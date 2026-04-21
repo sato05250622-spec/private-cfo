@@ -1,0 +1,38 @@
+:root {
+  --color-bg: #0A1628;
+  --color-accent: #D4A843;
+  --color-text: #E8EEF5;
+
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+    'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+body {
+  /* iOS: respect safe-area (notch / home indicator) */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+
+  /* iOS: disable overscroll bounce in standalone PWA */
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
