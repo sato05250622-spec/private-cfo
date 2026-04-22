@@ -11,6 +11,7 @@ import {
 import { SVG_ICONS, ALL_SVG_KEYS } from "@shared/icons";
 import { DEFAULT_EXPENSE_CATS, RECUR_OPTIONS, COLOR_OPTIONS, PAYMENT_COLORS } from "@shared/categories";
 import { fmt, fmtMonth, toDateStr } from "@shared/format";
+import { useExpenses } from "./hooks/useExpenses";
 
 const SvgIconBtn = ({ iconKey, size = 28, color = "#555", selected = false }) => {
   const icon = SVG_ICONS[iconKey];
@@ -54,7 +55,12 @@ function useLocalStorage(key, initialValue) {
 
 export default function App() {
   const [tab, setTab] = useState("daily");
-  const [transactions, setTransactions] = useLocalStorage("kakeibo_transactions", []);
+  const {
+    expenses: transactions,
+    addExpense,
+    updateExpense,
+    softDeleteExpense,
+  } = useExpenses();
   const [inputDate, setInputDate] = useState(new Date());
   const [inputAmount, setInputAmount] = useState("");
   const [inputMemo, setInputMemo] = useState("");
@@ -214,14 +220,52 @@ export default function App() {
 
   const changeDate = (delta) => { const d=new Date(inputDate); d.setDate(d.getDate()+delta); setInputDate(d); };
   const addTransaction = () => {
-    if (!inputAmount||isNaN(Number(inputAmount))||Number(inputAmount)<=0) return;
-    setTransactions(prev=>[...prev,{id:Date.now(),type:"expense",date:toDateStr(inputDate),amount:Number(inputAmount),memo:inputMemo,category:inputCategory,payment:inputPayment}]);
-    setInputAmount(""); setInputMemo("");
+    if (!inputAmount || isNaN(Number(inputAmount)) || Number(inputAmount) <= 0) return;
+    addExpense({
+      date: toDateStr(inputDate),
+      amount: Number(inputAmount),
+      memo: inputMemo,
+      category: inputCategory,
+      payment: inputPayment,
+    })
+      .then(() => { setInputAmount(""); setInputMemo(""); })
+      .catch((e) => { console.error(e); alert("支出の保存に失敗しました。"); });
   };
-  const deleteTransaction=(id)=>setTransactions(prev=>prev.filter(t=>t.id!==id));
-  const startEditTx=(tx)=>{setEditDraft({...tx,amount:String(tx.amount)});setShowEditModal(true);};
-  const saveEditTx=()=>{if(!editDraft.amount||isNaN(Number(editDraft.amount))||Number(editDraft.amount)<=0)return;setTransactions(prev=>prev.map(t=>t.id===editDraft.id?{...editDraft,amount:Number(editDraft.amount)}:t));setShowEditModal(false);};
-  const applyRecurring=(list=recurringList)=>{const newTxs=[];list.forEach(r=>{const dateStr=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(r.day||1).padStart(2,'0')}`;const exists=transactions.find(t=>t.recurId===r.id&&t.date.startsWith(tmPrefix));if(!exists)newTxs.push({id:Date.now()+Math.random(),type:"expense",date:dateStr,amount:Number(r.amount),memo:r.memo,category:r.category,recurId:r.id,isRecurring:true});});if(newTxs.length>0)setTransactions(prev=>[...prev,...newTxs]);};
+  const deleteTransaction = (id) => {
+    softDeleteExpense(id).catch((e) => { console.error(e); alert("削除に失敗しました。"); });
+  };
+  const startEditTx = (tx) => { setEditDraft({ ...tx, amount: String(tx.amount) }); setShowEditModal(true); };
+  const saveEditTx = () => {
+    if (!editDraft.amount || isNaN(Number(editDraft.amount)) || Number(editDraft.amount) <= 0) return;
+    updateExpense(editDraft.id, {
+      date: editDraft.date,
+      amount: Number(editDraft.amount),
+      memo: editDraft.memo,
+      category: editDraft.category,
+      payment: editDraft.payment,
+    })
+      .then(() => setShowEditModal(false))
+      .catch((e) => { console.error(e); alert("編集の保存に失敗しました。"); });
+  };
+  // NOTE: 定期ルール id は local Date.now() / DB recur_id は uuid のため、
+  // Day 3 では recurId / isRecurring を送信しない。結果として一括適用分には
+  // 「定期」バッジが付かない(視覚的退行のみ)。ルール自体は recurringList
+  // (in-memory) で従来通り動作。recurring_rules テーブル化は Phase 1 以降で。
+  const applyRecurring = (list = recurringList) => {
+    list.forEach((r) => {
+      const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(r.day || 1).padStart(2, '0')}`;
+      const exists = transactions.find(
+        (t) => t.memo === r.memo && t.category === r.category && t.date.startsWith(tmPrefix),
+      );
+      if (exists) return;
+      addExpense({
+        date: dateStr,
+        amount: Number(r.amount),
+        memo: r.memo,
+        category: r.category,
+      }).catch((e) => console.error(e));
+    });
+  };
   const saveRecurring=()=>{if(!recurDraft.amount||isNaN(Number(recurDraft.amount))||Number(recurDraft.amount)<=0)return;if(editingRecurId){setRecurringList(prev=>prev.map(r=>r.id===editingRecurId?{...recurDraft,id:editingRecurId}:r));}else{const newR={...recurDraft,id:Date.now(),amount:Number(recurDraft.amount)};const newList=[...recurringList,newR];setRecurringList(newList);applyRecurring(newList);}setShowRecurringModal(false);setEditingRecurId(null);setRecurDraft({category:"food",amount:"",memo:"",freq:"monthly"});};
 
   const handleCalc = (v) => {
@@ -363,7 +407,11 @@ export default function App() {
         <div style={{display:"flex",alignItems:"center",padding:"10px 18px",gap:10,background:CARD_BG,cursor:"pointer"}} onClick={()=>setOpen(p=>!p)}>
           {cat&&<CatSvgIcon cat={cat} size={24}/>}
           <div style={{flex:1}}>
-            <div style={{fontSize:14,fontWeight:600,display:"flex",alignItems:"center",gap:6,color:TEXT_PRIMARY}}>{cat?.label}{t.isRecurring&&<span style={{fontSize:8,background:`${GOLD}18`,color:GOLD,borderRadius:3,padding:"1px 5px"}}>定期</span>}</div>
+            <div style={{fontSize:14,fontWeight:600,display:"flex",alignItems:"center",gap:6,color:TEXT_PRIMARY,flexWrap:"wrap"}}>
+              {cat?.label}
+              {t.isRecurring && <span style={{fontSize:8,background:`${GOLD}18`,color:GOLD,borderRadius:3,padding:"1px 5px"}}>定期</span>}
+              {t.isProxyEntry && <span style={{fontSize:8,background:GOLD_GRAD,color:NAVY,borderRadius:3,padding:"1px 5px",fontWeight:700}}>本部入力</span>}
+            </div>
             <div style={{fontSize:11,color:TEXT_SECONDARY,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
               <span>{t.date}{t.memo&&` · ${t.memo}`}</span>
               {t.payment&&(()=>{const pm=paymentMethods.find(p=>p.id===t.payment);return pm?(<span style={{display:"inline-flex",alignItems:"center",gap:3,background:pm.color,color:"#fff",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700}}>{pm.label}</span>):null;})()}
