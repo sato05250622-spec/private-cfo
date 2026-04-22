@@ -14,6 +14,28 @@ import { fmt, fmtMonth, toDateStr } from "@shared/format";
 import { useExpenses } from "./hooks/useExpenses";
 import { useCategories } from "./hooks/useCategories";
 import { usePoints } from "./hooks/usePoints";
+import LogoutButton from "./components/LogoutButton";
+
+// ---------------------------------------------------------------
+// One-shot migration: kakeibo_* → cfo_* (module top-level, runs once per browser)
+// ---------------------------------------------------------------
+// Supabase 化対象外で localStorage 継続運用する 5 キーについて、
+// 旧 kakeibo_* 実データを cfo_* 側にコピーする。
+// - cfo_migratedFromKakeibo === "1" なら実行しない(冪等)
+// - 旧 kakeibo_* は削除しない(ロールバック用に残す)
+// - 値は JSON 未パースの生文字列でコピー(形状保全)
+// - cfo_* に既に値があればスキップ(Phase 2-3 の検証中に発生した上書き防止)
+if (typeof window !== "undefined" && window.localStorage.getItem("cfo_migratedFromKakeibo") !== "1") {
+  const MIGRATE_KEYS = ["budgets", "weekBudgets", "weekCatBudgets", "paymentMethods", "loans"];
+  for (const k of MIGRATE_KEYS) {
+    const old = window.localStorage.getItem(`kakeibo_${k}`);
+    const neu = window.localStorage.getItem(`cfo_${k}`);
+    if (old !== null && neu === null) {
+      window.localStorage.setItem(`cfo_${k}`, old);
+    }
+  }
+  window.localStorage.setItem("cfo_migratedFromKakeibo", "1");
+}
 
 const SvgIconBtn = ({ iconKey, size = 28, color = "#555", selected = false }) => {
   const icon = SVG_ICONS[iconKey];
@@ -78,7 +100,7 @@ export default function App() {
   const [reportYear, setReportYear] = useState(today.getFullYear());
   const [reportType, setReportType] = useState("monthly");
   const [budgetMonth, setBudgetMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
-  const [budgets, setBudgets] = useLocalStorage("kakeibo_budgets", {});
+  const [budgets, setBudgets] = useLocalStorage("cfo_budgets", {});
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState({});
   const [menuScreen, setMenuScreen] = useState("main");
@@ -102,12 +124,12 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState(toDateStr(today));
   const [expandedWeek, setExpandedWeek] = useState(Math.min(4, Math.ceil(today.getDate()/7)));
   const [weekBudgetInput, setWeekBudgetInput] = useState("");
-  const [weekBudgets, setWeekBudgets] = useLocalStorage("kakeibo_weekBudgets", {});
-  const [weekCatBudgets, setWeekCatBudgets] = useLocalStorage("kakeibo_weekCatBudgets", {});
+  const [weekBudgets, setWeekBudgets] = useLocalStorage("cfo_weekBudgets", {});
+  const [weekCatBudgets, setWeekCatBudgets] = useLocalStorage("cfo_weekCatBudgets", {});
   const [showCatBudgetModal, setShowCatBudgetModal] = useState(false);
   const [catBudgetTarget, setCatBudgetTarget] = useState(null);
   const [catBudgetInput, setCatBudgetInput] = useState("");
-  const [paymentMethods, setPaymentMethods] = useLocalStorage("kakeibo_paymentMethods", [{ id:"cash", label:"現金", color:"#4CAF50" }]);
+  const [paymentMethods, setPaymentMethods] = useLocalStorage("cfo_paymentMethods", [{ id:"cash", label:"現金", color:"#4CAF50" }]);
   const [inputPayment, setInputPayment] = useState("cash");
   const [showCalc, setShowCalc] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -123,7 +145,7 @@ export default function App() {
   const [contactText, setContactText] = useState("");
   const [contactSent, setContactSent] = useState(false);
   const [summaryTab, setSummaryTab] = useState("summary");
-  const [loans, setLoans] = useLocalStorage("kakeibo_loans", []);
+  const [loans, setLoans] = useLocalStorage("cfo_loans", []);
   const [showLoanForm, setShowLoanForm] = useState(false);
   const [deleteLoanTarget, setDeleteLoanTarget] = useState(null);
   const [showLoanCalc, setShowLoanCalc] = useState(false);
@@ -1514,6 +1536,7 @@ export default function App() {
           <div style={{margin:"16px 16px 0"}}>
             <button style={{width:"100%",padding:"14px",background:GOLD_GRAD,border:"none",borderRadius:12,fontSize:14,fontWeight:700,color:"#0A1628",cursor:"pointer"}}>保存</button>
           </div>
+          <LogoutButton />
           <div style={{height:20}}/>
         </div>
       );
