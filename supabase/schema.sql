@@ -60,9 +60,12 @@ as $$
   );
 $$;
 
--- auth.users 作成時に profiles 行を自動生成。
+-- auth.users 作成時に profiles 行と既定 9 カテゴリを自動生成。
 -- 新規ユーザーは必ず role='client' で作成される。
 -- admin 昇格は Dashboard → Table Editor で手動。
+-- categories の既定 9 個は label/icon_key/color ともに shared-cfo の値と同一。
+-- id は意味のある text(entertainment / daily など)で統一し、
+-- (client_id, id) 複合 PK により同じ id を全ユーザーが持てる。
 create or replace function public.handle_new_user() returns trigger
   language plpgsql security definer
   set search_path = public
@@ -70,6 +73,18 @@ as $$
 begin
   insert into public.profiles (id, email, role)
   values (new.id, new.email, 'client');
+
+  insert into public.categories (id, client_id, label, icon_key, color, sort_order) values
+    ('entertainment', new.id, '娯楽費',     'cigarette', '#7B6CF6', 0),
+    ('daily',         new.id, '日用品',     'cart',      '#4CAF50', 1),
+    ('emergency',     new.id, '臨時出費',   'emergency', '#E53935', 2),
+    ('business',      new.id, '事業活動費', 'briefcase', '#1976D2', 3),
+    ('social',        new.id, '接待交際費', 'wine',      '#D4A843', 4),
+    ('commute',       new.id, '通勤代',     'train',     '#00ACC1', 5),
+    ('parking',       new.id, '駐車場代',   'parking',   '#546E7A', 6),
+    ('etc',           new.id, 'ETC',        'car',       '#FF7043', 7),
+    ('other',         new.id, 'その他',     'more',      '#9E9E9E', 8);
+
   return new;
 end $$;
 
@@ -78,16 +93,20 @@ create trigger on_auth_user_created
   for each row execute procedure public.handle_new_user();
 
 -- =============================================================
--- 2. categories (カスタムカテゴリのみ。既定 9 個はコード側)
+-- 2. categories
+--   既定 9 個 + 顧客カスタムを同一テーブルに格納。
+--   id は text(既定: 'entertainment' など / カスタム: 'custom_' || uuid)。
+--   PK は (client_id, id) 複合 — 同じ id を全ユーザーがそれぞれ持つ。
 -- =============================================================
 create table public.categories (
-  id          uuid primary key default gen_random_uuid(),
+  id          text not null default ('custom_' || gen_random_uuid()::text),
   client_id   uuid not null references public.profiles(id) on delete cascade,
   label       text not null,
   icon_key    text not null,   -- shared-cfo/icons.jsx の key を参照
   color       text not null,
   sort_order  integer not null default 0,
-  created_at  timestamptz not null default now()
+  created_at  timestamptz not null default now(),
+  primary key (client_id, id)
 );
 create index categories_client_sort_idx
   on public.categories (client_id, sort_order);

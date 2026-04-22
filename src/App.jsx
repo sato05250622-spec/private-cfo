@@ -9,9 +9,11 @@ import {
   ORANGE, ORANGE_LIGHT, BLUE,
 } from "@shared/theme";
 import { SVG_ICONS, ALL_SVG_KEYS } from "@shared/icons";
-import { DEFAULT_EXPENSE_CATS, RECUR_OPTIONS, COLOR_OPTIONS, PAYMENT_COLORS } from "@shared/categories";
+import { RECUR_OPTIONS, COLOR_OPTIONS, PAYMENT_COLORS } from "@shared/categories";
 import { fmt, fmtMonth, toDateStr } from "@shared/format";
 import { useExpenses } from "./hooks/useExpenses";
+import { useCategories } from "./hooks/useCategories";
+import { usePoints } from "./hooks/usePoints";
 
 const SvgIconBtn = ({ iconKey, size = 28, color = "#555", selected = false }) => {
   const icon = SVG_ICONS[iconKey];
@@ -65,7 +67,12 @@ export default function App() {
   const [inputAmount, setInputAmount] = useState("");
   const [inputMemo, setInputMemo] = useState("");
   const [inputCategory, setInputCategory] = useState("entertainment");
-  const [expenseCats, setExpenseCats] = useLocalStorage("kakeibo_expenseCats", DEFAULT_EXPENSE_CATS);
+  const {
+    categories: expenseCats,
+    addCategory,
+    updateCategory: updateCategoryDb,
+    removeCategory,
+  } = useCategories();
   const [calMonth, setCalMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [reportMonth, setReportMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [reportYear, setReportYear] = useState(today.getFullYear());
@@ -123,8 +130,7 @@ export default function App() {
   const [editingLoanId, setEditingLoanId] = useState(null);
   const [loanDraft, setLoanDraft] = useState({label:"",amount:"",bank:"",withdrawalDay:"",pmId:""});
   const [reportSearchQuery, setReportSearchQuery] = useState("");
-  const [userPoints, setUserPoints] = useLocalStorage("kakeibo_userPoints", 0);
-  const [pointHistory, setPointHistory] = useLocalStorage("kakeibo_pointHistory", []);
+  const { balance: userPoints, history: pointHistory } = usePoints();
   const TELOP_TEXT = "【本部より】今月の経費精算は月末25日までにご提出ください　　　／　　　来月の研修は5月10日（土）を予定しております　　　／　　　ご不明点はお気軽に本部までお問い合わせください";
   const [menuPaymentScreen, setMenuPaymentScreen] = useState("list");
   const [paymentDraft, setPaymentDraft] = useState({ label:"", color:"#4CAF50", closingDay:"", withdrawalDay:"", bank:"" });
@@ -210,12 +216,14 @@ export default function App() {
   const saveBudgets=()=>{const next={...budgets};expenseCats.forEach(c=>{const k=budgetKey(c.id);if(budgetDraft[c.id]&&!isNaN(Number(budgetDraft[c.id])))next[k]=Number(budgetDraft[c.id]);else delete next[k];});setBudgets(next);setShowBudgetModal(false);};
   const searchResults=useMemo(()=>{if(!searchQuery.trim())return transactions;const q=searchQuery.toLowerCase();return transactions.filter(t=>{const cat=expenseCats.find(c=>c.id===t.category);return t.memo.toLowerCase().includes(q)||(cat&&cat.label.toLowerCase().includes(q))||String(t.amount).includes(q);});},[searchQuery,transactions,expenseCats]);
 
-  const addNewCategory=()=>{
-    if(!newCatName.trim())return;
-    const cat={id:`custom_${Date.now()}`,label:newCatName,iconKey:newCatIcon,color:newCatColor};
-    setExpenseCats(p=>[...p,cat]);
-    setNewCatName(""); setNewCatIcon("restaurant"); setNewCatColor("#F5921E");
-    setMenuScreen("catEdit");
+  const addNewCategory = () => {
+    if (!newCatName.trim()) return;
+    addCategory({ label: newCatName, iconKey: newCatIcon, color: newCatColor })
+      .then(() => {
+        setNewCatName(""); setNewCatIcon("restaurant"); setNewCatColor("#F5921E");
+        setMenuScreen("catEdit");
+      })
+      .catch((e) => { console.error(e); alert("カテゴリ追加に失敗しました。"); });
   };
 
   const changeDate = (delta) => { const d=new Date(inputDate); d.setDate(d.getDate()+delta); setInputDate(d); };
@@ -1116,7 +1124,10 @@ export default function App() {
               <CatSvgIcon cat={cat} size={32}/>
               <span style={{flex:1,fontSize:14,fontWeight:400,color:TEXT_PRIMARY}}>{cat.label}</span>
               <button onClick={()=>{setEditingCat(cat);setEditName(cat.label);setEditIcon(cat.iconKey||cat.icon||"restaurant");setEditColor(cat.color||"#FF6B35");setMenuScreen("catEditDetail");}} style={{padding:"6px 14px",background:ORANGE_LIGHT,border:`1px solid ${ORANGE}`,borderRadius:16,color:ORANGE,fontSize:12,fontWeight:700,cursor:"pointer",marginRight:6}}>編集</button>
-              <button onClick={()=>setExpenseCats(p=>p.filter(c=>c.id!==cat.id))} style={{padding:"6px 14px",background:"#FFEBEE",border:`1px solid ${RED}`,borderRadius:16,color:RED,fontSize:12,fontWeight:700,cursor:"pointer"}}>削除</button>
+              <button
+                onClick={() => removeCategory(cat.id).catch((e) => { console.error(e); alert("削除に失敗しました。"); })}
+                style={{padding:"6px 14px",background:"#FFEBEE",border:`1px solid ${RED}`,borderRadius:16,color:RED,fontSize:12,fontWeight:700,cursor:"pointer"}}
+              >削除</button>
             </div>
           ))}
         </div>
@@ -1145,7 +1156,14 @@ export default function App() {
           <div style={{height:12,background:CREAM}}/>
         </div>
         <div style={{position:"fixed",bottom:60,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:CARD_BG,padding:"12px 18px 12px",borderTop:"1px solid #f0f0f0",zIndex:150}}>
-          <button onClick={()=>{setExpenseCats(p=>p.map(c=>c.id===editingCat.id?{...c,label:editName,iconKey:editIcon,color:editColor}:c));setMenuScreen("catEdit");}} style={{display:"block",width:"100%",padding:"16px",background:ORANGE,color:"#fff",border:"none",borderRadius:28,fontSize:16,fontWeight:700,cursor:"pointer"}}>保存</button>
+          <button
+            onClick={() => {
+              updateCategoryDb(editingCat.id, { label: editName, iconKey: editIcon, color: editColor })
+                .then(() => setMenuScreen("catEdit"))
+                .catch((e) => { console.error(e); alert("保存に失敗しました。"); });
+            }}
+            style={{display:"block",width:"100%",padding:"16px",background:ORANGE,color:"#fff",border:"none",borderRadius:28,fontSize:16,fontWeight:700,cursor:"pointer"}}
+          >保存</button>
         </div>
       </div>
     );

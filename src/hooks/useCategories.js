@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { DEFAULT_EXPENSE_CATS } from '@shared/categories';
+import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../lib/api/categories';
 
-// DB 行 → App.jsx が期待する形。_custom フラグで既定 9 個と区別する。
+// DB 行 → App.jsx が期待する形。
+// 既定 9 個も DB に格納される設計のため、_custom フラグは廃止。
 function toApp(row) {
   return {
     id: row.id,
@@ -11,7 +11,6 @@ function toApp(row) {
     iconKey: row.icon_key,
     color: row.color,
     sortOrder: row.sort_order ?? 0,
-    _custom: true,
   };
 }
 
@@ -25,29 +24,27 @@ function toDb(cat, clientId) {
   };
 }
 
-// 既定 9 個(コード側)+ カスタム(DB)の結合リストを返す。
-// NOTE(Day 3 トレードオフ):
-//   App.jsx の UI には既定カテゴリの編集導線もあるが、Day 3 では
-//   既定の編集は永続化されない(ブラウザ限定)。既定の上書き対応は
-//   Phase 1 リリース後に overrides テーブルなどで検討する。
+// 顧客が持つカテゴリ一式(既定 + カスタム)を管理する。
+// 既定 9 個は profiles INSERT 時のトリガで自動投入されるため、
+// このフックは単純に DB を唯一のソースとして参照する。
 export function useCategories() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
-  const [customs, setCustoms] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const refetch = useCallback(async () => {
     if (!userId) {
-      setCustoms([]);
+      setCategories([]);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
       const rows = await api.listCategories(userId);
-      setCustoms(rows.map(toApp));
+      setCategories(rows.map(toApp));
       setError(null);
     } catch (e) {
       setError(e);
@@ -66,7 +63,7 @@ export function useCategories() {
       const row = toDb(cat, userId);
       const inserted = await api.insertCategory(row);
       const mapped = toApp(inserted);
-      setCustoms((prev) => [...prev, mapped]);
+      setCategories((prev) => [...prev, mapped]);
       return mapped;
     },
     [userId],
@@ -79,7 +76,7 @@ export function useCategories() {
       delete patch.client_id;
       const updated = await api.updateCategory(id, patch);
       const mapped = toApp(updated);
-      setCustoms((prev) => prev.map((c) => (c.id === id ? mapped : c)));
+      setCategories((prev) => prev.map((c) => (c.id === id ? mapped : c)));
       return mapped;
     },
     [userId],
@@ -87,18 +84,11 @@ export function useCategories() {
 
   const removeCategory = useCallback(async (id) => {
     await api.deleteCategory(id);
-    setCustoms((prev) => prev.filter((c) => c.id !== id));
+    setCategories((prev) => prev.filter((c) => c.id !== id));
   }, []);
-
-  // 読み取り用の結合リスト。既定 → カスタム の順。
-  const categories = useMemo(
-    () => [...DEFAULT_EXPENSE_CATS, ...customs],
-    [customs],
-  );
 
   return {
     categories,
-    customs,
     loading,
     error,
     refetch,
