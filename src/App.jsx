@@ -16,6 +16,7 @@ import { useCategories } from "./hooks/useCategories";
 import { usePoints } from "./hooks/usePoints";
 import LogoutButton from "./components/LogoutButton";
 import { useLatestTelop } from "./hooks/useNotifications";
+import { useInquiries } from "./hooks/useInquiries";
 
 // ---------------------------------------------------------------
 // One-shot migration: kakeibo_* → cfo_* (module top-level, runs once per browser)
@@ -149,6 +150,7 @@ export default function App() {
   const [contactType, setContactType] = useState("inquiry");
   const [contactText, setContactText] = useState("");
   const [contactSent, setContactSent] = useState(false);
+  const { submitting: contactSubmitting, sendInquiry } = useInquiries();
   const [summaryTab, setSummaryTab] = useState("summary");
   const [loans, setLoans] = useLocalStorage("cfo_loans", []);
   const [showLoanForm, setShowLoanForm] = useState(false);
@@ -1421,7 +1423,32 @@ export default function App() {
               <div style={{padding:"10px 14px",background:`${GOLD}10`,borderRadius:10,border:`1px solid ${GOLD}22`,marginBottom:16}}>
                 <div style={{fontSize:11,color:TEXT_SECONDARY,lineHeight:1.7}}>💡 送信内容はプライベートCFO担当が確認します。</div>
               </div>
-              <button onClick={()=>{if(!contactText.trim())return;setContactSent(true);}} style={{width:"100%",padding:"16px",background:contactText.trim()?GOLD_GRAD:"rgba(255,255,255,0.1)",border:"none",borderRadius:28,fontSize:16,fontWeight:700,color:contactText.trim()?"#0A1628":TEXT_MUTED,cursor:contactText.trim()?"pointer":"default"}}>送信する</button>
+              <button
+                onClick={async () => {
+                  if (!contactText.trim()) return;
+                  if (contactSubmitting) return;
+                  const ok = await sendInquiry(contactType, contactText);
+                  if (ok) {
+                    setContactSent(true);
+                  } else {
+                    alert("送信に失敗しました。通信状況を確認し、もう一度お試しください。");
+                  }
+                }}
+                disabled={contactSubmitting || !contactText.trim()}
+                style={{
+                  width: "100%",
+                  padding: "16px",
+                  background: contactText.trim() && !contactSubmitting ? GOLD_GRAD : "rgba(255,255,255,0.1)",
+                  border: "none",
+                  borderRadius: 28,
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: contactText.trim() && !contactSubmitting ? "#0A1628" : TEXT_MUTED,
+                  cursor: contactSubmitting ? "wait" : (contactText.trim() ? "pointer" : "default"),
+                }}
+              >
+                {contactSubmitting ? "送信中…" : "送信する"}
+              </button>
             </div>
           )}
         </div>
