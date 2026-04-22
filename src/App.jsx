@@ -15,6 +15,7 @@ import { useExpenses } from "./hooks/useExpenses";
 import { useCategories } from "./hooks/useCategories";
 import { usePoints } from "./hooks/usePoints";
 import LogoutButton from "./components/LogoutButton";
+import { useLatestTelop } from "./hooks/useNotifications";
 
 // ---------------------------------------------------------------
 // One-shot migration: kakeibo_* → cfo_* (module top-level, runs once per browser)
@@ -36,6 +37,10 @@ if (typeof window !== "undefined" && window.localStorage.getItem("cfo_migratedFr
   }
   window.localStorage.setItem("cfo_migratedFromKakeibo", "1");
 }
+
+// Supabase 取得失敗・未ログイン・0 件時に表示するフォールバック。
+// admin が INSERT しないままでも画面が成立するための安全網。
+const FALLBACK_TELOP = "【本部より】今月の経費精算は月末25日までにご提出ください　　　／　　　来月の研修は5月10日（土）を予定しております　　　／　　　ご不明点はお気軽に本部までお問い合わせください";
 
 const SvgIconBtn = ({ iconKey, size = 28, color = "#555", selected = false }) => {
   const icon = SVG_ICONS[iconKey];
@@ -153,7 +158,8 @@ export default function App() {
   const [loanDraft, setLoanDraft] = useState({label:"",amount:"",bank:"",withdrawalDay:"",pmId:""});
   const [reportSearchQuery, setReportSearchQuery] = useState("");
   const { balance: userPoints, history: pointHistory } = usePoints();
-  const TELOP_TEXT = "【本部より】今月の経費精算は月末25日までにご提出ください　　　／　　　来月の研修は5月10日（土）を予定しております　　　／　　　ご不明点はお気軽に本部までお問い合わせください";
+  const { body: telopBody } = useLatestTelop();
+  const telopText = telopBody ?? FALLBACK_TELOP;
   const [menuPaymentScreen, setMenuPaymentScreen] = useState("list");
   const [paymentDraft, setPaymentDraft] = useState({ label:"", color:"#4CAF50", closingDay:"", withdrawalDay:"", bank:"" });
   const [showDayCalc, setShowDayCalc] = useState(false);
@@ -1639,7 +1645,7 @@ export default function App() {
     <div style={S.app}>
       <div style={{position:"fixed",top:0,left:"50%",transform:`translateX(-50%) translateY(${showTelop?0:"-100%"})`,width:"100%",maxWidth:430,zIndex:200,background:`linear-gradient(90deg,${NAVY},#0D1E36,${NAVY})`,borderBottom:`1px solid ${GOLD}44`,height:24,overflow:"hidden",display:"flex",alignItems:"center",transition:"transform 0.3s ease",cursor:"pointer"}} onTouchStart={e=>{e._startY=e.touches[0].clientY;}} onTouchEnd={e=>{if(e._startY-e.changedTouches[0].clientY>20)setShowTelop(false);}}>
         <style>{`@keyframes telop{0%{transform:translateX(100%);}100%{transform:translateX(-100%);}} .telop-text{animation:telop 28s linear infinite;white-space:nowrap;display:inline-block;}`}</style>
-        <span className="telop-text" style={{fontSize:10,fontWeight:500,color:GOLD,letterSpacing:"0.05em",paddingLeft:"100%"}}>{TELOP_TEXT}</span>
+        <span className="telop-text" style={{fontSize:10,fontWeight:500,color:GOLD,letterSpacing:"0.05em",paddingLeft:"100%"}}>{telopText}</span>
       </div>
       {!showTelop&&<div onClick={()=>setShowTelop(true)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,zIndex:200,height:8,background:`${GOLD}33`,cursor:"pointer",borderBottom:`1px solid ${GOLD}22`}}/>}
 
