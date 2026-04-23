@@ -15,6 +15,7 @@ import { useExpenses } from "./hooks/useExpenses";
 import { useCategories } from "./hooks/useCategories";
 import { usePoints } from "./hooks/usePoints";
 import LogoutButton from "./components/LogoutButton";
+import AppointmentCard from "./components/AppointmentCard";
 import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
 
@@ -1389,6 +1390,10 @@ export default function App() {
       );
     }
 
+    if (menuScreen === "appointment") {
+      return <AppointmentCard onBack={() => setMenuScreen("main")} />;
+    }
+
     if(menuScreen==="contact"){
       return(
         <div style={{minHeight:"100vh",background:NAVY}}>
@@ -1623,7 +1628,11 @@ export default function App() {
       );
     }
 
-    const menuGroups=[[{icon:"📊",label:"当月レポート",action:()=>setMenuScreen("currentMonthReport")},{icon:"📋",label:"月別レポート",action:()=>setMenuScreen("monthlyReport")}]];
+    const menuGroups=[[
+      {icon:"📊",label:"当月レポート",action:()=>setMenuScreen("currentMonthReport")},
+      {icon:"📋",label:"月別レポート",action:()=>setMenuScreen("monthlyReport")},
+      {icon:"🤝",label:"面談予定",action:()=>setMenuScreen("appointment")},
+    ]];
     const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"定期支出",action:()=>setMenuScreen("loanSetting")}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
 
     return(
