@@ -25,10 +25,15 @@ export async function insertCategory(row) {
   return data;
 }
 
-export async function updateCategory(id, patch) {
+// UPDATE は (client_id, id) の複合キーで絞る。
+// admin ロールは RLS `is_admin()` で全行を触れるため、id 単独だと
+// 同じ id を持つ他顧客の行まで巻き込んでしまい .single() が
+// PGRST116(複数行)で落ちる。client_id フィルタ必須。
+export async function updateCategory(id, patch, clientId) {
   const { data, error } = await supabase
     .from(TABLE)
     .update(patch)
+    .eq('client_id', clientId)
     .eq('id', id)
     .select()
     .single();
@@ -36,8 +41,12 @@ export async function updateCategory(id, patch) {
   return data;
 }
 
-// カテゴリは admin 物理削除・顧客物理削除どちらも OK(expenses との FK なし)。
-export async function deleteCategory(id) {
-  const { error } = await supabase.from(TABLE).delete().eq('id', id);
+// DELETE も同様に client_id + id で絞る(admin の誤操作防止 + 対称性)。
+export async function deleteCategory(id, clientId) {
+  const { error } = await supabase
+    .from(TABLE)
+    .delete()
+    .eq('client_id', clientId)
+    .eq('id', id);
   if (error) throw error;
 }

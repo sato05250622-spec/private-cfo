@@ -74,7 +74,7 @@ export function useCategories() {
       if (!userId) return null;
       const patch = toDb(patchApp, userId);
       delete patch.client_id;
-      const updated = await api.updateCategory(id, patch);
+      const updated = await api.updateCategory(id, patch, userId);
       const mapped = toApp(updated);
       setCategories((prev) => prev.map((c) => (c.id === id ? mapped : c)));
       return mapped;
@@ -82,10 +82,14 @@ export function useCategories() {
     [userId],
   );
 
-  const removeCategory = useCallback(async (id) => {
-    await api.deleteCategory(id);
-    setCategories((prev) => prev.filter((c) => c.id !== id));
-  }, []);
+  const removeCategory = useCallback(
+    async (id) => {
+      if (!userId) return;
+      await api.deleteCategory(id, userId);
+      setCategories((prev) => prev.filter((c) => c.id !== id));
+    },
+    [userId],
+  );
 
   // 並び替え:sortedIds は新しい順序の id 配列。
   // optimistic にローカル state を並び替え、差分 UPDATE を並列発行。
@@ -113,7 +117,7 @@ export function useCategories() {
 
       try {
         await Promise.all(
-          diffs.map((d) => api.updateCategory(d.id, { sort_order: d.newOrder })),
+          diffs.map((d) => api.updateCategory(d.id, { sort_order: d.newOrder }, userId)),
         );
       } catch (e) {
         console.error(e);
