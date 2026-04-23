@@ -393,8 +393,8 @@ export default function App() {
   const S = {
     app:{fontFamily:"'Hiragino Sans','Noto Sans JP','Yu Gothic UI','sans-serif'",maxWidth:430,margin:"0 auto",minHeight:"100vh",background:NAVY,display:"flex",flexDirection:"column",position:"relative",overflowX:"hidden"},
     main:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:140},
-    bottomNav:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:NAVY2,borderTop:`1px solid ${BORDER}`,display:"flex",zIndex:100},
-    fixedSubmit:{position:"fixed",bottom:60,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,padding:"10px 18px",background:NAVY2,borderTop:`1px solid ${BORDER}`,zIndex:99},
+    bottomNav:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:NAVY2,borderTop:`1px solid ${BORDER}`,display:"flex",zIndex:100,paddingBottom:"calc(env(safe-area-inset-bottom) + 8px)"},
+    fixedSubmit:{position:"fixed",bottom:"calc(60px + env(safe-area-inset-bottom) + 8px)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,padding:"10px 18px",background:NAVY2,borderTop:`1px solid ${BORDER}`,zIndex:99},
     navBtn:(a)=>({flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"10px 0 8px",border:"none",background:"none",cursor:"pointer",color:a?GOLD:TEXT_MUTED,fontSize:10,gap:2,fontWeight:500}),
     typeBtn:(a)=>({flex:1,padding:"3px 16px",border:"none",borderRadius:20,fontWeight:a?600:400,fontSize:10,cursor:"pointer",background:a?GOLD_GRAD:"transparent",color:a?"#0A1628":TEXT_SECONDARY,whiteSpace:"nowrap"}),
     row:{display:"flex",alignItems:"center",padding:"13px 20px",background:CARD_BG,borderBottom:`1px solid ${BORDER}`,boxSizing:"border-box",width:"100%"},
@@ -1734,13 +1734,13 @@ export default function App() {
 
   return (
     <div style={S.app}>
-      <div style={{position:"fixed",top:0,left:"50%",transform:`translateX(-50%) translateY(${showTelop?0:"-100%"})`,width:"100%",maxWidth:430,zIndex:200,background:`linear-gradient(90deg,${NAVY},#0D1E36,${NAVY})`,borderBottom:`1px solid ${GOLD}44`,height:24,overflow:"hidden",display:"flex",alignItems:"center",transition:"transform 0.3s ease",cursor:"pointer"}} onTouchStart={e=>{e._startY=e.touches[0].clientY;}} onTouchEnd={e=>{if(e._startY-e.changedTouches[0].clientY>20)setShowTelop(false);}}>
+      <div style={{position:"fixed",top:0,left:"50%",transform:`translateX(-50%) translateY(${showTelop?0:"-100%"})`,width:"100%",maxWidth:430,zIndex:200,background:`linear-gradient(90deg,${NAVY},#0D1E36,${NAVY})`,borderBottom:`1px solid ${GOLD}44`,height:24,paddingTop:"env(safe-area-inset-top)",boxSizing:"content-box",overflow:"hidden",display:"flex",alignItems:"center",transition:"transform 0.3s ease",cursor:"pointer"}} onTouchStart={e=>{e._startY=e.touches[0].clientY;}} onTouchEnd={e=>{if(e._startY-e.changedTouches[0].clientY>20)setShowTelop(false);}}>
         <style>{`@keyframes telop{0%{transform:translateX(100%);}100%{transform:translateX(-100%);}} .telop-text{animation:telop 28s linear infinite;white-space:nowrap;display:inline-block;}`}</style>
         <span className="telop-text" style={{fontSize:10,fontWeight:500,color:GOLD,letterSpacing:"0.05em",paddingLeft:"100%"}}>{telopText}</span>
       </div>
-      {!showTelop&&<div onClick={()=>setShowTelop(true)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,zIndex:200,height:8,background:`${GOLD}33`,cursor:"pointer",borderBottom:`1px solid ${GOLD}22`}}/>}
+      {!showTelop&&<div onClick={()=>setShowTelop(true)} style={{position:"fixed",top:"env(safe-area-inset-top)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,zIndex:200,height:8,background:`${GOLD}33`,cursor:"pointer",borderBottom:`1px solid ${GOLD}22`}}/>}
 
-      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom:tab==="daily"?60:140}}>
+      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom:tab==="daily"?"calc(60px + env(safe-area-inset-bottom) + 8px)":"calc(140px + env(safe-area-inset-bottom) + 8px)"}}>
         {tab==="daily"&&renderDaily()}
         {tab==="day"&&renderDayView()}
         {tab==="weekly"&&renderWeekly()}
