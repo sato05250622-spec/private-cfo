@@ -28,3 +28,4 @@ dev-dist
 
 # Vite cache
 .vite
+.vercel

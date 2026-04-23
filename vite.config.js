@@ -5,21 +5,19 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const sharedDir = path.resolve(__dirname, '../shared-cfo')
 
 // https://vitejs.dev/config/
 export default defineConfig({
   resolve: {
     alias: {
-      '@shared': sharedDir,
+      // shared-cfo から同期した資産を src/shared 配下に置き、
+      // Vercel 等のビルド環境で親ディレクトリへ辿らずとも解決できるようにする。
+      // 元ソースは Desktop/shared-cfo リポジトリ。同期は手動コピー運用。
+      '@shared': path.resolve(__dirname, 'src/shared'),
     },
   },
   server: {
     port: 5173,
-    fs: {
-      // 親ディレクトリの shared-cfo を読めるように許可
-      allow: [__dirname, sharedDir],
-    },
   },
   plugins: [
     react(),
