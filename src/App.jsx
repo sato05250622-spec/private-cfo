@@ -107,9 +107,11 @@ export default function App() {
     reorderCategories,
   } = useCategories();
 
-  // dnd-kit: ポインタは 6px 以上の移動で drag 発動(タップ操作と競合させない)
+  // dnd-kit: iOS 長押しドラッグ方式(500ms 押下で発動、5px までの揺れは許容)
+  // - 編集/削除ボタンのタップは即反応(100ms 未満)なので発動しない
+  // - 行を 500ms 押し続けるとドラッグ開始
   const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(PointerSensor, { activationConstraint: { delay: 500, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const [calMonth, setCalMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
