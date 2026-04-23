@@ -16,8 +16,11 @@ import { useCategories } from "./hooks/useCategories";
 import { usePoints } from "./hooks/usePoints";
 import LogoutButton from "./components/LogoutButton";
 import AppointmentCard from "./components/AppointmentCard";
+import SortableCategoryRow from "./components/SortableCategoryRow";
 import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
+import { DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
 
 // ---------------------------------------------------------------
 // One-shot migration: kakeibo_* → cfo_* (module top-level, runs once per browser)
@@ -101,7 +104,14 @@ export default function App() {
     addCategory,
     updateCategory: updateCategoryDb,
     removeCategory,
+    reorderCategories,
   } = useCategories();
+
+  // dnd-kit: ポインタは 6px 以上の移動で drag 発動(タップ操作と競合させない)
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   const [calMonth, setCalMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [reportMonth, setReportMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [reportYear, setReportYear] = useState(today.getFullYear());
@@ -824,16 +834,18 @@ export default function App() {
                     <span style={{fontSize:14,color:isExpanded?GOLD:TEXT_MUTED}}>{isExpanded?"▲":"▼"}</span>
                   </div>
 
-                  {/* ★ 2ボックス */}
-                  <WeekTwoBox
-                    expense={w.expense}
-                    budget={w.weekBudget}
-                    isOver={w.isOver}
-                    pct={pct}
-                    pctRaw={pctRaw}
-                    remain={remain}
-                    barColor={barColor}
-                  />
+                  {/* ★ 2ボックス(合計バー・差別化グレー背景) */}
+                  <div style={{background:"#3A4556"}}>
+                    <WeekTwoBox
+                      expense={w.expense}
+                      budget={w.weekBudget}
+                      isOver={w.isOver}
+                      pct={pct}
+                      pctRaw={pctRaw}
+                      remain={remain}
+                      barColor={barColor}
+                    />
+                  </div>
                 </div>
 
                 {/* ── 展開：カテゴリ別内訳（2ボックス形式） ── */}
@@ -901,16 +913,38 @@ export default function App() {
                   <PieChart>
                     <Pie
                       data={catBreakdown} cx="50%" cy="50%" innerRadius={50} outerRadius={90} dataKey="value" labelLine={false}
-                      label={({cx,cy,midAngle,innerRadius,outerRadius,name,percent})=>{
-                        if(percent<0.08)return null;
+                      label={({cx,cy,midAngle,innerRadius,outerRadius,name,percent,fill})=>{
                         const RADIAN=Math.PI/180;
-                        const r=innerRadius+(outerRadius-innerRadius)*0.5;
-                        const x=cx+r*Math.cos(-midAngle*RADIAN);
-                        const yy=cy+r*Math.sin(-midAngle*RADIAN);
+                        const pctInt=Math.round(percent*100);
+                        // 中サイズ以上: リング内側に従来どおり重ね描画
+                        if(percent>=0.08){
+                          const r=innerRadius+(outerRadius-innerRadius)*0.5;
+                          const x=cx+r*Math.cos(-midAngle*RADIAN);
+                          const yy=cy+r*Math.sin(-midAngle*RADIAN);
+                          return(
+                            <g>
+                              <text x={x} y={yy-7} fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700}>{name.length>4?name.slice(0,4):name}</text>
+                              <text x={x} y={yy+9} fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700}>{pctInt}%</text>
+                            </g>
+                          );
+                        }
+                        // 小サイズ: スライス外縁からリーダーライン → 外側ラベル
+                        const cos=Math.cos(-midAngle*RADIAN);
+                        const sin=Math.sin(-midAngle*RADIAN);
+                        const sx=cx+outerRadius*cos;
+                        const sy=cy+outerRadius*sin;
+                        const mx=cx+(outerRadius+8)*cos;
+                        const my=cy+(outerRadius+8)*sin;
+                        const ex=mx+(cos>=0?1:-1)*10;
+                        const ey=my;
+                        const textAnchor=cos>=0?'start':'end';
+                        const tx=ex+(cos>=0?3:-3);
+                        const lineColor=fill||TEXT_MUTED;
                         return(
                           <g>
-                            <text x={x} y={yy-7} fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700}>{name.length>4?name.slice(0,4):name}</text>
-                            <text x={x} y={yy+9} fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700}>{Math.round(percent*100)}%</text>
+                            <path d={`M${sx},${sy}L${mx},${my}L${ex},${ey}`} stroke={lineColor} strokeWidth={1} fill="none" opacity={0.7}/>
+                            <circle cx={ex} cy={ey} r={1.5} fill={lineColor}/>
+                            <text x={tx} y={ey} fill={TEXT_PRIMARY} textAnchor={textAnchor} dominantBaseline="central" fontSize={10} fontWeight={600}>{(name.length>4?name.slice(0,4):name)} {pctInt}%</text>
                           </g>
                         );
                       }}
@@ -1150,17 +1184,36 @@ export default function App() {
         <div style={{height:12,background:CREAM}}/>
         <div style={{background:CARD_BG}}>
           <div onClick={()=>setMenuScreen("catNew")} style={{...S.listItem,color:ORANGE,fontWeight:600}}><span>＋</span><span style={{flex:1}}>新規カテゴリーの追加</span><span style={{color:"#bbb"}}>›</span></div>
-          {expenseCats.map(cat=>(
-            <div key={cat.id} style={{display:"flex",alignItems:"center",padding:"12px 18px",borderBottom:`1px solid ${BORDER}`,background:CARD_BG,gap:12}}>
-              <CatSvgIcon cat={cat} size={32}/>
-              <span style={{flex:1,fontSize:14,fontWeight:400,color:TEXT_PRIMARY}}>{cat.label}</span>
-              <button onClick={()=>{setEditingCat(cat);setEditName(cat.label);setEditIcon(cat.iconKey||cat.icon||"restaurant");setEditColor(cat.color||"#FF6B35");setMenuScreen("catEditDetail");}} style={{padding:"6px 14px",background:ORANGE_LIGHT,border:`1px solid ${ORANGE}`,borderRadius:16,color:ORANGE,fontSize:12,fontWeight:700,cursor:"pointer",marginRight:6}}>編集</button>
-              <button
-                onClick={() => removeCategory(cat.id).catch((e) => { console.error(e); alert("削除に失敗しました。"); })}
-                style={{padding:"6px 14px",background:"#FFEBEE",border:`1px solid ${RED}`,borderRadius:16,color:RED,fontSize:12,fontWeight:700,cursor:"pointer"}}
-              >削除</button>
-            </div>
-          ))}
+          <DndContext
+            sensors={dndSensors}
+            collisionDetection={closestCenter}
+            onDragEnd={({ active, over }) => {
+              if (!over || active.id === over.id) return;
+              const oldIndex = expenseCats.findIndex((c) => c.id === active.id);
+              const newIndex = expenseCats.findIndex((c) => c.id === over.id);
+              if (oldIndex < 0 || newIndex < 0) return;
+              const sorted = arrayMove(expenseCats, oldIndex, newIndex);
+              reorderCategories(sorted.map((c) => c.id));
+            }}
+          >
+            <SortableContext items={expenseCats.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+              {expenseCats.map((cat) => (
+                <SortableCategoryRow
+                  key={cat.id}
+                  cat={cat}
+                  icon={<CatSvgIcon cat={cat} size={32}/>}
+                  onEdit={(c) => {
+                    setEditingCat(c);
+                    setEditName(c.label);
+                    setEditIcon(c.iconKey || c.icon || "restaurant");
+                    setEditColor(c.color || "#FF6B35");
+                    setMenuScreen("catEditDetail");
+                  }}
+                  onRemove={(id) => removeCategory(id).catch((e) => { console.error(e); alert("削除に失敗しました。"); })}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         </div>
       </div>
     );

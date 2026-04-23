@@ -87,6 +87,43 @@ export function useCategories() {
     setCategories((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
+  // 並び替え:sortedIds は新しい順序の id 配列。
+  // optimistic にローカル state を並び替え、差分 UPDATE を並列発行。
+  // 失敗時は元の順序へロールバック + alert。
+  const reorderCategories = useCallback(
+    async (sortedIds) => {
+      if (!userId) return;
+      const prev = categories;
+      const diffs = sortedIds
+        .map((id, idx) => ({
+          id,
+          newOrder: idx,
+          prevOrder: prev.findIndex((c) => c.id === id),
+        }))
+        .filter((d) => d.newOrder !== d.prevOrder);
+      if (diffs.length === 0) return;
+
+      const next = sortedIds
+        .map((id, idx) => {
+          const c = prev.find((x) => x.id === id);
+          return c ? { ...c, sortOrder: idx } : null;
+        })
+        .filter(Boolean);
+      setCategories(next);
+
+      try {
+        await Promise.all(
+          diffs.map((d) => api.updateCategory(d.id, { sort_order: d.newOrder })),
+        );
+      } catch (e) {
+        console.error(e);
+        setCategories(prev);
+        alert('並び替えの保存に失敗しました。');
+      }
+    },
+    [userId, categories],
+  );
+
   return {
     categories,
     loading,
@@ -95,5 +132,6 @@ export function useCategories() {
     addCategory,
     updateCategory,
     removeCategory,
+    reorderCategories,
   };
 }
