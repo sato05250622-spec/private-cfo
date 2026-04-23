@@ -24,6 +24,13 @@
 
 ## Phase 1 以降の課題(優先度:中)
 
+- [ ] **予算の Supabase 化(admin 可視化のため)**
+  - 現状 `cfo_budgets` / `cfo_weekBudgets` / `cfo_weekCatBudgets` /
+    `cfo_paymentMethods` / `cfo_loans` は顧客端末の localStorage のみ
+  - Day 5 Phase 1 で本部ダッシュボード側の「予算タブ」を実装しようとして、
+    データソースが無く断念(判断 E-1)
+  - admin から顧客の予算状況を見たい要望が出た段階でスキーマ追加 + 顧客側
+    フック差し替えを検討
 - [ ] `recurring_rules` テーブルを作り、`applyRecurring` の
   `recurId` / `isRecurring` を復活(「定期」バッジ再表示)
 - [ ] 既定カテゴリの「リセット」機能(削除後に元に戻せる動線)
