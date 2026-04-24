@@ -531,27 +531,30 @@ export default function App() {
         </div>
         <div style={{
           display:"flex",
-          border:`1.5px solid rgba(255,255,255,0.18)`,
           borderRadius:8,
           overflow:"hidden",
           position:"relative",
         }}>
-          {/* 進捗フィル背景（絶対配置・pct%分だけ色がつく） */}
-          <div style={{
-            position:"absolute", top:0, left:0, height:"100%",
-            width:`${Math.min(100,pct)}%`,
-            background:`${themeColor}22`,
-            transition:"width 0.4s ease",
-            pointerEvents:"none",
-          }}/>
-          {/* 縦の仕切り線（pct%の位置に絶対配置） */}
-          <div style={{
-            position:"absolute", top:0, left:`${Math.min(100,pct)}%`,
-            width:1.5, height:"100%",
-            background:"rgba(255,255,255,0.25)",
-            transform:"translateX(-50%)",
-            pointerEvents:"none",
-          }}/>
+          {/* 進捗フィル背景(pct%分だけ色がつく)— pct===0 は DOM ごと描画しない */}
+          {pct > 0 && (
+            <div style={{
+              position:"absolute", top:0, left:0, height:"100%",
+              width:`${Math.min(100,pct)}%`,
+              background:`${themeColor}22`,
+              transition:"width 0.4s ease",
+              pointerEvents:"none",
+            }}/>
+          )}
+          {/* 縦の仕切り線(pct%の位置)— 0% 時は左端に半画素漏れするので同じく非描画 */}
+          {pct > 0 && (
+            <div style={{
+              position:"absolute", top:0, left:`${Math.min(100,pct)}%`,
+              width:1.5, height:"100%",
+              background:"rgba(255,255,255,0.25)",
+              transform:"translateX(-50%)",
+              pointerEvents:"none",
+            }}/>
+          )}
           {/* 左テキスト */}
           <div style={{flex:1,padding:"5px 12px",position:"relative",zIndex:1,display:"flex",alignItems:"center",gap:4,overflow:"hidden"}}>
             <span style={{fontSize:13,fontWeight:700,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{expense.toLocaleString()}円</span>
@@ -572,7 +575,7 @@ export default function App() {
   // ============================================================
   // ★ カテゴリボックス（絶対配置フィル＋縦線・テキスト絶対切れない）
   // ============================================================
-  const CatTwoBox = ({ cat, spent, weekCatBudget, catPct, catPctRaw, isLast }) => {
+  const CatTwoBox = ({ cat, spent, weekCatBudget, catPct, catPctRaw, isLast, periodLabel = '週' }) => {
     const isOver = weekCatBudget > 0 && spent > weekCatBudget;
     const isWarn = weekCatBudget > 0 && catPct >= 80 && !isOver;
     // 〜79%: TEAL / 80〜99%: 黄 / 100%+: 赤
@@ -589,13 +592,12 @@ export default function App() {
           </div>
           {weekCatBudget > 0 && (
             <span style={{fontSize:10,color:TEXT_MUTED}}>
-              予算 <span style={{color:TEXT_PRIMARY,fontWeight:700}}>{weekCatBudget.toLocaleString()}</span>円（週）
+              予算 <span style={{color:TEXT_PRIMARY,fontWeight:700}}>{weekCatBudget.toLocaleString()}</span>円（{periodLabel}）
             </span>
           )}
         </div>
         <div style={{
           display:"flex",
-          border:`1.5px solid rgba(255,255,255,0.15)`,
           borderRadius:7,
           overflow:"hidden",
           position:"relative",
@@ -692,7 +694,10 @@ export default function App() {
             );
           })}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,padding:"8px 14px 4px",background:NAVY}}>
+        {/* marginTop:"auto" で flex:1 親(L674)の残り領域を全てグリッド上に吸わせ、
+            グリッドを flex コンテナの末尾に押し下げる。
+            グリッド内部の paddingBottom も 4→0 にして、アイコン下端とグリッド外形の差を詰めた。 */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,padding:"8px 14px 0",background:NAVY,marginTop:"auto"}}>
           {expenseCats.map(cat=>{
             const isSelected=inputCategory===cat.id;
             const currentWeekNum2 = Math.min(4, Math.ceil(inputDate.getDate()/7));
@@ -719,7 +724,8 @@ export default function App() {
         </div>
         {recurringList.length>0&&(<div style={{margin:"6px 18px 0",background:`${TEAL}18`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",border:`1px solid ${TEAL}44`}}><span style={{fontSize:11,color:TEAL,fontWeight:300}}>🔁 定期支出: {recurringList.length}件</span><button onClick={()=>setShowRecurringModal(true)} style={{background:"none",border:"none",color:TEAL,fontSize:11,cursor:"pointer"}}>管理 ›</button></div>)}
         </div>
-        <div style={{padding:"8px 16px 0",background:NAVY2,borderTop:`1px solid ${BORDER}`,flexShrink:0}}>
+        {/* 「支出を入力する」ボタンはナビ直上に固定。S.fixedSubmit = position:fixed + bottom:calc(60px + safe-area-inset-bottom + 8px) */}
+        <div style={S.fixedSubmit}>
           <button style={S.submitBtn} onClick={addTransaction}>支出を入力する</button>
         </div>
       </div>
@@ -819,7 +825,7 @@ export default function App() {
             });
 
             return (
-              <div key={i} style={{marginBottom:12,background:NAVY2,borderRadius:14,border:`1px solid ${isExpanded?GOLD:BORDER}`,boxShadow:isExpanded?`0 0 12px ${GOLD}33`:SHADOW,overflow:"hidden"}}>
+              <div key={i} style={{marginBottom:12,background:"#2A2F3E",borderRadius:14,border:`1px solid ${isExpanded?GOLD:BORDER}`,boxShadow:isExpanded?`0 0 12px ${GOLD}33`:SHADOW,overflow:"hidden"}}>
                 {/* ── カードヘッダー ── */}
                 <div onClick={()=>setExpandedWeek(isExpanded?null:w.weekNum)} style={{padding:"14px 16px",cursor:"pointer"}}>
                   {/* タイトル行 */}
@@ -836,23 +842,21 @@ export default function App() {
                     <span style={{fontSize:14,color:isExpanded?GOLD:TEXT_MUTED}}>{isExpanded?"▲":"▼"}</span>
                   </div>
 
-                  {/* ★ 2ボックス(合計バー・差別化グレー背景) */}
-                  <div style={{background:"#3A4556"}}>
-                    <WeekTwoBox
-                      expense={w.expense}
-                      budget={w.weekBudget}
-                      isOver={w.isOver}
-                      pct={pct}
-                      pctRaw={pctRaw}
-                      remain={remain}
-                      barColor={barColor}
-                    />
-                  </div>
+                  {/* ★ 2ボックス(合計バー。カード地 #2A2F3E にフラットに溶ける) */}
+                  <WeekTwoBox
+                    expense={w.expense}
+                    budget={w.weekBudget}
+                    isOver={w.isOver}
+                    pct={pct}
+                    pctRaw={pctRaw}
+                    remain={remain}
+                    barColor={barColor}
+                  />
                 </div>
 
                 {/* ── 展開：カテゴリ別内訳（2ボックス形式） ── */}
                 {isExpanded&&(
-                  <div style={{borderTop:`1px solid ${BORDER}`,padding:"14px 16px 14px"}}>
+                  <div style={{borderTop:`1px solid ${BORDER}`,padding:"14px 16px 14px",background:"#1E2330"}}>
                     {catBreakdownData.map(({cat,spent,weekCatBudget,catPct,catPctRaw,hasAnyBudget},idx,arr)=>{
                       const visible = arr.filter(x=>x.spent>0||x.weekCatBudget>0||x.hasAnyBudget);
                       const visIdx = visible.findIndex(x=>x.cat.id===cat.id);
@@ -961,49 +965,35 @@ export default function App() {
 
             <div style={{background:CARD_BG,marginBottom:1}}>
               <div style={{fontWeight:400,fontSize:13,padding:"16px 18px 10px",color:TEXT_SECONDARY}}>カテゴリー別支出</div>
-              {expenseCats.map(cat=>{
-                const spent=reportTxs.filter(t=>t.category===cat.id).reduce((s,t)=>s+t.amount,0);
-                // 月予算：直接設定 → なければ週予算×4週の合計
-                const directBudget=budgets[`${y}-${m+1}-${cat.id}`]||0;
-                const weeklyBudgetSum=[1,2,3,4].reduce((s,wn)=>s+(weekCatBudgets[`${y}-${m+1}-w${wn}_${cat.id}`]||0),0);
-                const budget=directBudget>0?directBudget:weeklyBudgetSum>0?weeklyBudgetSum:0;
-                // 支出0かつ予算0の場合のみ非表示
-                if(spent===0 && budget===0)return null;
-                const remain=budget?budget-spent:null;
-                const isOver=remain!==null&&remain<0;
-                const pctRaw=budget?Math.round(spent/budget*100):null;
-                const pct=budget?Math.min(100,pctRaw):null;
-                return(
-                  <div key={cat.id} style={{padding:"12px 18px",borderBottom:`1px solid ${BORDER}`,background:CARD_BG}}>
-                    <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:budget?8:0}}>
-                      <CatSvgIcon cat={cat} size={26}/>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:14,fontWeight:700,color:TEXT_PRIMARY}}>{cat.label}</div>
-                        <div style={{fontSize:13,fontWeight:700,color:isOver?RED:"#2196F3"}}>{spent.toLocaleString()}円</div>
-                      </div>
-                      <div style={{textAlign:"right",minWidth:80}}>
-                        {remain===null
-                          ? <span style={{fontSize:11,color:TEXT_MUTED}}>予算未設定</span>
-                          : isOver
-                            ? <><div style={{fontSize:12,fontWeight:400,color:RED}}>超過 {Math.abs(remain).toLocaleString()}円</div><div style={{fontSize:10,color:`${RED}CC`}}>{pctRaw}% 使用</div></>
-                            : <><div style={{fontSize:12,fontWeight:400,color:GOLD}}>残 {remain.toLocaleString()}円</div><div style={{fontSize:10,color:TEXT_SECONDARY}}>{pctRaw}% 使用</div></>
-                        }
-                      </div>
-                    </div>
-                    {budget>0&&(
-                      <div>
-                        <div style={{height:5,background:"rgba(255,255,255,0.08)",borderRadius:4,overflow:"hidden"}}>
-                          <div style={{height:"100%",width:`${pct}%`,background:pct>=100?RED:pct>=80?GOLD:TEAL,borderRadius:4}}/>
-                        </div>
-                        <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
-                          <span style={{fontSize:9,color:TEXT_MUTED}}>{spent.toLocaleString()}円</span>
-                          <span style={{fontSize:9,color:TEXT_MUTED}}>{budget.toLocaleString()}円</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              <div style={{padding:"0 18px 16px"}}>
+                {(()=>{
+                  // 月予算:直接設定 → なければ週予算×4週の合計
+                  const items = expenseCats.map(cat=>{
+                    const spent = reportTxs.filter(t=>t.category===cat.id).reduce((s,t)=>s+t.amount,0);
+                    const directBudget = budgets[`${y}-${m+1}-${cat.id}`] || 0;
+                    const weeklyBudgetSum = [1,2,3,4].reduce((s,wn)=>s+(weekCatBudgets[`${y}-${m+1}-w${wn}_${cat.id}`]||0),0);
+                    const catBudget = directBudget>0 ? directBudget : weeklyBudgetSum;
+                    return { cat, spent, catBudget };
+                  }).filter(x => x.spent>0 || x.catBudget>0);
+                  return items.map((item, idx)=>{
+                    const { cat, spent, catBudget } = item;
+                    const catPctRaw = catBudget>0 ? Math.round(spent/catBudget*100) : 0;
+                    const catPct = Math.min(100, catPctRaw);
+                    return (
+                      <CatTwoBox
+                        key={cat.id}
+                        cat={cat}
+                        spent={spent}
+                        weekCatBudget={catBudget}
+                        catPct={catPct}
+                        catPctRaw={catPctRaw}
+                        isLast={idx === items.length - 1}
+                        periodLabel="月"
+                      />
+                    );
+                  });
+                })()}
+              </div>
             </div>
           </>
         ):(
@@ -1740,7 +1730,11 @@ export default function App() {
       </div>
       {!showTelop&&<div onClick={()=>setShowTelop(true)} style={{position:"fixed",top:"env(safe-area-inset-top)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,zIndex:200,height:8,background:`${GOLD}33`,cursor:"pointer",borderBottom:`1px solid ${GOLD}22`}}/>}
 
-      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom:tab==="daily"?"calc(60px + env(safe-area-inset-bottom) + 8px)":"calc(140px + env(safe-area-inset-bottom) + 8px)"}}>
+      {/* paddingBottom 108+safe+8 = 116+safe(viewport 底からの content 末端位置)。
+          Chrome DevTools iPhone 14 Pro 実測で 115 でも余白が残っていたため、さらに 7px 詰めた。
+          ボタン本体上端の実測位置は理論値(125+safe)より下側にある模様(line-height / font metrics 差分)。
+          3行目カードの「残XXX」と下枠線が見える状態を維持する前提。欠けたら 115→118→127 へ段階的に戻す。 */}
+      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom:"calc(108px + env(safe-area-inset-bottom) + 8px)"}}>
         {tab==="daily"&&renderDaily()}
         {tab==="day"&&renderDayView()}
         {tab==="weekly"&&renderWeekly()}

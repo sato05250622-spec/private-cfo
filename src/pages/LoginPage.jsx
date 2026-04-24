@@ -24,7 +24,7 @@ const S = {
     boxShadow: SHADOW,
     padding: '32px 24px',
   },
-  header: { textAlign: 'center', marginBottom: 28 },
+  header: { textAlign: 'center', marginBottom: 22 },
   brand: {
     fontSize: 11,
     color: GOLD,
@@ -33,6 +33,26 @@ const S = {
     fontWeight: 600,
   },
   title: { fontSize: 18, color: TEXT_PRIMARY, fontWeight: 600 },
+  tabs: {
+    display: 'flex',
+    background: NAVY2,
+    border: `1px solid ${BORDER}`,
+    borderRadius: 10,
+    padding: 3,
+    marginBottom: 20,
+    gap: 2,
+  },
+  tab: (active) => ({
+    flex: 1,
+    padding: '8px 0',
+    background: active ? GOLD_GRAD : 'transparent',
+    color: active ? '#0A1628' : TEXT_SECONDARY,
+    border: 'none',
+    borderRadius: 7,
+    fontSize: 12,
+    fontWeight: active ? 700 : 500,
+    cursor: 'pointer',
+  }),
   form: { display: 'flex', flexDirection: 'column', gap: 14 },
   labelRow: {
     display: 'flex',
@@ -84,33 +104,70 @@ const S = {
 };
 
 export default function LoginPage() {
-  const { signIn } = useAuth();
+  const { signIn, signUp } = useAuth();
+  const [mode, setMode] = useState('login'); // 'login' | 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  const switchTo = (next) => {
+    if (next === mode) return;
+    setMode(next);
+    setError(null);
+    setPassword('');
+    setPasswordConfirm('');
+  };
 
   const onSubmit = async (e) => {
     e.preventDefault();
     if (busy) return;
     setError(null);
+
+    if (mode === 'signup') {
+      if (password.length < 6) {
+        setError('パスワードは 6 文字以上で入力してください。');
+        return;
+      }
+      if (password !== passwordConfirm) {
+        setError('パスワード(確認)が一致しません。');
+        return;
+      }
+    }
+
     setBusy(true);
     try {
-      await signIn(email.trim(), password);
+      if (mode === 'signup') {
+        await signUp(email.trim(), password);
+        // signUp 成功後、Email Confirmation が OFF なら自動でセッションが発行され、
+        // onAuthStateChange → loadProfile → role='client' / approved=false 。
+        // AuthGate がそのまま PendingApprovalMessage に切り替わる。
+      } else {
+        await signIn(email.trim(), password);
+      }
     } catch (err) {
-      setError(translateAuthError(err));
+      setError(translateAuthError(err, mode));
     } finally {
       setBusy(false);
     }
   };
+
+  const isSignup = mode === 'signup';
 
   return (
     <div style={S.wrap}>
       <div style={S.card}>
         <div style={S.header}>
           <div style={S.brand}>PRIVATE CFO</div>
-          <div style={S.title}>ログイン</div>
+          <div style={S.title}>{isSignup ? '新規登録' : 'ログイン'}</div>
         </div>
+
+        <div style={S.tabs}>
+          <button type="button" onClick={() => switchTo('login')}  style={S.tab(!isSignup)}>ログイン</button>
+          <button type="button" onClick={() => switchTo('signup')} style={S.tab(isSignup)}>新規登録</button>
+        </div>
+
         <form onSubmit={onSubmit} style={S.form}>
           <label style={S.labelRow}>
             メールアドレス
@@ -124,32 +181,56 @@ export default function LoginPage() {
             />
           </label>
           <label style={S.labelRow}>
-            パスワード
+            パスワード{isSignup && <span style={{ color: TEXT_MUTED, fontSize: 10 }}> (6 文字以上)</span>}
             <input
               type="password"
               required
-              autoComplete="current-password"
+              autoComplete={isSignup ? 'new-password' : 'current-password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               style={S.input}
             />
           </label>
+          {isSignup && (
+            <label style={S.labelRow}>
+              パスワード(確認)
+              <input
+                type="password"
+                required
+                autoComplete="new-password"
+                value={passwordConfirm}
+                onChange={(e) => setPasswordConfirm(e.target.value)}
+                style={S.input}
+              />
+            </label>
+          )}
           {error && <div style={S.errorBox}>{error}</div>}
           <button type="submit" disabled={busy} style={S.submit(busy)}>
-            {busy ? 'ログイン中…' : 'ログイン'}
+            {busy
+              ? (isSignup ? '登録中…' : 'ログイン中…')
+              : (isSignup ? '新規登録' : 'ログイン')}
           </button>
         </form>
+
         <div style={S.footer}>
-          アカウントは本部からの招待制です。
-          <br />
-          ログインできない場合は本部までお問い合わせください。
+          {isSignup ? (
+            <>
+              ご登録後、本部の承認をお待ちください。<br />
+              承認後にご利用いただけます。
+            </>
+          ) : (
+            <>
+              アカウントをお持ちでない方は「新規登録」から。<br />
+              ログインできない場合は本部までお問い合わせください。
+            </>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function translateAuthError(err) {
+function translateAuthError(err, mode) {
   const msg = err?.message || '';
   if (/invalid login credentials/i.test(msg)) {
     return 'メールアドレスまたはパスワードが正しくありません。';
@@ -160,5 +241,11 @@ function translateAuthError(err) {
   if (/rate limit/i.test(msg)) {
     return '試行回数が多すぎます。しばらく時間をおいてお試しください。';
   }
-  return msg || 'ログインに失敗しました。';
+  if (/user already registered/i.test(msg)) {
+    return 'このメールアドレスは既に登録されています。ログインタブからお進みください。';
+  }
+  if (/password.*6|weak password|should be at least/i.test(msg)) {
+    return 'パスワードが弱すぎます。6 文字以上を入れてください。';
+  }
+  return msg || (mode === 'signup' ? '新規登録に失敗しました。' : 'ログインに失敗しました。');
 }
