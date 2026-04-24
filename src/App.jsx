@@ -154,11 +154,14 @@ export default function App() {
   // 中央付近の行だけドラッグ発動しない問題があったため、MouseSensor + TouchSensor に分離。
   // TouchSensor はネイティブ touchstart を直接 listen するので iOS の gesture interception を回避できる。
   // - MouseSensor:PC 向け、5px ドラッグで発動(即時)
-  // - TouchSensor:iOS/Android 向け、500ms 長押し+5px 許容(素早いスクロールとは区別される)
+  // - TouchSensor:iOS/Android 向け、250ms 長押し + 5px 許容
+  //   行側は touch-action:'pan-y' で縦スクロールを許可しているため、
+  //   250ms 以内に 5px 以上動けば activation キャンセル → そのままブラウザスクロールに移行。
+  //   250ms 指が動かなければ明示的な長押しとしてドラッグ発動。両立のための閾値設計。
   // - 編集/削除ボタンは行の listeners より先に onMouseDown/onTouchStart で伝播停止(下記 Row 参照)
   const dndSensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 500, tolerance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const [calMonth, setCalMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });

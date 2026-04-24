@@ -27,7 +27,12 @@ export default function SortablePaymentRow({ pm, onEdit, onRemove }) {
     boxShadow: isDragging ? '0 6px 24px rgba(0,0,0,0.5)' : 'none',
     opacity: isDragging ? 0.9 : 1,
     zIndex: isDragging ? 2 : 0,
-    touchAction: 'none',
+    // iOS touch 競合対策:
+    // - touch-action:'pan-y' で縦スクロールはブラウザに残し、pinch / 長押しコンテキストメニューだけ抑止。
+    //   'none' にすると親スクロールまで奪い「中央行で縦スワイプしてもスクロールしない」バグが出る。
+    //   ドラッグ活性化は App 側 TouchSensor の delay(250ms)+ tolerance(5px)で差別化する。
+    // - user-select / TouchCallout は iOS の青いテキスト選択 UI・コピーメニューを抑止するため残す。
+    touchAction: 'pan-y',
     userSelect: 'none',
     WebkitUserSelect: 'none',
     WebkitTouchCallout: 'none',
