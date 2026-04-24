@@ -402,11 +402,15 @@ export default function App() {
     if(v==="00"){ setCatBudgetInput(p=>p===""?"0":p+"00"); return; }
     if(v==="OK"){
       const val=catBudgetInput; const num=Number(val);
+      // 未設定と 0 を明確に区別する:
+      //  - 空欄(val==="") / NaN / 負数 → 「未設定」として key を削除(従来通り)
+      //  - 0 以上の有効値     → 値として保存(0 も「明示的に 0 円」として保存される)
+      const isInvalid = !val || isNaN(num) || num < 0;
       if(catBudgetTarget._isWeek){
-        if(!val||num<=0){setWeekCatBudgets(p=>{const next={...p};delete next[`${catBudgetTarget._weekKey}_${catBudgetTarget.id}`];return next;});}
+        if(isInvalid){setWeekCatBudgets(p=>{const next={...p};delete next[`${catBudgetTarget._weekKey}_${catBudgetTarget.id}`];return next;});}
         else{setWeekCatBudgets(p=>({...p,[`${catBudgetTarget._weekKey}_${catBudgetTarget.id}`]:num}));}
       } else {
-        if(!val||num<=0){setBudgets(prev=>{const next={...prev};delete next[`${today.getFullYear()}-${today.getMonth()+1}-${catBudgetTarget.id}`];return next;});}
+        if(isInvalid){setBudgets(prev=>{const next={...prev};delete next[`${today.getFullYear()}-${today.getMonth()+1}-${catBudgetTarget.id}`];return next;});}
         else{setBudgets(prev=>({...prev,[`${today.getFullYear()}-${today.getMonth()+1}-${catBudgetTarget.id}`]:num}));}
       }
       setShowCatBudgetModal(false);setCatBudgetInput(""); return;
@@ -425,7 +429,9 @@ export default function App() {
     if(v==="÷"||v==="×"||v==="－"||v==="＋"){ setAllWeekInput(p=>p===""?"0":p+v); return; }
     if(v==="00"){ setAllWeekInput(p=>p===""?"0":p+"00"); return; }
     if(v==="OK"){
-      const val=allWeekInput; const num=Number(val); if(!val||num<=0) return;
+      // 全週一括設定でも 0 入力を許可(全週を明示的に 0 円としてセットできる)。
+      // 空欄 / NaN / 負数は「何もしない」= モーダルを閉じずに留まる動作を維持。
+      const val=allWeekInput; const num=Number(val); if(!val||isNaN(num)||num<0) return;
       const next={...weekCatBudgets};
       weeks.forEach(w=>{next[`${w.weekKey}_${allWeekTarget.id}`]=num;});
       setWeekCatBudgets(next);setAllWeekTarget(null);setAllWeekInput(""); return;
@@ -1445,7 +1451,8 @@ export default function App() {
       const weeks=[];let d=new Date(y,m,1);let weekNum=1;
       while(d.getMonth()===m){const startDay=d.getDate();const lastDay=new Date(y,m+1,0).getDate();let endDay=Math.min(startDay+6,lastDay);if(weekNum===4)endDay=lastDay;const weekKey=`${y}-${m+1}-w${weekNum}`;weeks.push({weekNum,weekKey,startStr:`${m+1}/${startDay}`,endStr:`${m+1}/${endDay}`});weekNum++;d=new Date(y,m,endDay+1);if(weekNum>4)break;}
       const prevM=m===0?11:m-1;const prevY=m===0?y-1:y;
-      const copyLastMonth=()=>{const next={...weekCatBudgets};weeks.forEach(w=>{expenseCats.forEach(cat=>{const prevKey=`${prevY}-${prevM+1}-w${w.weekNum}_${cat.id}`;const thisKey=`${w.weekKey}_${cat.id}`;if(weekCatBudgets[prevKey])next[thisKey]=weekCatBudgets[prevKey];});});setWeekCatBudgets(next);};
+      // 先月コピーも 0 を尊重:truthy チェックだと prev が 0 のときにコピーされないので null 判定に変更。
+      const copyLastMonth=()=>{const next={...weekCatBudgets};weeks.forEach(w=>{expenseCats.forEach(cat=>{const prevKey=`${prevY}-${prevM+1}-w${w.weekNum}_${cat.id}`;const thisKey=`${w.weekKey}_${cat.id}`;if(weekCatBudgets[prevKey]!=null)next[thisKey]=weekCatBudgets[prevKey];});});setWeekCatBudgets(next);};
       return(
         <div style={{minHeight:"100vh",background:NAVY}}>
           <div style={S.overlayHeader}>
@@ -1469,32 +1476,41 @@ export default function App() {
                 <div/>
                 {weeks.map(w=>(<div key={w.weekKey} style={{textAlign:"center",padding:"6px 2px",background:NAVY2,borderRadius:8,border:`1px solid ${BORDER}`}}><div style={{fontSize:10,fontWeight:700,color:TEXT_PRIMARY}}>第{w.weekNum}週</div><div style={{fontSize:8,color:TEXT_MUTED}}>{w.startStr}〜{w.endStr}</div></div>))}
                 {/* 合計列ヘッダ:週ヘッダと同構造・2行(日付行は visibility:hidden で高さ揃え)。NAVY3 + 破線 border で読み取り専用を示唆。 */}
-                <div style={{textAlign:"center",padding:"6px 2px",background:NAVY3,borderRadius:8,border:`1px dashed ${BORDER}`}}><div style={{fontSize:10,fontWeight:700,color:TEXT_MUTED}}>合計</div><div style={{fontSize:8,visibility:"hidden"}}>-</div></div>
+                <div style={{textAlign:"center",padding:"6px 2px",background:NAVY3,borderRadius:8,border:`1px dashed ${BORDER}`}}><div style={{fontSize:10,fontWeight:700,color:TEXT_MUTED}}>合計額</div><div style={{fontSize:8,visibility:"hidden"}}>-</div></div>
               </div>
               {expenseCats.map(cat=>{
-                // そのカテゴリの週予算合計(第1〜第N週分)
-                const catTotal=weeks.reduce((s,w)=>s+(weekCatBudgets[`${w.weekKey}_${cat.id}`]||0),0);
+                // 「1週でも明示的に値(0含む)がセットされているか」で合計表示の有無を決める。
+                // 合計値は null/undefined を 0 扱いで加算、0 は実質寄与ゼロで安全。
+                const hasAnyBudget=weeks.some(w=>weekCatBudgets[`${w.weekKey}_${cat.id}`]!=null);
+                const catTotal=weeks.reduce((s,w)=>s+(weekCatBudgets[`${w.weekKey}_${cat.id}`]??0),0);
                 return(
                 <div key={cat.id} style={{display:"grid",gridTemplateColumns:"90px repeat(4,1fr) 56px",gap:4,marginBottom:4}}>
                   <button onClick={()=>{setAllWeekTarget(cat);setAllWeekInput("");}} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 8px",background:CARD_BG,border:`1px solid ${BORDER}`,borderRadius:8,cursor:"pointer",textAlign:"left"}}>
                     <CatSvgIcon cat={cat} size={16}/><span style={{fontSize:10,color:TEXT_PRIMARY,fontWeight:500,lineHeight:1.2}}>{cat.label}</span>
                   </button>
-                  {weeks.map(w=>{const key=`${w.weekKey}_${cat.id}`;const val=weekCatBudgets[key];return(
+                  {weeks.map(w=>{
+                    const key=`${w.weekKey}_${cat.id}`;
+                    const val=weekCatBudgets[key];
+                    // hasVal:明示設定があるか(0 も含む)= 表示・スタイル・削除可否の真の判定。
+                    // 従来の `val ?` だと 0 が falsy になり「未設定扱い」になってしまう不具合があった。
+                    const hasVal=val!=null;
+                    return(
                     <button key={w.weekKey}
-                      onClick={()=>{setCatBudgetTarget({...cat,_weekKey:w.weekKey,_isWeek:true});setCatBudgetInput(val?String(val):"");setShowCatBudgetModal(true);}}
-                      onContextMenu={e=>{e.preventDefault();if(val){const next={...weekCatBudgets};delete next[key];setWeekCatBudgets(next);}}}
-                      onTouchStart={()=>{if(val){longPressTimer.current=setTimeout(()=>{const next={...weekCatBudgets};delete next[key];setWeekCatBudgets(next);},700);}}}
+                      onClick={()=>{setCatBudgetTarget({...cat,_weekKey:w.weekKey,_isWeek:true});setCatBudgetInput(hasVal?String(val):"");setShowCatBudgetModal(true);}}
+                      onContextMenu={e=>{e.preventDefault();if(hasVal){const next={...weekCatBudgets};delete next[key];setWeekCatBudgets(next);}}}
+                      onTouchStart={()=>{if(hasVal){longPressTimer.current=setTimeout(()=>{const next={...weekCatBudgets};delete next[key];setWeekCatBudgets(next);},700);}}}
                       onTouchEnd={()=>{clearTimeout(longPressTimer.current);}}
                       onTouchMove={()=>{clearTimeout(longPressTimer.current);}}
-                      style={{padding:"8px 4px",textAlign:"center",background:val?`${GOLD}15`:NAVY2,border:`1px solid ${val?`${GOLD}44`:BORDER}`,borderRadius:8,cursor:"pointer"}}>
-                      <div style={{fontSize:10,fontWeight:700,color:val?GOLD:TEXT_MUTED}}>{val?`${val.toLocaleString()}`:"-"}</div>
-                      {val&&<div style={{fontSize:8,color:TEXT_MUTED}}>円</div>}
+                      style={{padding:"8px 4px",textAlign:"center",background:hasVal?`${GOLD}15`:NAVY2,border:`1px solid ${hasVal?`${GOLD}44`:BORDER}`,borderRadius:8,cursor:"pointer"}}>
+                      <div style={{fontSize:10,fontWeight:700,color:hasVal?GOLD:TEXT_MUTED}}>{hasVal?`${val.toLocaleString()}`:"-"}</div>
+                      {hasVal&&<div style={{fontSize:8,color:TEXT_MUTED}}>円</div>}
                     </button>
-                  );})}
-                  {/* 合計列:div(button でない)= タップ不可。NAVY3 + 破線 border で週セルと区別。値は週セルと同じ書式。 */}
+                    );
+                  })}
+                  {/* 合計列:1週でも明示設定があれば合計を表示(0 円合計も含む)、全週未設定なら "-"。 */}
                   <div style={{padding:"8px 4px",textAlign:"center",background:NAVY3,border:`1px dashed ${BORDER}`,borderRadius:8}}>
-                    <div style={{fontSize:10,fontWeight:700,color:catTotal>0?GOLD:TEXT_MUTED}}>{catTotal>0?catTotal.toLocaleString():"-"}</div>
-                    {catTotal>0&&<div style={{fontSize:8,color:TEXT_MUTED}}>円</div>}
+                    <div style={{fontSize:10,fontWeight:700,color:hasAnyBudget?GOLD:TEXT_MUTED}}>{hasAnyBudget?catTotal.toLocaleString():"-"}</div>
+                    {hasAnyBudget&&<div style={{fontSize:8,color:TEXT_MUTED}}>円</div>}
                   </div>
                 </div>
                 );
@@ -1705,7 +1721,7 @@ export default function App() {
             <span style={{width:40}}/>
           </div>
           <div style={{margin:"12px 16px 0",background:CARD_BG,borderRadius:12,overflow:"hidden",border:`1px solid ${BORDER}`}}>
-            {[{label:"名前",placeholder:"例：山田 太郎",type:"text"},{label:"報酬日",placeholder:"例：25日",type:"text"},{label:"メールアドレス",placeholder:"例：example@mail.com",type:"email"},{label:"電話番号",placeholder:"例：090-1234-5678",type:"tel"}].map((field,i,arr)=>(
+            {[{label:"名前",placeholder:"例：山田 太郎",type:"text"},{label:"メールアドレス",placeholder:"例：example@mail.com",type:"email"},{label:"電話番号",placeholder:"例：090-1234-5678",type:"tel"},{label:"報酬日",placeholder:"例：25日",type:"text"},{label:"管理スタート日",placeholder:"例：2026/04/01",type:"date"}].map((field,i,arr)=>(
               <div key={i} style={{display:"flex",alignItems:"center",padding:"14px 16px",borderBottom:i<arr.length-1?`1px solid ${BORDER}`:"none",gap:12}}>
                 <span style={{fontSize:12,color:TEXT_SECONDARY,minWidth:80,fontWeight:500}}>{field.label}</span>
                 <input type={field.type} placeholder={field.placeholder} style={{flex:1,border:"none",background:"transparent",fontSize:14,outline:"none",color:TEXT_PRIMARY,textAlign:"right"}}/>
