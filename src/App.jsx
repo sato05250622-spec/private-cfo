@@ -17,9 +17,10 @@ import { usePoints } from "./hooks/usePoints";
 import LogoutButton from "./components/LogoutButton";
 import AppointmentCard from "./components/AppointmentCard";
 import SortableCategoryRow from "./components/SortableCategoryRow";
+import SortablePaymentRow from "./components/SortablePaymentRow";
 import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
-import { DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, closestCenter, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
 
 // ---------------------------------------------------------------
@@ -46,6 +47,47 @@ if (typeof window !== "undefined" && window.localStorage.getItem("cfo_migratedFr
 // Supabase 取得失敗・未ログイン・0 件時に表示するフォールバック。
 // admin が INSERT しないままでも画面が成立するための安全網。
 const FALLBACK_TELOP = "【本部より】今月の経費精算は月末25日までにご提出ください　　　／　　　来月の研修は5月10日（土）を予定しております　　　／　　　ご不明点はお気軽に本部までお問い合わせください";
+
+// ---------------------------------------------------------------
+// 「支出を入力する」固定ゴールドボタン用のスタイルを module スコープに昇格。
+// - App 内 `const S = {...}` は毎レンダで再生成 → S.fixedSubmit の参照も毎回新規
+// - React は style prop の参照が変わるたびに DOM element.style の各プロパティを再適用
+// - その際 iOS Safari は bottom:calc(env(safe-area-inset-bottom)...) を再評価し、
+//   safe-area の測定ゆらぎで 1-2px の位置ズレ=「ピクッ」と跳ねる挙動が発生
+// この定数を module レベルに置くことで参照を完全固定し、React の style 再適用を抑制。
+// 加えて位置指定を bottom ではなく transform:translate3d に移行することで、
+// 再適用が発生しても GPU コンポジット層のみで処理され、layout 再計算を完全回避できる。
+// ---------------------------------------------------------------
+const FIXED_SUBMIT_STYLE = {
+  position: "fixed",
+  bottom: 0,
+  left: 0,
+  right: 0,
+  margin: "0 auto",
+  maxWidth: 430,
+  padding: "10px 18px",
+  background: NAVY2,
+  borderTop: `1px solid ${BORDER}`,
+  zIndex: 99,
+  // 位置オフセット(60=ナビ高 + safe-area + 8=呼吸)を transform で表現。
+  // bottom:0 で viewport 底に固定レイアウトし、見た目だけ transform で上に持ち上げる。
+  transform: "translate3d(0, calc(-60px - env(safe-area-inset-bottom) - 8px), 0)",
+  willChange: "transform",
+  WebkitBackfaceVisibility: "hidden",
+};
+const SUBMIT_BTN_STYLE = {
+  display: "block",
+  width: "100%",
+  padding: "15px",
+  background: GOLD_GRAD,
+  color: "#0A1628",
+  border: "none",
+  borderRadius: 28,
+  fontSize: 14,
+  fontWeight: 600,
+  cursor: "pointer",
+  boxShadow: `0 4px 24px ${GOLD}44`,
+};
 
 const SvgIconBtn = ({ iconKey, size = 28, color = "#555", selected = false }) => {
   const icon = SVG_ICONS[iconKey];
@@ -107,11 +149,16 @@ export default function App() {
     reorderCategories,
   } = useCategories();
 
-  // dnd-kit: iOS 長押しドラッグ方式(500ms 押下で発動、5px までの揺れは許容)
-  // - 編集/削除ボタンのタップは即反応(100ms 未満)なので発動しない
-  // - 行を 500ms 押し続けるとドラッグ開始
+  // dnd-kit: iOS 長押しドラッグ方式。
+  // PointerSensor は iOS Safari 画面中央で Pointer Events が scroll gesture detection に奪われ、
+  // 中央付近の行だけドラッグ発動しない問題があったため、MouseSensor + TouchSensor に分離。
+  // TouchSensor はネイティブ touchstart を直接 listen するので iOS の gesture interception を回避できる。
+  // - MouseSensor:PC 向け、5px ドラッグで発動(即時)
+  // - TouchSensor:iOS/Android 向け、500ms 長押し+5px 許容(素早いスクロールとは区別される)
+  // - 編集/削除ボタンは行の listeners より先に onMouseDown/onTouchStart で伝播停止(下記 Row 参照)
   const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { delay: 500, tolerance: 5 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 500, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const [calMonth, setCalMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
@@ -282,6 +329,13 @@ export default function App() {
       .then(() => { setInputAmount(""); setInputMemo(""); })
       .catch((e) => { console.error(e); alert("支出の保存に失敗しました。"); });
   };
+  // 固定ゴールドボタンの onClick を参照固定化する(jitter 対策)。
+  // addTransaction は複数 state を閉包するため毎レンダ新規関数 → そのまま渡すと
+  // React が毎回 event listener を付け替え、iOS Safari で DOM touch が発生する。
+  // ref に最新を保持し、useMemo で作った単一クロージャから常に最新 addTransaction を呼ぶ。
+  const addTransactionRef = useRef(addTransaction);
+  addTransactionRef.current = addTransaction;
+  const submitFixedClick = useMemo(() => () => addTransactionRef.current(), []);
   const deleteTransaction = (id) => {
     softDeleteExpense(id).catch((e) => { console.error(e); alert("削除に失敗しました。"); });
   };
@@ -394,13 +448,16 @@ export default function App() {
     app:{fontFamily:"'Hiragino Sans','Noto Sans JP','Yu Gothic UI','sans-serif'",maxWidth:430,margin:"0 auto",minHeight:"100vh",background:NAVY,display:"flex",flexDirection:"column",position:"relative",overflowX:"hidden"},
     main:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:140},
     bottomNav:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:NAVY2,borderTop:`1px solid ${BORDER}`,display:"flex",zIndex:100,paddingBottom:"calc(env(safe-area-inset-bottom) + 8px)"},
-    fixedSubmit:{position:"fixed",bottom:"calc(60px + env(safe-area-inset-bottom) + 8px)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,padding:"10px 18px",background:NAVY2,borderTop:`1px solid ${BORDER}`,zIndex:99},
+    // 固定ゴールドボタン用:module-level 定数への参照で、毎レンダ同一参照を維持。
+    // 実体は FIXED_SUBMIT_STYLE(GPU 合成レイヤー化済み)。
+    fixedSubmit: FIXED_SUBMIT_STYLE,
     navBtn:(a)=>({flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"10px 0 8px",border:"none",background:"none",cursor:"pointer",color:a?GOLD:TEXT_MUTED,fontSize:10,gap:2,fontWeight:500}),
     typeBtn:(a)=>({flex:1,padding:"3px 16px",border:"none",borderRadius:20,fontWeight:a?600:400,fontSize:10,cursor:"pointer",background:a?GOLD_GRAD:"transparent",color:a?"#0A1628":TEXT_SECONDARY,whiteSpace:"nowrap"}),
     row:{display:"flex",alignItems:"center",padding:"13px 20px",background:CARD_BG,borderBottom:`1px solid ${BORDER}`,boxSizing:"border-box",width:"100%"},
     amountInput:{flex:1,border:"none",fontSize:32,fontWeight:400,background:"transparent",padding:"4px 10px",outline:"none",color:TEXT_PRIMARY,minWidth:0},
     memoInput:{flex:1,border:"none",fontSize:14,background:"transparent",outline:"none",color:TEXT_PRIMARY,fontWeight:400},
-    submitBtn:{display:"block",width:"100%",padding:"15px",background:GOLD_GRAD,color:"#0A1628",border:"none",borderRadius:28,fontSize:14,fontWeight:600,cursor:"pointer",boxShadow:`0 4px 24px ${GOLD}44`},
+    // 固定ゴールドボタン本体:module-level 定数への参照。実体は SUBMIT_BTN_STYLE。
+    submitBtn: SUBMIT_BTN_STYLE,
     monthNav:{display:"flex",alignItems:"center",justifyContent:"space-between",background:NAVY2,borderRadius:12,padding:"10px 16px",margin:"0 14px 12px",border:`1px solid ${BORDER}`,boxShadow:SHADOW},
     navArrow:{background:"none",border:"none",fontSize:18,cursor:"pointer",color:GOLD,padding:"0 8px"},
     calGrid:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",background:CARD_BG},
@@ -724,9 +781,15 @@ export default function App() {
         </div>
         {recurringList.length>0&&(<div style={{margin:"6px 18px 0",background:`${TEAL}18`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",border:`1px solid ${TEAL}44`}}><span style={{fontSize:11,color:TEAL,fontWeight:300}}>🔁 定期支出: {recurringList.length}件</span><button onClick={()=>setShowRecurringModal(true)} style={{background:"none",border:"none",color:TEAL,fontSize:11,cursor:"pointer"}}>管理 ›</button></div>)}
         </div>
-        {/* 「支出を入力する」ボタンはナビ直上に固定。S.fixedSubmit = position:fixed + bottom:calc(60px + safe-area-inset-bottom + 8px) */}
+        {/* 固定ゴールドボタン(jitter 完全対策版)
+            - style は module-level FIXED_SUBMIT_STYLE / SUBMIT_BTN_STYLE を参照
+              → レンダ毎の参照変更が無くなり、React は style の再適用をスキップ
+            - bottom:0 + transform:translate3d(0, -offset, 0) で位置指定を GPU 層へ
+              → iOS Safari の env() 再評価で bottom が再計算されても layout には影響しない
+            - onClick は submitFixedClick(useMemo で参照固定)→ listener 付け替えも抑制
+         */}
         <div style={S.fixedSubmit}>
-          <button style={S.submitBtn} onClick={addTransaction}>支出を入力する</button>
+          <button style={S.submitBtn} onClick={submitFixedClick}>支出を入力する</button>
         </div>
       </div>
     );
@@ -1252,17 +1315,35 @@ export default function App() {
           <div onClick={()=>{setPaymentDraft({label:"",color:"#4CAF50",closingDay:"",withdrawalDay:""});setEditingPaymentId(null);setMenuScreen("paymentNew");}} style={{...S.listItem,color:ORANGE,fontWeight:600}}>
             <span>＋</span><span style={{flex:1}}>新しい支払い方法を追加</span><span style={{color:"#bbb"}}>›</span>
           </div>
-          {paymentMethods.map(pm=>(
-            <div key={pm.id} style={{display:"flex",alignItems:"center",padding:"14px 18px",borderBottom:`1px solid ${BORDER}`,background:CARD_BG,gap:12}}>
-              <div style={{width:36,height:36,borderRadius:8,background:pm.color,flexShrink:0}}/>
-              <div style={{flex:1}}>
-                <span style={{fontSize:14,fontWeight:400,color:TEXT_PRIMARY}}>{pm.label}</span>
-                {(pm.closingDay||pm.withdrawalDay||pm.bank)&&<div style={{fontSize:10,color:TEXT_MUTED,marginTop:2}}>{pm.bank?`🏦${pm.bank}　`:""}{ pm.closingDay?`締日：${pm.closingDay}日`:""}　{pm.withdrawalDay?`引落：${pm.withdrawalDay}日`:""}</div>}
-              </div>
-              <button onClick={()=>{setPaymentDraft({label:pm.label,color:pm.color,closingDay:pm.closingDay||"",withdrawalDay:pm.withdrawalDay||"",bank:pm.bank||""});setEditingPaymentId(pm.id);setMenuScreen("paymentNew");}} style={{padding:"6px 14px",background:ORANGE_LIGHT,border:`1px solid ${ORANGE}`,borderRadius:16,color:ORANGE,fontSize:12,fontWeight:700,cursor:"pointer",marginRight:6}}>編集</button>
-              <button onClick={()=>setPaymentMethods(p=>p.filter(x=>x.id!==pm.id))} style={{padding:"6px 14px",background:"#FFEBEE",border:`1px solid ${RED}`,borderRadius:16,color:RED,fontSize:12,fontWeight:700,cursor:"pointer"}}>削除</button>
-            </div>
-          ))}
+          {/* カテゴリ編集と同じ iOS 長押しドラッグ機構。
+              sensors は App 直下で定義済みの dndSensors を流用(MouseSensor + TouchSensor + KeyboardSensor)。
+              永続化は useLocalStorage("cfo_paymentMethods") 経由で自動 → アプリ再起動後も順序保持。 */}
+          <DndContext
+            sensors={dndSensors}
+            collisionDetection={closestCenter}
+            onDragEnd={({ active, over }) => {
+              if (!over || active.id === over.id) return;
+              const oldIndex = paymentMethods.findIndex((pm) => pm.id === active.id);
+              const newIndex = paymentMethods.findIndex((pm) => pm.id === over.id);
+              if (oldIndex < 0 || newIndex < 0) return;
+              setPaymentMethods(arrayMove(paymentMethods, oldIndex, newIndex));
+            }}
+          >
+            <SortableContext items={paymentMethods.map((pm) => pm.id)} strategy={verticalListSortingStrategy}>
+              {paymentMethods.map((pm) => (
+                <SortablePaymentRow
+                  key={pm.id}
+                  pm={pm}
+                  onEdit={(p) => {
+                    setPaymentDraft({ label: p.label, color: p.color, closingDay: p.closingDay || "", withdrawalDay: p.withdrawalDay || "", bank: p.bank || "" });
+                    setEditingPaymentId(p.id);
+                    setMenuScreen("paymentNew");
+                  }}
+                  onRemove={(id) => setPaymentMethods((prev) => prev.filter((x) => x.id !== id))}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         </div>
       </div>
     );
@@ -1379,13 +1460,19 @@ export default function App() {
             <button style={S.navArrow} onClick={()=>setWeekBudgetMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};})}>›</button>
           </div>
           <div style={{margin:"0 12px",overflowX:"auto"}}>
-            <div style={{minWidth:380}}>
-              <div style={{display:"grid",gridTemplateColumns:"90px repeat(4,1fr)",gap:4,marginBottom:4}}>
+            {/* minWidth:440 = 90(cat label)+ 4fr(week cells)+ 56(合計列)+ 5×4(gap)、4fr≈274で週セルの1列幅を従来と同等に維持。 */}
+            <div style={{minWidth:440}}>
+              <div style={{display:"grid",gridTemplateColumns:"90px repeat(4,1fr) 56px",gap:4,marginBottom:4}}>
                 <div/>
                 {weeks.map(w=>(<div key={w.weekKey} style={{textAlign:"center",padding:"6px 2px",background:NAVY2,borderRadius:8,border:`1px solid ${BORDER}`}}><div style={{fontSize:10,fontWeight:700,color:TEXT_PRIMARY}}>第{w.weekNum}週</div><div style={{fontSize:8,color:TEXT_MUTED}}>{w.startStr}〜{w.endStr}</div></div>))}
+                {/* 合計列ヘッダ:週ヘッダと同構造・2行(日付行は visibility:hidden で高さ揃え)。NAVY3 + 破線 border で読み取り専用を示唆。 */}
+                <div style={{textAlign:"center",padding:"6px 2px",background:NAVY3,borderRadius:8,border:`1px dashed ${BORDER}`}}><div style={{fontSize:10,fontWeight:700,color:TEXT_MUTED}}>合計</div><div style={{fontSize:8,visibility:"hidden"}}>-</div></div>
               </div>
-              {expenseCats.map(cat=>(
-                <div key={cat.id} style={{display:"grid",gridTemplateColumns:"90px repeat(4,1fr)",gap:4,marginBottom:4}}>
+              {expenseCats.map(cat=>{
+                // そのカテゴリの週予算合計(第1〜第N週分)
+                const catTotal=weeks.reduce((s,w)=>s+(weekCatBudgets[`${w.weekKey}_${cat.id}`]||0),0);
+                return(
+                <div key={cat.id} style={{display:"grid",gridTemplateColumns:"90px repeat(4,1fr) 56px",gap:4,marginBottom:4}}>
                   <button onClick={()=>{setAllWeekTarget(cat);setAllWeekInput("");}} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 8px",background:CARD_BG,border:`1px solid ${BORDER}`,borderRadius:8,cursor:"pointer",textAlign:"left"}}>
                     <CatSvgIcon cat={cat} size={16}/><span style={{fontSize:10,color:TEXT_PRIMARY,fontWeight:500,lineHeight:1.2}}>{cat.label}</span>
                   </button>
@@ -1401,8 +1488,14 @@ export default function App() {
                       {val&&<div style={{fontSize:8,color:TEXT_MUTED}}>円</div>}
                     </button>
                   );})}
+                  {/* 合計列:div(button でない)= タップ不可。NAVY3 + 破線 border で週セルと区別。値は週セルと同じ書式。 */}
+                  <div style={{padding:"8px 4px",textAlign:"center",background:NAVY3,border:`1px dashed ${BORDER}`,borderRadius:8}}>
+                    <div style={{fontSize:10,fontWeight:700,color:catTotal>0?GOLD:TEXT_MUTED}}>{catTotal>0?catTotal.toLocaleString():"-"}</div>
+                    {catTotal>0&&<div style={{fontSize:8,color:TEXT_MUTED}}>円</div>}
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
           {allWeekTarget&&(
