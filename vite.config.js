@@ -63,6 +63,11 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         navigateFallback: '/index.html',
+        // デプロイ後の最初のリロードで即新コードに切替えるための 2 設定。
+        // これがないと「autoUpdate」モードでも新 SW が install 後 waiting に留まり、
+        // ユーザーがタブを完全に閉じない限り旧バンドルが serve され続けていた。
+        skipWaiting: true,   // 新 SW が install 後すぐ active 化
+        clientsClaim: true,  // 既に開いているクライアントも新 SW の制御下に取り込む
       },
       devOptions: {
         enabled: false,

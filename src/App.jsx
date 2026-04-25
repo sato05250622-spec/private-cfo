@@ -209,7 +209,12 @@ export default function App() {
     const v = getRewardDay();
     return v == null ? "" : String(v);
   });
-  const rewardDay = useMemo(() => getRewardDay(), [rewardDayDraft]);
+  // 保存ボタン押下時にこのカウンタをインクリメント → useMemo を再評価して最新値を読み直す。
+  // 保存タイミングが UI 上で明示される(「打鍵ごとに自動保存」より顧客への説明が明快)。
+  const [rewardDayCommitTick, setRewardDayCommitTick] = useState(0);
+  const rewardDay = useMemo(() => getRewardDay(), [rewardDayCommitTick]);
+  // 「保存しました」フラッシュ表示用(2 秒で自動的に消す)
+  const [accountSavedFlash, setAccountSavedFlash] = useState(false);
   const [inputPayment, setInputPayment] = useState("cash");
   const [showCalc, setShowCalc] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -1813,13 +1818,15 @@ export default function App() {
               <div key={i} style={{display:"flex",alignItems:"center",padding:"14px 16px",borderBottom:i<arr.length-1?`1px solid ${BORDER}`:"none",gap:12}}>
                 <span style={{fontSize:12,color:TEXT_SECONDARY,minWidth:80,fontWeight:500}}>{field.label}</span>
                 {field.label === "報酬日" ? (
-                  // controlled input:onChange ごとに setRewardDay() で localStorage 永続化。
-                  // ユーティリティ経由なので明日 Supabase profiles.reward_day へ差し替える際もここは触らない。
+                  // controlled input:onChange は draft state 更新のみ。
+                  // 永続化(localStorage 書き込み)は下の保存ボタン onClick で実行する。
+                  // ユーティリティ経由なので明日 Supabase profiles.reward_day へ差し替えても
+                  // 保存ボタンの中身を 1 行(setRewardDay → upsert call)に変えるだけで済む。
                   <input
                     type="text"
                     placeholder={field.placeholder}
                     value={rewardDayDraft}
-                    onChange={(e) => { const v = e.target.value; setRewardDayDraft(v); setRewardDay(v); }}
+                    onChange={(e) => setRewardDayDraft(e.target.value)}
                     style={{flex:1,border:"none",background:"transparent",fontSize:14,outline:"none",color:TEXT_PRIMARY,textAlign:"right"}}
                   />
                 ) : (
@@ -1829,7 +1836,18 @@ export default function App() {
             ))}
           </div>
           <div style={{margin:"16px 16px 0"}}>
-            <button style={{width:"100%",padding:"14px",background:GOLD_GRAD,border:"none",borderRadius:12,fontSize:14,fontWeight:700,color:"#0A1628",cursor:"pointer"}}>保存</button>
+            {/* 保存ボタン:報酬日のみ localStorage 書き込み(他項目は依然 stub)。
+                押下時に rewardDayCommitTick をインクリメントして全画面の rewardDay 派生値を再評価。
+                「保存しました」を 2 秒間ボタン上に上書き表示してユーザーに反映を可視化する。 */}
+            <button
+              onClick={() => {
+                setRewardDay(rewardDayDraft);
+                setRewardDayCommitTick(t => t + 1);
+                setAccountSavedFlash(true);
+                setTimeout(() => setAccountSavedFlash(false), 2000);
+              }}
+              style={{width:"100%",padding:"14px",background:GOLD_GRAD,border:"none",borderRadius:12,fontSize:14,fontWeight:700,color:"#0A1628",cursor:"pointer"}}
+            >{accountSavedFlash ? "保存しました" : "保存"}</button>
           </div>
           <LogoutButton />
           <div style={{height:20}}/>
