@@ -11,6 +11,10 @@ import {
 import { SVG_ICONS, ALL_SVG_KEYS } from "@shared/icons";
 import { RECUR_OPTIONS, COLOR_OPTIONS, PAYMENT_COLORS } from "@shared/categories";
 import { fmt, fmtMonth, toDateStr } from "@shared/format";
+import {
+  getRewardDay, setRewardDay,
+  cycleStart, cycleEnd, findCycleOfDate, weeksInCycle, weekInCycle, cycleLabel, isInCycle,
+} from "./utils/cycle";
 import { useExpenses } from "./hooks/useExpenses";
 import { useCategories } from "./hooks/useCategories";
 import { usePoints } from "./hooks/usePoints";
@@ -189,7 +193,7 @@ export default function App() {
   const [editIcon, setEditIcon] = useState("restaurant");
   const [editColor, setEditColor] = useState("#FF6B35");
   const [selectedDay, setSelectedDay] = useState(toDateStr(today));
-  const [expandedWeek, setExpandedWeek] = useState(Math.min(4, Math.ceil(today.getDate()/7)));
+  const [expandedWeek, setExpandedWeek] = useState(weekInCycle(today, getRewardDay()));
   const [weekBudgetInput, setWeekBudgetInput] = useState("");
   const [weekBudgets, setWeekBudgets] = useLocalStorage("cfo_weekBudgets", {});
   const [weekCatBudgets, setWeekCatBudgets] = useLocalStorage("cfo_weekCatBudgets", {});
@@ -197,6 +201,15 @@ export default function App() {
   const [catBudgetTarget, setCatBudgetTarget] = useState(null);
   const [catBudgetInput, setCatBudgetInput] = useState("");
   const [paymentMethods, setPaymentMethods] = useLocalStorage("cfo_paymentMethods", [{ id:"cash", label:"現金", color:"#4CAF50" }]);
+  // 報酬日(localStorage 永続化、空 → 1日起点フォールバック)。
+  // 数値 1-31 または "末" の文字列 1 つを保持。明日 Supabase profiles.reward_day へ移行予定。
+  // rewardDayDraft = アカウント設定の controlled input 用、入力ごとに setRewardDay() で localStorage へ書く。
+  // rewardDay は useMemo で rewardDayDraft の変化を deps に取り、useMemo / useEffect の再評価をトリガする。
+  const [rewardDayDraft, setRewardDayDraft] = useState(() => {
+    const v = getRewardDay();
+    return v == null ? "" : String(v);
+  });
+  const rewardDay = useMemo(() => getRewardDay(), [rewardDayDraft]);
   const [inputPayment, setInputPayment] = useState("cash");
   const [showCalc, setShowCalc] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -230,63 +243,121 @@ export default function App() {
   const [editingPaymentId, setEditingPaymentId] = useState(null);
   const longPressTimer = useRef(null);
 
-  const tmPrefix = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
+  // today が属するサイクルの year/month と日付範囲。
+  // 月予算キー / "今月" 判定 / 月別サマリ等、today を起点にした計算は全てここを通す。
+  const todayCycle = useMemo(() => findCycleOfDate(today, rewardDay), [rewardDay]);
+  const tmCycleStart = useMemo(() => toDateStr(cycleStart(todayCycle.year, todayCycle.month, rewardDay)), [todayCycle, rewardDay]);
+  const tmCycleEnd = useMemo(() => toDateStr(cycleEnd(todayCycle.year, todayCycle.month, rewardDay)), [todayCycle, rewardDay]);
+  // 月予算キーはサイクルベース(起点日が属する年月)。報酬日未設定時はカレンダー月と等価。
+  const monthBudgetKey = (catId) => `${todayCycle.year}-${todayCycle.month + 1}-${catId}`;
 
   const getCatBudgetRemain = (catId) => {
-    const bv = budgets[`${today.getFullYear()}-${today.getMonth()+1}-${catId}`];
+    const bv = budgets[monthBudgetKey(catId)];
     if (!bv) return null;
-    const spent = transactions.filter(t=>t.category===catId&&t.date.startsWith(tmPrefix)).reduce((s,t)=>s+t.amount,0);
+    const spent = transactions.filter(t=>t.category===catId&&t.date>=tmCycleStart&&t.date<=tmCycleEnd).reduce((s,t)=>s+t.amount,0);
     return bv - spent;
   };
 
   const budgetAlerts = useMemo(() => {
     const result = [];
     expenseCats.forEach(cat => {
-      const budget = budgets[`${today.getFullYear()}-${today.getMonth()+1}-${cat.id}`];
+      const budget = budgets[monthBudgetKey(cat.id)];
       if (!budget) return;
-      const spent = transactions.filter(t=>t.category===cat.id&&t.date.startsWith(tmPrefix)).reduce((s,t)=>s+t.amount,0);
+      const spent = transactions.filter(t=>t.category===cat.id&&t.date>=tmCycleStart&&t.date<=tmCycleEnd).reduce((s,t)=>s+t.amount,0);
       const pct = spent / budget * 100;
       if (pct >= 100) result.push({ cat, pct, spent, budget, level:"over" });
       else if (pct >= 80) result.push({ cat, pct, spent, budget, level:"warn" });
     });
     return result;
-  }, [transactions, budgets, expenseCats, tmPrefix]);
+  }, [transactions, budgets, expenseCats, tmCycleStart, tmCycleEnd, todayCycle]);
 
   const tmSummary = useMemo(() => {
-    const spent = transactions.filter(t=>t.date.startsWith(tmPrefix)).reduce((s,t)=>s+t.amount,0);
-    const budget = expenseCats.reduce((s,c)=>s+(budgets[`${today.getFullYear()}-${today.getMonth()+1}-${c.id}`]||0),0);
+    const spent = transactions.filter(t=>t.date>=tmCycleStart&&t.date<=tmCycleEnd).reduce((s,t)=>s+t.amount,0);
+    const budget = expenseCats.reduce((s,c)=>s+(budgets[monthBudgetKey(c.id)]||0),0);
     return { spent, budget, remain: budget - spent };
-  }, [transactions, budgets, expenseCats, tmPrefix]);
+  }, [transactions, budgets, expenseCats, tmCycleStart, tmCycleEnd, todayCycle]);
 
+  // weekSummary:calMonth(現在表示中のサイクル年月)に対応する週リスト + 集計。
+  // 報酬日サイクル準拠で weeksInCycle() を使用。週数は 4 or 5(端数週がある場合)。
   const weekSummary = useMemo(() => {
-    const {y,m} = calMonth;
-    const lastDayOfMonth = new Date(y,m+1,0).getDate();
-    const weeks = Array.from({length:4},(_,w)=>{
-      const startDay = 1 + w*7;
-      const endDay = w===3 ? lastDayOfMonth : Math.min(7+w*7, lastDayOfMonth);
-      const start=new Date(y,m,startDay);
-      const end=new Date(y,m,endDay);
-      const startStr=toDateStr(start); const endStr=toDateStr(end);
-      const exp=transactions.filter(t=>t.date>=startStr&&t.date<=endStr).reduce((s,t)=>s+t.amount,0);
-      const weekKey=`${y}-${m+1}-w${w+1}`;
-      const manualBudget=weekBudgets[weekKey]||null;
-      const catBudgetTotal = expenseCats.reduce((s,cat)=>s+(weekCatBudgets[`${weekKey}_${cat.id}`]||0),0);
-      return {label:`第${w+1}週`,startStr,endStr,expense:exp,weekKey,weekNum:w+1,manualBudget,catBudgetTotal};
+    const {y, m} = calMonth;
+    const cycWeeks = weeksInCycle(y, m, rewardDay);
+    const enriched = cycWeeks.map((w) => {
+      const startStr = toDateStr(w.startDate);
+      const endStr = toDateStr(w.endDate);
+      const exp = transactions.filter(t => t.date >= startStr && t.date <= endStr).reduce((s,t) => s + t.amount, 0);
+      const manualBudget = weekBudgets[w.weekKey] != null ? weekBudgets[w.weekKey] : null;
+      const catBudgetTotal = expenseCats.reduce((s, cat) => s + (weekCatBudgets[`${w.weekKey}_${cat.id}`] || 0), 0);
+      return {
+        label: `第${w.weekNum}週`,
+        startStr, endStr,
+        expense: exp,
+        weekKey: w.weekKey,
+        weekNum: w.weekNum,
+        manualBudget, catBudgetTotal,
+      };
     });
-    return weeks.map(w=>{
+    return enriched.map(w => {
       const weekBudget = w.manualBudget !== null ? w.manualBudget : w.catBudgetTotal > 0 ? w.catBudgetTotal : 0;
       const isOver = weekBudget > 0 && w.expense > weekBudget;
       const isManual = w.manualBudget !== null;
       return {...w, weekBudget, isOver, isManual};
     });
-  }, [calMonth, transactions, budgets, expenseCats, weekBudgets, weekCatBudgets]);
+  }, [calMonth, transactions, budgets, expenseCats, weekBudgets, weekCatBudgets, rewardDay]);
 
-  const calDays=useMemo(()=>{const {y,m}=calMonth;const first=new Date(y,m,1);const last=new Date(y,m+1,0);const days=[];for(let i=0;i<first.getDay();i++){const d=new Date(y,m,1-(first.getDay()-i));days.push({date:d,current:false});}for(let i=1;i<=last.getDate();i++)days.push({date:new Date(y,m,i),current:true});while(days.length%7!==0){const l=days[days.length-1].date;const d=new Date(l);d.setDate(d.getDate()+1);days.push({date:d,current:false});}return days;},[calMonth]);
+  // calDays:カレンダー画面の日付グリッド。サイクル(cycleStart..cycleEnd)を 7 列の Sun-Sat グリッドに展開。
+  // 範囲外の日は current:false で薄く描画。報酬日未設定なら従来のカレンダー月そのまま。
+  const calDays = useMemo(() => {
+    const {y, m} = calMonth;
+    const start = cycleStart(y, m, rewardDay);
+    const end = cycleEnd(y, m, rewardDay);
+    const days = [];
+    // 先頭の空白セル(start の曜日まで前日埋め)
+    for (let i = 0; i < start.getDay(); i++) {
+      const d = new Date(start);
+      d.setDate(d.getDate() - (start.getDay() - i));
+      days.push({date: d, current: false});
+    }
+    // 本体:start 〜 end
+    const cur = new Date(start);
+    while (cur <= end) {
+      days.push({date: new Date(cur), current: true});
+      cur.setDate(cur.getDate() + 1);
+    }
+    // 末尾埋め(7 の倍数まで)
+    while (days.length % 7 !== 0) {
+      const last = days[days.length - 1].date;
+      const d = new Date(last);
+      d.setDate(d.getDate() + 1);
+      days.push({date: d, current: false});
+    }
+    return days;
+  }, [calMonth, rewardDay]);
+
   const calTxMap=useMemo(()=>{const map={};transactions.forEach(t=>{map[t.date]=(map[t.date]||0)+t.amount;});return map;},[transactions]);
-  const reportTxs=useMemo(()=>{const {y,m}=reportMonth;const prefix=`${y}-${String(m+1).padStart(2,'0')}`;return transactions.filter(t=>t.date.startsWith(prefix));},[transactions,reportMonth]);
+
+  // reportTxs:選択中サイクル(reportMonth)範囲内の取引のみ。
+  // 旧:date.startsWith(YYYY-MM)/ 新:cycleStart..cycleEnd の文字列範囲比較
+  const reportTxs = useMemo(() => {
+    const {y, m} = reportMonth;
+    const sStr = toDateStr(cycleStart(y, m, rewardDay));
+    const eStr = toDateStr(cycleEnd(y, m, rewardDay));
+    return transactions.filter(t => t.date >= sStr && t.date <= eStr);
+  }, [transactions, reportMonth, rewardDay]);
   const reportExpense=reportTxs.reduce((s,t)=>s+t.amount,0);
   const catBreakdown=useMemo(()=>{const map={};reportTxs.forEach(t=>{map[t.category]=(map[t.category]||0)+t.amount;});return expenseCats.filter(c=>map[c.id]).map(c=>({name:c.label,value:map[c.id],color:c.color}));},[reportTxs,expenseCats]);
-  const yearlyData=useMemo(()=>Array.from({length:12},(_,m)=>{const prefix=`${reportYear}-${String(m+1).padStart(2,'0')}`;return{name:`${m+1}月`,expense:transactions.filter(t=>t.date.startsWith(prefix)).reduce((s,t)=>s+t.amount,0)};}),[transactions,reportYear]);
+
+  // yearlyData:12 サイクル(各カレンダー月起点)を独立に集計。
+  // 報酬日 25 なら 5月分 = 5/25-6/24 のように、隣接サイクルが同じ取引を重複カウントしないよう
+  // 各サイクル range で個別 filter する。
+  const yearlyData = useMemo(() => Array.from({length: 12}, (_, m) => {
+    const sStr = toDateStr(cycleStart(reportYear, m, rewardDay));
+    const eStr = toDateStr(cycleEnd(reportYear, m, rewardDay));
+    return {
+      name: `${m + 1}月`,
+      expense: transactions.filter(t => t.date >= sStr && t.date <= eStr).reduce((s, t) => s + t.amount, 0),
+    };
+  }), [transactions, reportYear, rewardDay]);
   const yearlyTotal=yearlyData.reduce((s,d)=>s+d.expense,0);
 
   const budgetKey=(cat)=>`${budgetMonth.y}-${budgetMonth.m+1}-${cat}`;
@@ -299,10 +370,12 @@ export default function App() {
     return weekKeys.reduce((total,wKey)=>total+expenseCats.reduce((s,cat)=>s+(weekCatBudgets[`${wKey}_${cat.id}`]||0),0),0);
   };
 
-  const budgetPrefix=`${budgetMonth.y}-${String(budgetMonth.m+1).padStart(2,'0')}`;
-  const catSpending=(catId)=>transactions.filter(t=>t.category===catId&&t.date.startsWith(budgetPrefix)).reduce((s,t)=>s+t.amount,0);
+  // 予算画面の集計範囲もサイクルベース(報酬日未設定時はカレンダー月と等価)
+  const budgetCycleStartStr = toDateStr(cycleStart(budgetMonth.y, budgetMonth.m, rewardDay));
+  const budgetCycleEndStr = toDateStr(cycleEnd(budgetMonth.y, budgetMonth.m, rewardDay));
+  const catSpending=(catId)=>transactions.filter(t=>t.category===catId&&t.date>=budgetCycleStartStr&&t.date<=budgetCycleEndStr).reduce((s,t)=>s+t.amount,0);
   const totalBudget=getEffectiveMonthBudget(budgetMonth.y, budgetMonth.m);
-  const totalSpending=transactions.filter(t=>t.date.startsWith(budgetPrefix)).reduce((s,t)=>s+t.amount,0);
+  const totalSpending=transactions.filter(t=>t.date>=budgetCycleStartStr&&t.date<=budgetCycleEndStr).reduce((s,t)=>s+t.amount,0);
   const openBudgetModal=()=>{const draft={};expenseCats.forEach(c=>{const b=getBudget(c.id);if(b)draft[c.id]=String(b);});setBudgetDraft(draft);setShowBudgetModal(true);};
   const saveBudgets=()=>{const next={...budgets};expenseCats.forEach(c=>{const k=budgetKey(c.id);if(budgetDraft[c.id]&&!isNaN(Number(budgetDraft[c.id])))next[k]=Number(budgetDraft[c.id]);else delete next[k];});setBudgets(next);setShowBudgetModal(false);};
   const searchResults=useMemo(()=>{if(!searchQuery.trim())return transactions;const q=searchQuery.toLowerCase();return transactions.filter(t=>{const cat=expenseCats.find(c=>c.id===t.category);return t.memo.toLowerCase().includes(q)||(cat&&cat.label.toLowerCase().includes(q))||String(t.amount).includes(q);});},[searchQuery,transactions,expenseCats]);
@@ -361,7 +434,7 @@ export default function App() {
     list.forEach((r) => {
       const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(r.day || 1).padStart(2, '0')}`;
       const exists = transactions.find(
-        (t) => t.memo === r.memo && t.category === r.category && t.date.startsWith(tmPrefix),
+        (t) => t.memo === r.memo && t.category === r.category && t.date >= tmCycleStart && t.date <= tmCycleEnd,
       );
       if (exists) return;
       addExpense({
@@ -408,8 +481,8 @@ export default function App() {
         if(isInvalid){setWeekCatBudgets(p=>{const next={...p};delete next[`${catBudgetTarget._weekKey}_${catBudgetTarget.id}`];return next;});}
         else{setWeekCatBudgets(p=>({...p,[`${catBudgetTarget._weekKey}_${catBudgetTarget.id}`]:num}));}
       } else {
-        if(isInvalid){setBudgets(prev=>{const next={...prev};delete next[`${today.getFullYear()}-${today.getMonth()+1}-${catBudgetTarget.id}`];return next;});}
-        else{setBudgets(prev=>({...prev,[`${today.getFullYear()}-${today.getMonth()+1}-${catBudgetTarget.id}`]:num}));}
+        if(isInvalid){setBudgets(prev=>{const next={...prev};delete next[monthBudgetKey(catBudgetTarget.id)];return next;});}
+        else{setBudgets(prev=>({...prev,[monthBudgetKey(catBudgetTarget.id)]:num}));}
       }
       setShowCatBudgetModal(false);setCatBudgetInput(""); return;
     }
@@ -707,12 +780,23 @@ export default function App() {
   };
 
   const renderDaily = () => {
-    const weekNum = Math.min(4, Math.ceil(inputDate.getDate()/7));
-    const thisWeekData = weekSummary[weekNum-1] || {};
-    const weekBudget = thisWeekData.weekBudget || 0;
-    const weekStart = new Date(inputDate.getFullYear(),inputDate.getMonth(),1+(weekNum-1)*7);
-    const lastDayOfInputMonth = new Date(inputDate.getFullYear(),inputDate.getMonth()+1,0).getDate();
-    const weekEnd = new Date(inputDate.getFullYear(),inputDate.getMonth(), weekNum===4 ? lastDayOfInputMonth : Math.min(weekNum*7, lastDayOfInputMonth));
+    // inputDate が属するサイクルの週情報を取得(報酬日基準)。
+    // weekSummary は calMonth ベースなので、別サイクルにいるときは inputDate のサイクル週で再計算する。
+    const inputCycle = findCycleOfDate(inputDate, rewardDay);
+    const inputCycWeeks = weeksInCycle(inputCycle.year, inputCycle.month, rewardDay);
+    const weekNum = weekInCycle(inputDate, rewardDay);
+    const thisWeek = inputCycWeeks[weekNum - 1] || inputCycWeeks[0];
+    // weekSummary は calMonth(画面選択中の月)用、inputDate の月と同じなら使い、違うなら個別計算。
+    const weekBudgetFromSummary = (calMonth.y === inputCycle.year && calMonth.m === inputCycle.month)
+      ? (weekSummary[weekNum - 1]?.weekBudget || 0)
+      : (() => {
+          const manual = weekBudgets[thisWeek.weekKey];
+          if (manual != null) return manual;
+          return expenseCats.reduce((s, cat) => s + (weekCatBudgets[`${thisWeek.weekKey}_${cat.id}`] || 0), 0);
+        })();
+    const weekBudget = weekBudgetFromSummary;
+    const weekStart = thisWeek.startDate;
+    const weekEnd = thisWeek.endDate;
     const weekExp = transactions.filter(t=>t.date>=toDateStr(weekStart)&&t.date<=toDateStr(weekEnd)).reduce((s,t)=>s+t.amount,0);
     const weekRemain = weekBudget - weekExp;
     const weekRemainDays = Math.max(1, Math.ceil((weekEnd - inputDate) / (1000*60*60*24)) + 1);
@@ -765,12 +849,11 @@ export default function App() {
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,padding:"8px 14px 0",background:NAVY}}>
           {expenseCats.map(cat=>{
             const isSelected=inputCategory===cat.id;
-            const currentWeekNum2 = Math.min(4, Math.ceil(inputDate.getDate()/7));
-            const wKey = `${inputDate.getFullYear()}-${inputDate.getMonth()+1}-w${currentWeekNum2}`;
+            // inputDate が属するサイクルの「現在週」のキーで予算/支出を引く
+            const wKey = thisWeek.weekKey;
             const weekCatBudget = weekCatBudgets[`${wKey}_${cat.id}`] || 0;
-            const lastDay2 = new Date(inputDate.getFullYear(),inputDate.getMonth()+1,0).getDate();
-            const wStart = toDateStr(new Date(inputDate.getFullYear(),inputDate.getMonth(),1+(currentWeekNum2-1)*7));
-            const wEnd = toDateStr(new Date(inputDate.getFullYear(),inputDate.getMonth(), currentWeekNum2===4?lastDay2:Math.min(currentWeekNum2*7,lastDay2)));
+            const wStart = toDateStr(thisWeek.startDate);
+            const wEnd = toDateStr(thisWeek.endDate);
             const weekCatSpent = transactions.filter(t=>t.category===cat.id&&t.date>=wStart&&t.date<=wEnd).reduce((s,t)=>s+t.amount,0);
             const weekRemainCat = weekCatBudget>0 ? weekCatBudget - weekCatSpent : null;
             const isOver = weekRemainCat!==null&&weekRemainCat<0;
@@ -805,15 +888,17 @@ export default function App() {
 
   const renderDayView = () => {
     const {y,m}=calMonth;
-    const monthPrefix=`${y}-${String(m+1).padStart(2,'0')}`;
-    const monthTxs=[...transactions].filter(t=>t.date.startsWith(monthPrefix)).reverse();
+    // サイクル範囲(報酬日設定済み = 5/25-6/24 など、未設定 = 5/1-5/31)で取引フィルタ
+    const cycSStr = toDateStr(cycleStart(y, m, rewardDay));
+    const cycEStr = toDateStr(cycleEnd(y, m, rewardDay));
+    const monthTxs=[...transactions].filter(t=>t.date>=cycSStr&&t.date<=cycEStr).reverse();
     const groupedByDate = {};
     monthTxs.forEach(t=>{if(!groupedByDate[t.date])groupedByDate[t.date]=[];groupedByDate[t.date].push(t);});
     return (
       <div>
         <div style={{...S.monthNav,justifyContent:"space-between",padding:"8px 12px"}}>
           <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};});setSelectedDay(null);}}>‹</button>
-          <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{fmtMonth(y,m)}</span>
+          <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,rewardDay)}</span>
           <div style={{display:"flex",alignItems:"center",gap:4}}>
             <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};});setSelectedDay(null);}}>›</button>
             <button onClick={()=>setShowSearch(true)} style={{background:"none",border:"none",color:TEXT_MUTED,cursor:"pointer",fontSize:13,padding:"4px 6px"}}>🔍</button>
@@ -851,7 +936,7 @@ export default function App() {
   // ============================================================
   const renderWeekly = () => {
     const {y,m}=calMonth;
-    const currentWeekNum = Math.min(4, Math.ceil(today.getDate()/7));
+    const currentWeekNum = weekInCycle(today, rewardDay);
 
     return (
       <div>
@@ -860,9 +945,9 @@ export default function App() {
           <span style={{width:40}}/>
         </div>
         <div style={S.monthNav}>
-          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m-1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===today.getFullYear()&&nm===today.getMonth();setExpandedWeek(isNowMonth?Math.min(4,Math.ceil(today.getDate()/7)):null);return{y:ny,m:nm};});}}>‹</button>
-          <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{fmtMonth(y,m)}</span>
-          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m+1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===today.getFullYear()&&nm===today.getMonth();setExpandedWeek(isNowMonth?Math.min(4,Math.ceil(today.getDate()/7)):null);return{y:ny,m:nm};});}}>›</button>
+          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m-1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===today.getFullYear()&&nm===today.getMonth();setExpandedWeek(isNowMonth?weekInCycle(today,rewardDay):null);return{y:ny,m:nm};});}}>‹</button>
+          <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,rewardDay)}</span>
+          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m+1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===today.getFullYear()&&nm===today.getMonth();setExpandedWeek(isNowMonth?weekInCycle(today,rewardDay):null);return{y:ny,m:nm};});}}>›</button>
         </div>
 
         <div style={{background:CARD_BG,margin:"8px 0 0",padding:"14px 18px"}}>
@@ -871,7 +956,7 @@ export default function App() {
             // 今月表示中だけ今週を先頭に、それ以外は第1週から順番
             const isCurrentMonth = y===today.getFullYear() && m===today.getMonth();
             if(!isCurrentMonth) return a.weekNum-b.weekNum;
-            const cur = Math.min(4, Math.ceil(today.getDate()/7));
+            const cur = weekInCycle(today, rewardDay);
             if(a.weekNum===cur) return -1;
             if(b.weekNum===cur) return 1;
             return a.weekNum-b.weekNum;
@@ -965,8 +1050,9 @@ export default function App() {
             </div>
           </div>
           {(()=>{
-            const prefix=`${y}-${String(m+1).padStart(2,'0')}`;
-            const monthTotal=transactions.filter(t=>t.date.startsWith(prefix)).reduce((s,t)=>s+t.amount,0);
+            const sStr=toDateStr(cycleStart(y,m,rewardDay));
+            const eStr=toDateStr(cycleEnd(y,m,rewardDay));
+            const monthTotal=transactions.filter(t=>t.date>=sStr&&t.date<=eStr).reduce((s,t)=>s+t.amount,0);
             return(
               <button onClick={()=>setShowMonthSummary(true)} style={{background:NAVY3,border:`1px solid ${GOLD}66`,borderRadius:16,padding:"4px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:3,flexShrink:0}}>
                 <span style={{fontSize:10,fontWeight:700,color:GOLD}}>現金支出</span>
@@ -978,7 +1064,7 @@ export default function App() {
           <>
             <div style={S.monthNav}>
               <button style={S.navArrow} onClick={()=>setReportMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};})}>‹</button>
-              <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{fmtMonth(y,m)}</span>
+              <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,rewardDay)}</span>
               <button style={S.navArrow} onClick={()=>setReportMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};})}>›</button>
             </div>
             <SummaryBar spent={reportExpense} budget={rBudget} remain={rBudget-reportExpense} labelBudget="月の予算" labelSpent="月の支出" labelRemain="月の残予算"/>
@@ -1447,8 +1533,9 @@ export default function App() {
 
     if(menuScreen==="weekBudgetSetting"){
       const y=weekBudgetMonth.y,m=weekBudgetMonth.m;
-      const weeks=[];let d=new Date(y,m,1);let weekNum=1;
-      while(d.getMonth()===m){const startDay=d.getDate();const lastDay=new Date(y,m+1,0).getDate();let endDay=Math.min(startDay+6,lastDay);if(weekNum===4)endDay=lastDay;const weekKey=`${y}-${m+1}-w${weekNum}`;weeks.push({weekNum,weekKey,startStr:`${m+1}/${startDay}`,endStr:`${m+1}/${endDay}`});weekNum++;d=new Date(y,m,endDay+1);if(weekNum>4)break;}
+      // weeks 配列はサイクルベース。報酬日設定済みなら 4-5 週、未設定なら従来 4 週。
+      // {weekNum, weekKey, startStr, endStr} の形は従来互換、UI 側のグリッドが動的列数に対応する。
+      const weeks = weeksInCycle(y, m, rewardDay);
       const prevM=m===0?11:m-1;const prevY=m===0?y-1:y;
       // 先月コピーも 0 を尊重:truthy チェックだと prev が 0 のときにコピーされないので null 判定に変更。
       const copyLastMonth=()=>{const next={...weekCatBudgets};weeks.forEach(w=>{expenseCats.forEach(cat=>{const prevKey=`${prevY}-${prevM+1}-w${w.weekNum}_${cat.id}`;const thisKey=`${w.weekKey}_${cat.id}`;if(weekCatBudgets[prevKey]!=null)next[thisKey]=weekCatBudgets[prevKey];});});setWeekCatBudgets(next);};
@@ -1465,13 +1552,14 @@ export default function App() {
           <div style={{padding:"8px 12px",fontSize:10,color:TEXT_MUTED}}>カテゴリ名 → 全週統一　／　金額タップ → その週のみ</div>
           <div style={S.monthNav}>
             <button style={S.navArrow} onClick={()=>setWeekBudgetMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};})}>‹</button>
-            <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{y}年{m+1}月</span>
+            <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,rewardDay)}</span>
             <button style={S.navArrow} onClick={()=>setWeekBudgetMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};})}>›</button>
           </div>
           <div style={{margin:"0 12px",overflowX:"auto"}}>
-            {/* minWidth:440 = 90(cat label)+ 4fr(week cells)+ 56(合計列)+ 5×4(gap)、4fr≈274で週セルの1列幅を従来と同等に維持。 */}
-            <div style={{minWidth:440}}>
-              <div style={{display:"grid",gridTemplateColumns:"90px repeat(4,1fr) 56px",gap:4,marginBottom:4}}>
+            {/* minWidth は週数に応じて動的:90(cat) + 週列(weeks.length × ~70) + 56(合計) + gap。
+                報酬日設定で 5 週になっても横スクロールで対応可能。 */}
+            <div style={{minWidth:90 + weeks.length * 68 + 56 + (weeks.length + 2) * 4}}>
+              <div style={{display:"grid",gridTemplateColumns:`90px repeat(${weeks.length},1fr) 56px`,gap:4,marginBottom:4}}>
                 <div/>
                 {weeks.map(w=>(<div key={w.weekKey} style={{textAlign:"center",padding:"6px 2px",background:NAVY2,borderRadius:8,border:`1px solid ${BORDER}`}}><div style={{fontSize:10,fontWeight:700,color:TEXT_PRIMARY}}>第{w.weekNum}週</div><div style={{fontSize:8,color:TEXT_MUTED}}>{w.startStr}〜{w.endStr}</div></div>))}
                 {/* 合計列ヘッダ:週ヘッダと同構造・2行(日付行は visibility:hidden で高さ揃え)。NAVY3 + 破線 border で読み取り専用を示唆。 */}
@@ -1483,7 +1571,7 @@ export default function App() {
                 const hasAnyBudget=weeks.some(w=>weekCatBudgets[`${w.weekKey}_${cat.id}`]!=null);
                 const catTotal=weeks.reduce((s,w)=>s+(weekCatBudgets[`${w.weekKey}_${cat.id}`]??0),0);
                 return(
-                <div key={cat.id} style={{display:"grid",gridTemplateColumns:"90px repeat(4,1fr) 56px",gap:4,marginBottom:4}}>
+                <div key={cat.id} style={{display:"grid",gridTemplateColumns:`90px repeat(${weeks.length},1fr) 56px`,gap:4,marginBottom:4}}>
                   <button onClick={()=>{setAllWeekTarget(cat);setAllWeekInput("");}} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 8px",background:CARD_BG,border:`1px solid ${BORDER}`,borderRadius:8,cursor:"pointer",textAlign:"left"}}>
                     <CatSvgIcon cat={cat} size={16}/><span style={{fontSize:10,color:TEXT_PRIMARY,fontWeight:500,lineHeight:1.2}}>{cat.label}</span>
                   </button>
@@ -1670,7 +1758,8 @@ export default function App() {
     );
 
     if(menuScreen==="currentMonthReport"){
-      const y=today.getFullYear(), m=today.getMonth()+1;
+      // 今日が属するサイクルの y / 1-indexed month を表示用に取得。
+      const y=todayCycle.year, m=todayCycle.month+1;
       return(
         <div style={{minHeight:"100vh",background:NAVY}}>
           <div style={S.overlayHeader}>
@@ -1720,10 +1809,22 @@ export default function App() {
             <span style={{width:40}}/>
           </div>
           <div style={{margin:"12px 16px 0",background:CARD_BG,borderRadius:12,overflow:"hidden",border:`1px solid ${BORDER}`}}>
-            {[{label:"名前",placeholder:"例：山田 太郎",type:"text"},{label:"メールアドレス",placeholder:"例：example@mail.com",type:"email"},{label:"電話番号",placeholder:"例：090-1234-5678",type:"tel"},{label:"報酬日",placeholder:"例：25日",type:"text"},{label:"管理スタート日",placeholder:"例：2026/04/01",type:"date"}].map((field,i,arr)=>(
+            {[{label:"名前",placeholder:"例：山田 太郎",type:"text"},{label:"メールアドレス",placeholder:"例：example@mail.com",type:"email"},{label:"電話番号",placeholder:"例：090-1234-5678",type:"tel"},{label:"報酬日",placeholder:"例：25 または 末",type:"text"},{label:"管理スタート日",placeholder:"例：2026/04/01",type:"date"}].map((field,i,arr)=>(
               <div key={i} style={{display:"flex",alignItems:"center",padding:"14px 16px",borderBottom:i<arr.length-1?`1px solid ${BORDER}`:"none",gap:12}}>
                 <span style={{fontSize:12,color:TEXT_SECONDARY,minWidth:80,fontWeight:500}}>{field.label}</span>
-                <input type={field.type} placeholder={field.placeholder} style={{flex:1,border:"none",background:"transparent",fontSize:14,outline:"none",color:TEXT_PRIMARY,textAlign:"right"}}/>
+                {field.label === "報酬日" ? (
+                  // controlled input:onChange ごとに setRewardDay() で localStorage 永続化。
+                  // ユーティリティ経由なので明日 Supabase profiles.reward_day へ差し替える際もここは触らない。
+                  <input
+                    type="text"
+                    placeholder={field.placeholder}
+                    value={rewardDayDraft}
+                    onChange={(e) => { const v = e.target.value; setRewardDayDraft(v); setRewardDay(v); }}
+                    style={{flex:1,border:"none",background:"transparent",fontSize:14,outline:"none",color:TEXT_PRIMARY,textAlign:"right"}}
+                  />
+                ) : (
+                  <input type={field.type} placeholder={field.placeholder} style={{flex:1,border:"none",background:"transparent",fontSize:14,outline:"none",color:TEXT_PRIMARY,textAlign:"right"}}/>
+                )}
               </div>
             ))}
           </div>
@@ -1757,9 +1858,9 @@ export default function App() {
                 ? <div style={{padding:"24px",textAlign:"center",fontSize:12,color:TEXT_MUTED}}>該当する月がありません</div>
                 : filtered.map(({y,m,label},i)=>(
                   <div key={label} onClick={()=>setMenuScreen(`report_${y}_${m}`)} style={{display:"flex",alignItems:"center",padding:"10px 16px",borderBottom:i<filtered.length-1?`1px solid ${BORDER}`:"none",cursor:"pointer",gap:10}}>
-                    <div style={{width:6,height:6,borderRadius:"50%",background:y===today.getFullYear()&&m===today.getMonth()+1?GOLD:BORDER,flexShrink:0}}/>
-                    <span style={{flex:1,fontSize:13,fontWeight:y===today.getFullYear()&&m===today.getMonth()+1?600:400,color:y===today.getFullYear()&&m===today.getMonth()+1?TEXT_PRIMARY:TEXT_SECONDARY}}>{label}</span>
-                    {y===today.getFullYear()&&m===today.getMonth()+1&&<span style={{fontSize:9,color:GOLD,background:`${GOLD}18`,borderRadius:6,padding:"2px 6px",fontWeight:600}}>今月</span>}
+                    <div style={{width:6,height:6,borderRadius:"50%",background:y===todayCycle.year&&m===todayCycle.month+1?GOLD:BORDER,flexShrink:0}}/>
+                    <span style={{flex:1,fontSize:13,fontWeight:y===todayCycle.year&&m===todayCycle.month+1?600:400,color:y===todayCycle.year&&m===todayCycle.month+1?TEXT_PRIMARY:TEXT_SECONDARY}}>{label}</span>
+                    {y===todayCycle.year&&m===todayCycle.month+1&&<span style={{fontSize:9,color:GOLD,background:`${GOLD}18`,borderRadius:6,padding:"2px 6px",fontWeight:600}}>今月</span>}
                     <span style={{color:TEXT_MUTED,fontSize:12}}>›</span>
                   </div>
                 ));
@@ -1858,10 +1959,16 @@ export default function App() {
 
       {/* 今月サマリーモーダル */}
       {showMonthSummary&&(()=>{
-        const y=reportMonth.y;const m=reportMonth.m+1;const prefix=`${y}-${String(m).padStart(2,'0')}`;
+        // y は カレンダー年、m は 1-indexed 月。サイクル範囲は cycSStr-cycEStr で表現。
+        // ※ 締日(closingDay)依存の cardBreakdown 計算は支払い方法側のロジックなので
+        //    報酬日サイクルとは別概念のまま据え置き(下のロジックを変更しない)。
+        const y=reportMonth.y;const m=reportMonth.m+1;
+        const cycSStr=toDateStr(cycleStart(reportMonth.y,reportMonth.m,rewardDay));
+        const cycEStr=toDateStr(cycleEnd(reportMonth.y,reportMonth.m,rewardDay));
+        const prefix=`${y}-${String(m).padStart(2,'0')}`; // 締日計算側で引き続き使用
         const cashId="cash";const cardPms=paymentMethods.filter(p=>p.id!==cashId);
-        const cashTxs=transactions.filter(t=>t.date.startsWith(prefix)&&t.payment===cashId);const cashTotal=cashTxs.reduce((s,t)=>s+t.amount,0);
-        const cardBreakdown=cardPms.map(pm=>{let pmTxs;if(pm.closingDay&&pm.closingDay!=="末"){const closingDay=Number(pm.closingDay);const prevMonth=m===1?12:m-1;const prevYear=m===1?y-1:y;const prevLastDay=new Date(prevYear,prevMonth,0).getDate();const fromDay=Math.min(closingDay+1,prevLastDay);const fromDate=`${prevYear}-${String(prevMonth).padStart(2,'0')}-${String(fromDay).padStart(2,'0')}`;const thisLastDay=new Date(y,m,0).getDate();const toDay=Math.min(closingDay,thisLastDay);const toDate=`${y}-${String(m).padStart(2,'0')}-${String(toDay).padStart(2,'0')}`;pmTxs=transactions.filter(t=>t.payment===pm.id&&t.date>=fromDate&&t.date<=toDate);}else if(pm.closingDay==="末"){const prevMonth=m===1?12:m-1;const prevYear=m===1?y-1:y;const fromDate=`${prevYear}-${String(prevMonth).padStart(2,'0')}-01`;const lastDay=new Date(y,m,0).getDate();const toDate=`${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;pmTxs=transactions.filter(t=>t.payment===pm.id&&t.date>=fromDate&&t.date<=toDate);}else{pmTxs=transactions.filter(t=>t.payment===pm.id&&t.date.startsWith(prefix));}const total=pmTxs.reduce((s,t)=>s+t.amount,0);return{pm,total,pmTxs};});
+        const cashTxs=transactions.filter(t=>t.date>=cycSStr&&t.date<=cycEStr&&t.payment===cashId);const cashTotal=cashTxs.reduce((s,t)=>s+t.amount,0);
+        const cardBreakdown=cardPms.map(pm=>{let pmTxs;if(pm.closingDay&&pm.closingDay!=="末"){const closingDay=Number(pm.closingDay);const prevMonth=m===1?12:m-1;const prevYear=m===1?y-1:y;const prevLastDay=new Date(prevYear,prevMonth,0).getDate();const fromDay=Math.min(closingDay+1,prevLastDay);const fromDate=`${prevYear}-${String(prevMonth).padStart(2,'0')}-${String(fromDay).padStart(2,'0')}`;const thisLastDay=new Date(y,m,0).getDate();const toDay=Math.min(closingDay,thisLastDay);const toDate=`${y}-${String(m).padStart(2,'0')}-${String(toDay).padStart(2,'0')}`;pmTxs=transactions.filter(t=>t.payment===pm.id&&t.date>=fromDate&&t.date<=toDate);}else if(pm.closingDay==="末"){const prevMonth=m===1?12:m-1;const prevYear=m===1?y-1:y;const fromDate=`${prevYear}-${String(prevMonth).padStart(2,'0')}-01`;const lastDay=new Date(y,m,0).getDate();const toDate=`${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;pmTxs=transactions.filter(t=>t.payment===pm.id&&t.date>=fromDate&&t.date<=toDate);}else{pmTxs=transactions.filter(t=>t.payment===pm.id&&t.date>=cycSStr&&t.date<=cycEStr);}const total=pmTxs.reduce((s,t)=>s+t.amount,0);return{pm,total,pmTxs};});
         const cardTotal=cardBreakdown.reduce((s,c)=>s+c.total,0);const grandTotal=cashTotal+cardTotal;
         return(
           <div onClick={()=>setShowMonthSummary(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex",alignItems:"flex-end"}}>
@@ -2128,7 +2235,7 @@ export default function App() {
           <div style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:24}}>
             <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px 12px",borderBottom:`1px solid ${BORDER}`}}>
               <CatSvgIcon cat={catBudgetTarget} size={28}/>
-              <div style={{flex:1}}><div style={{fontWeight:700,fontSize:15,color:TEXT_PRIMARY}}>{catBudgetTarget.label}</div><div style={{fontSize:11,color:TEXT_MUTED}}>{catBudgetTarget._isWeek?"今週の予算を設定":`${today.getMonth()+1}月の予算を設定`}</div></div>
+              <div style={{flex:1}}><div style={{fontWeight:700,fontSize:15,color:TEXT_PRIMARY}}>{catBudgetTarget.label}</div><div style={{fontSize:11,color:TEXT_MUTED}}>{catBudgetTarget._isWeek?"今週の予算を設定":`${todayCycle.month+1}月の予算を設定`}</div></div>
               <button onClick={()=>setShowCatBudgetModal(false)} style={{background:"none",border:"none",fontSize:22,color:TEXT_MUTED,cursor:"pointer"}}>✕</button>
             </div>
             <div style={{padding:"14px 20px 10px",display:"flex",alignItems:"baseline",justifyContent:"flex-end",gap:6}}>
