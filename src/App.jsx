@@ -1562,7 +1562,7 @@ export default function App() {
           </div>
           {showDayCalc&&(
             <div onClick={()=>setShowDayCalc(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
-              <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:30}}>
+              <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(30px + env(safe-area-inset-bottom))"}}>
                 <div style={{padding:"14px 20px 10px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                   <span style={{fontSize:13,color:TEXT_SECONDARY}}>{showDayCalc==="closing"?"締日":"引き落とし日"}</span>
                   <div style={{display:"flex",alignItems:"baseline",gap:4}}>
@@ -1669,7 +1669,7 @@ export default function App() {
           </div>
           {allWeekTarget&&(
             <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:300,display:"flex",alignItems:"flex-end"}}>
-              <div style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:24}}>
+              <div style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(24px + env(safe-area-inset-bottom))"}}>
                 <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px 12px",borderBottom:`1px solid ${BORDER}`}}>
                   <CatSvgIcon cat={allWeekTarget} size={28}/>
                   <div style={{flex:1}}><div style={{fontWeight:700,fontSize:15,color:TEXT_PRIMARY}}>{allWeekTarget.label}</div><div style={{fontSize:11,color:TEXT_MUTED}}>全週統一で設定</div></div>
@@ -2360,7 +2360,7 @@ export default function App() {
       {/* 電卓モーダル */}
       {showCalc&&(
         <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex",flexDirection:"column",justifyContent:"flex-end"}} onClick={()=>setShowCalc(false)}>
-          <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:30}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(30px + env(safe-area-inset-bottom))"}}>
             <div style={{padding:"16px 20px 10px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"flex-end",justifyContent:"flex-end",gap:8}}>
               <span style={{fontSize:46,fontWeight:400,color:inputAmount?TEXT_PRIMARY:TEXT_MUTED,lineHeight:1}}>{inputAmount||"0"}</span>
               <span style={{fontSize:18,color:TEXT_MUTED,fontWeight:400,marginBottom:8}}>円</span>
@@ -2380,7 +2380,7 @@ export default function App() {
       {/* カテゴリ予算モーダル */}
       {showCatBudgetModal&&catBudgetTarget&&(
         <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:300,display:"flex",alignItems:"flex-end"}}>
-          <div style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:24}}>
+          <div style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(24px + env(safe-area-inset-bottom))"}}>
             <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px 12px",borderBottom:`1px solid ${BORDER}`}}>
               <CatSvgIcon cat={catBudgetTarget} size={28}/>
               <div style={{flex:1}}><div style={{fontWeight:700,fontSize:15,color:TEXT_PRIMARY}}>{catBudgetTarget.label}</div><div style={{fontSize:11,color:TEXT_MUTED}}>{catBudgetTarget._isWeek?"今週の予算を設定":`${todayCycle.month+1}月の予算を設定`}</div></div>
