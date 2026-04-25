@@ -59,19 +59,17 @@ const FALLBACK_TELOP = "【本部より】今月の経費精算は月末25日ま
 // 再適用が発生しても GPU コンポジット層のみで処理され、layout 再計算を完全回避できる。
 // ---------------------------------------------------------------
 const FIXED_SUBMIT_STYLE = {
-  position: "fixed",
-  bottom: 0,
-  left: 0,
-  right: 0,
-  margin: "0 auto",
-  maxWidth: 430,
+  // サンドイッチ構造の footer:renderDaily 直下の flex column の最下段に配置。
+  // 旧実装(position:fixed + bottom:calc(env())) は iOS Safari で env() 再評価が
+  // 主因のジッタ原因だったため、flex child に移行。renderDaily が height:100% で
+  // S.main 内容域いっぱいを占めるので、そこの末尾にぶら下げれば視覚的に「画面下固定」と同等。
+  flexShrink: 0,
+  width: "100%",
   padding: "10px 18px",
   background: NAVY2,
   borderTop: `1px solid ${BORDER}`,
-  zIndex: 99,
-  // 位置オフセット(60=ナビ高 + safe-area + 8=呼吸)を transform で表現。
-  // bottom:0 で viewport 底に固定レイアウトし、見た目だけ transform で上に持ち上げる。
-  transform: "translate3d(0, calc(-60px - env(safe-area-inset-bottom) - 8px), 0)",
+  // GPU 合成レイヤー化は維持(他サブツリー再レンダによる paint 波及を分離)。
+  transform: "translateZ(0)",
   willChange: "transform",
   WebkitBackfaceVisibility: "hidden",
 };
@@ -737,7 +735,8 @@ export default function App() {
             </div>
           </div>
         </div>
-        <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-end",minHeight:0}}>
+        {/* 上部ブロック(flex-shrink:0):金額 / メモ / 支払い方法 — 常に最上段固定でスクロール非対象 */}
+        <div style={{flexShrink:0,display:"flex",flexDirection:"column"}}>
         <div onClick={()=>setShowCalc(true)} style={{background:CARD_BG,borderBottom:`1px solid ${BORDER}`,padding:"5px 16px 8px",display:"flex",alignItems:"flex-end",justifyContent:"space-between",cursor:"pointer"}}>
           <span style={{fontSize:12,color:TEXT_MUTED,fontWeight:500,marginBottom:6}}>支出金額</span>
           <div style={{display:"flex",alignItems:"flex-end",gap:6}}>
@@ -760,10 +759,10 @@ export default function App() {
             );
           })}
         </div>
-        {/* marginTop:"auto" で flex:1 親(L674)の残り領域を全てグリッド上に吸わせ、
-            グリッドを flex コンテナの末尾に押し下げる。
-            グリッド内部の paddingBottom も 4→0 にして、アイコン下端とグリッド外形の差を詰めた。 */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,padding:"8px 14px 0",background:NAVY,marginTop:"auto"}}>
+        </div>
+        {/* 中央ブロック(flex:1 overflow-y:auto):カテゴリグリッドと定期支出だけスクロール可 */}
+        <div style={{flex:1,overflowY:"auto",minHeight:0}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,padding:"8px 14px 0",background:NAVY}}>
           {expenseCats.map(cat=>{
             const isSelected=inputCategory===cat.id;
             const currentWeekNum2 = Math.min(4, Math.ceil(inputDate.getDate()/7));
@@ -790,13 +789,13 @@ export default function App() {
         </div>
         {recurringList.length>0&&(<div style={{margin:"6px 18px 0",background:`${TEAL}18`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",border:`1px solid ${TEAL}44`}}><span style={{fontSize:11,color:TEAL,fontWeight:300}}>🔁 定期支出: {recurringList.length}件</span><button onClick={()=>setShowRecurringModal(true)} style={{background:"none",border:"none",color:TEAL,fontSize:11,cursor:"pointer"}}>管理 ›</button></div>)}
         </div>
-        {/* 固定ゴールドボタン(jitter 完全対策版)
-            - style は module-level FIXED_SUBMIT_STYLE / SUBMIT_BTN_STYLE を参照
-              → レンダ毎の参照変更が無くなり、React は style の再適用をスキップ
-            - bottom:0 + transform:translate3d(0, -offset, 0) で位置指定を GPU 層へ
-              → iOS Safari の env() 再評価で bottom が再計算されても layout には影響しない
-            - onClick は submitFixedClick(useMemo で参照固定)→ listener 付け替えも抑制
-         */}
+        {/* 下部ブロック(flex-shrink:0):ゴールドボタン — サンドイッチの footer 位置
+            - FIXED_SUBMIT_STYLE は module-level 定数(参照安定 → style 再適用スキップ)
+            - 旧 position:fixed + translate3d + env() 方式から flex child に移行。
+              renderDaily の height:100% が S.main content area と一致し、その末尾の
+              flex-shrink:0 要素として自然に「画面下」に収まる。env() 再評価ジッタなし。
+            - translateZ(0)・willChange:transform は GPU 合成レイヤー化のため維持。
+            - onClick は submitFixedClick(useMemo 参照固定) */}
         <div style={S.fixedSubmit}>
           <button style={S.submitBtn} onClick={submitFixedClick}>支出を入力する</button>
         </div>
@@ -1842,11 +1841,12 @@ export default function App() {
       </div>
       {!showTelop&&<div onClick={()=>setShowTelop(true)} style={{position:"fixed",top:"env(safe-area-inset-top)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,zIndex:200,height:8,background:`${GOLD}33`,cursor:"pointer",borderBottom:`1px solid ${GOLD}22`}}/>}
 
-      {/* paddingBottom 108+safe+8 = 116+safe(viewport 底からの content 末端位置)。
-          Chrome DevTools iPhone 14 Pro 実測で 115 でも余白が残っていたため、さらに 7px 詰めた。
-          ボタン本体上端の実測位置は理論値(125+safe)より下側にある模様(line-height / font metrics 差分)。
-          3行目カードの「残XXX」と下枠線が見える状態を維持する前提。欠けたら 115→118→127 へ段階的に戻す。 */}
-      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom:"calc(108px + env(safe-area-inset-bottom) + 8px)"}}>
+      {/* paddingBottom 60+safe+8:ナビバー(position:fixed, 60+safe)+ 8px 呼吸だけ確保。
+          従来の 108 は「position:fixed のゴールドボタンぶんの領域予約」だったが、
+          サンドイッチ構造化で button は renderDaily 内の flex footer に移行したため、
+          S.main の予約領域としては不要になった。他タブ(週/月/メニュー)のスクロール末尾も
+          ナビバー直上に収まるので 60+safe+8 で十分。 */}
+      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom:"calc(60px + env(safe-area-inset-bottom) + 8px)"}}>
         {tab==="daily"&&renderDaily()}
         {tab==="day"&&renderDayView()}
         {tab==="weekly"&&renderWeekly()}
