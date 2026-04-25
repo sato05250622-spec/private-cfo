@@ -12,7 +12,7 @@ import { SVG_ICONS, ALL_SVG_KEYS } from "@shared/icons";
 import { RECUR_OPTIONS, COLOR_OPTIONS, PAYMENT_COLORS } from "@shared/categories";
 import { fmt, fmtMonth, toDateStr } from "@shared/format";
 import {
-  getRewardDay, setRewardDay,
+  getManagementStartDay, setManagementStartDay,
   cycleStart, cycleEnd, findCycleOfDate, weeksInCycle, weekInCycle, cycleLabel, isInCycle,
 } from "./utils/cycle";
 import { useExpenses } from "./hooks/useExpenses";
@@ -46,6 +46,26 @@ if (typeof window !== "undefined" && window.localStorage.getItem("cfo_migratedFr
     }
   }
   window.localStorage.setItem("cfo_migratedFromKakeibo", "1");
+}
+
+// 報酬日(rewardDay) → 管理スタート日(managementStartDay) へのワンタイム移行。
+// Phase 1 で rewardDay からサイクル切替機能を剥がし、managementStartDay に移植したため、
+// 既存ユーザー(localStorage に旧キー cfo_rewardDay = "25" 等を持つ人)のサイクル挙動を
+// 維持するために値を新キー cfo_managementStartDay へコピーする。
+// "末" や非数値は新仕様では受けないので silent drop。
+// 旧キー cfo_rewardDay 自体は表示記録として残置(Phase 2 の複数登録UI設計時に再利用)。
+// 冪等:cfo_migratedRewardToManagementStart フラグで二重実行防止。
+if (typeof window !== "undefined" && window.localStorage.getItem("cfo_migratedRewardToManagementStart") !== "1") {
+  const oldVal = window.localStorage.getItem("cfo_rewardDay");
+  const newVal = window.localStorage.getItem("cfo_managementStartDay");
+  if (oldVal != null && newVal == null) {
+    const n = Number(oldVal);
+    if (Number.isInteger(n) && n >= 1 && n <= 31) {
+      window.localStorage.setItem("cfo_managementStartDay", String(n));
+    }
+    // 数値以外("末" 等)は新仕様非対応のため移行しない(silent drop)。
+  }
+  window.localStorage.setItem("cfo_migratedRewardToManagementStart", "1");
 }
 
 // Supabase 取得失敗・未ログイン・0 件時に表示するフォールバック。
@@ -193,7 +213,7 @@ export default function App() {
   const [editIcon, setEditIcon] = useState("restaurant");
   const [editColor, setEditColor] = useState("#FF6B35");
   const [selectedDay, setSelectedDay] = useState(toDateStr(today));
-  const [expandedWeek, setExpandedWeek] = useState(weekInCycle(today, getRewardDay()));
+  const [expandedWeek, setExpandedWeek] = useState(weekInCycle(today, getManagementStartDay()));
   const [weekBudgetInput, setWeekBudgetInput] = useState("");
   const [weekBudgets, setWeekBudgets] = useLocalStorage("cfo_weekBudgets", {});
   const [weekCatBudgets, setWeekCatBudgets] = useLocalStorage("cfo_weekCatBudgets", {});
@@ -201,18 +221,32 @@ export default function App() {
   const [catBudgetTarget, setCatBudgetTarget] = useState(null);
   const [catBudgetInput, setCatBudgetInput] = useState("");
   const [paymentMethods, setPaymentMethods] = useLocalStorage("cfo_paymentMethods", [{ id:"cash", label:"現金", color:"#4CAF50" }]);
-  // 報酬日(localStorage 永続化、空 → 1日起点フォールバック)。
-  // 数値 1-31 または "末" の文字列 1 つを保持。明日 Supabase profiles.reward_day へ移行予定。
-  // rewardDayDraft = アカウント設定の controlled input 用、入力ごとに setRewardDay() で localStorage へ書く。
-  // rewardDay は useMemo で rewardDayDraft の変化を deps に取り、useMemo / useEffect の再評価をトリガする。
-  const [rewardDayDraft, setRewardDayDraft] = useState(() => {
-    const v = getRewardDay();
+  // 管理スタート日(サイクル切替の本体機能、旧 rewardDay の役割を引き継ぐ)。
+  // localStorage 永続化、空 → 1 日起点フォールバック。数値 1-31 のみ受け付ける("末" 等は無効)。
+  // 明日 Supabase profiles.management_start_day 列に β 移行予定 → そのときも getter/setter
+  // ユーティリティの中身を差し替えるだけで済むよう、UI 側は draft state パターンを採用。
+  const [managementStartDayDraft, setManagementStartDayDraft] = useState(() => {
+    const v = getManagementStartDay();
     return v == null ? "" : String(v);
   });
   // 保存ボタン押下時にこのカウンタをインクリメント → useMemo を再評価して最新値を読み直す。
   // 保存タイミングが UI 上で明示される(「打鍵ごとに自動保存」より顧客への説明が明快)。
-  const [rewardDayCommitTick, setRewardDayCommitTick] = useState(0);
-  const rewardDay = useMemo(() => getRewardDay(), [rewardDayCommitTick]);
+  const [managementStartDayCommitTick, setManagementStartDayCommitTick] = useState(0);
+  const managementStartDay = useMemo(() => getManagementStartDay(), [managementStartDayCommitTick]);
+  // 報酬日 (legacy):Phase 1 ではサイクル切替機能を完全に剥がし、ただの記録に降格。
+  // Phase 2 で複数登録 UI(iOS 風カレンダーから日付追加)に作り替える予定。
+  // それまでの繋ぎとして controlled text input のまま据え置き、書込先は cfo_rewardDay_legacy。
+  // 旧キー cfo_rewardDay は移行履歴用に保存(Phase 2 の複数登録初期値として再利用予定)。
+  const [legacyRewardDayDraft, setLegacyRewardDayDraft] = useState(() => {
+    if (typeof window === 'undefined') return "";
+    try {
+      // legacy キーを優先、無ければ旧キーの値を引き継ぎ表示(マイグレーション済みでも残置されている)
+      const legacy = window.localStorage.getItem('cfo_rewardDay_legacy');
+      if (legacy != null) return legacy;
+      const old = window.localStorage.getItem('cfo_rewardDay');
+      return old != null ? old : "";
+    } catch { return ""; }
+  });
   // 「保存しました」フラッシュ表示用(2 秒で自動的に消す)
   const [accountSavedFlash, setAccountSavedFlash] = useState(false);
   const [inputPayment, setInputPayment] = useState("cash");
@@ -250,9 +284,9 @@ export default function App() {
 
   // today が属するサイクルの year/month と日付範囲。
   // 月予算キー / "今月" 判定 / 月別サマリ等、today を起点にした計算は全てここを通す。
-  const todayCycle = useMemo(() => findCycleOfDate(today, rewardDay), [rewardDay]);
-  const tmCycleStart = useMemo(() => toDateStr(cycleStart(todayCycle.year, todayCycle.month, rewardDay)), [todayCycle, rewardDay]);
-  const tmCycleEnd = useMemo(() => toDateStr(cycleEnd(todayCycle.year, todayCycle.month, rewardDay)), [todayCycle, rewardDay]);
+  const todayCycle = useMemo(() => findCycleOfDate(today, managementStartDay), [managementStartDay]);
+  const tmCycleStart = useMemo(() => toDateStr(cycleStart(todayCycle.year, todayCycle.month, managementStartDay)), [todayCycle, managementStartDay]);
+  const tmCycleEnd = useMemo(() => toDateStr(cycleEnd(todayCycle.year, todayCycle.month, managementStartDay)), [todayCycle, managementStartDay]);
   // 月予算キーはサイクルベース(起点日が属する年月)。報酬日未設定時はカレンダー月と等価。
   const monthBudgetKey = (catId) => `${todayCycle.year}-${todayCycle.month + 1}-${catId}`;
 
@@ -286,7 +320,7 @@ export default function App() {
   // 報酬日サイクル準拠で weeksInCycle() を使用。常に 4 週(第 4 週がサイクル末日まで吸収)。
   const weekSummary = useMemo(() => {
     const {y, m} = calMonth;
-    const cycWeeks = weeksInCycle(y, m, rewardDay);
+    const cycWeeks = weeksInCycle(y, m, managementStartDay);
     const enriched = cycWeeks.map((w) => {
       const startStr = toDateStr(w.startDate);
       const endStr = toDateStr(w.endDate);
@@ -308,14 +342,14 @@ export default function App() {
       const isManual = w.manualBudget !== null;
       return {...w, weekBudget, isOver, isManual};
     });
-  }, [calMonth, transactions, budgets, expenseCats, weekBudgets, weekCatBudgets, rewardDay]);
+  }, [calMonth, transactions, budgets, expenseCats, weekBudgets, weekCatBudgets, managementStartDay]);
 
   // calDays:カレンダー画面の日付グリッド。サイクル(cycleStart..cycleEnd)を 7 列の Sun-Sat グリッドに展開。
   // 範囲外の日は current:false で薄く描画。報酬日未設定なら従来のカレンダー月そのまま。
   const calDays = useMemo(() => {
     const {y, m} = calMonth;
-    const start = cycleStart(y, m, rewardDay);
-    const end = cycleEnd(y, m, rewardDay);
+    const start = cycleStart(y, m, managementStartDay);
+    const end = cycleEnd(y, m, managementStartDay);
     const days = [];
     // 先頭の空白セル(start の曜日まで前日埋め)
     for (let i = 0; i < start.getDay(); i++) {
@@ -337,7 +371,7 @@ export default function App() {
       days.push({date: d, current: false});
     }
     return days;
-  }, [calMonth, rewardDay]);
+  }, [calMonth, managementStartDay]);
 
   const calTxMap=useMemo(()=>{const map={};transactions.forEach(t=>{map[t.date]=(map[t.date]||0)+t.amount;});return map;},[transactions]);
 
@@ -345,10 +379,10 @@ export default function App() {
   // 旧:date.startsWith(YYYY-MM)/ 新:cycleStart..cycleEnd の文字列範囲比較
   const reportTxs = useMemo(() => {
     const {y, m} = reportMonth;
-    const sStr = toDateStr(cycleStart(y, m, rewardDay));
-    const eStr = toDateStr(cycleEnd(y, m, rewardDay));
+    const sStr = toDateStr(cycleStart(y, m, managementStartDay));
+    const eStr = toDateStr(cycleEnd(y, m, managementStartDay));
     return transactions.filter(t => t.date >= sStr && t.date <= eStr);
-  }, [transactions, reportMonth, rewardDay]);
+  }, [transactions, reportMonth, managementStartDay]);
   const reportExpense=reportTxs.reduce((s,t)=>s+t.amount,0);
   const catBreakdown=useMemo(()=>{const map={};reportTxs.forEach(t=>{map[t.category]=(map[t.category]||0)+t.amount;});return expenseCats.filter(c=>map[c.id]).map(c=>({name:c.label,value:map[c.id],color:c.color}));},[reportTxs,expenseCats]);
 
@@ -356,13 +390,13 @@ export default function App() {
   // 報酬日 25 なら 5月分 = 5/25-6/24 のように、隣接サイクルが同じ取引を重複カウントしないよう
   // 各サイクル range で個別 filter する。
   const yearlyData = useMemo(() => Array.from({length: 12}, (_, m) => {
-    const sStr = toDateStr(cycleStart(reportYear, m, rewardDay));
-    const eStr = toDateStr(cycleEnd(reportYear, m, rewardDay));
+    const sStr = toDateStr(cycleStart(reportYear, m, managementStartDay));
+    const eStr = toDateStr(cycleEnd(reportYear, m, managementStartDay));
     return {
       name: `${m + 1}月`,
       expense: transactions.filter(t => t.date >= sStr && t.date <= eStr).reduce((s, t) => s + t.amount, 0),
     };
-  }), [transactions, reportYear, rewardDay]);
+  }), [transactions, reportYear, managementStartDay]);
   const yearlyTotal=yearlyData.reduce((s,d)=>s+d.expense,0);
 
   const budgetKey=(cat)=>`${budgetMonth.y}-${budgetMonth.m+1}-${cat}`;
@@ -376,8 +410,8 @@ export default function App() {
   };
 
   // 予算画面の集計範囲もサイクルベース(報酬日未設定時はカレンダー月と等価)
-  const budgetCycleStartStr = toDateStr(cycleStart(budgetMonth.y, budgetMonth.m, rewardDay));
-  const budgetCycleEndStr = toDateStr(cycleEnd(budgetMonth.y, budgetMonth.m, rewardDay));
+  const budgetCycleStartStr = toDateStr(cycleStart(budgetMonth.y, budgetMonth.m, managementStartDay));
+  const budgetCycleEndStr = toDateStr(cycleEnd(budgetMonth.y, budgetMonth.m, managementStartDay));
   const catSpending=(catId)=>transactions.filter(t=>t.category===catId&&t.date>=budgetCycleStartStr&&t.date<=budgetCycleEndStr).reduce((s,t)=>s+t.amount,0);
   const totalBudget=getEffectiveMonthBudget(budgetMonth.y, budgetMonth.m);
   const totalSpending=transactions.filter(t=>t.date>=budgetCycleStartStr&&t.date<=budgetCycleEndStr).reduce((s,t)=>s+t.amount,0);
@@ -791,9 +825,9 @@ export default function App() {
   const renderDaily = () => {
     // inputDate が属するサイクルの週情報を取得(報酬日基準)。
     // weekSummary は calMonth ベースなので、別サイクルにいるときは inputDate のサイクル週で再計算する。
-    const inputCycle = findCycleOfDate(inputDate, rewardDay);
-    const inputCycWeeks = weeksInCycle(inputCycle.year, inputCycle.month, rewardDay);
-    const weekNum = weekInCycle(inputDate, rewardDay);
+    const inputCycle = findCycleOfDate(inputDate, managementStartDay);
+    const inputCycWeeks = weeksInCycle(inputCycle.year, inputCycle.month, managementStartDay);
+    const weekNum = weekInCycle(inputDate, managementStartDay);
     const thisWeek = inputCycWeeks[weekNum - 1] || inputCycWeeks[0];
     // weekSummary は calMonth(画面選択中の月)用、inputDate の月と同じなら使い、違うなら個別計算。
     const weekBudgetFromSummary = (calMonth.y === inputCycle.year && calMonth.m === inputCycle.month)
@@ -900,8 +934,8 @@ export default function App() {
   const renderDayView = () => {
     const {y,m}=calMonth;
     // サイクル範囲(報酬日設定済み = 5/25-6/24 など、未設定 = 5/1-5/31)で取引フィルタ
-    const cycSStr = toDateStr(cycleStart(y, m, rewardDay));
-    const cycEStr = toDateStr(cycleEnd(y, m, rewardDay));
+    const cycSStr = toDateStr(cycleStart(y, m, managementStartDay));
+    const cycEStr = toDateStr(cycleEnd(y, m, managementStartDay));
     const monthTxs=[...transactions].filter(t=>t.date>=cycSStr&&t.date<=cycEStr).reverse();
     const groupedByDate = {};
     monthTxs.forEach(t=>{if(!groupedByDate[t.date])groupedByDate[t.date]=[];groupedByDate[t.date].push(t);});
@@ -909,7 +943,7 @@ export default function App() {
       <div>
         <div style={{...S.monthNav,justifyContent:"space-between",padding:"8px 12px"}}>
           <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};});setSelectedDay(null);}}>‹</button>
-          <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,rewardDay)}</span>
+          <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,managementStartDay)}</span>
           <div style={{display:"flex",alignItems:"center",gap:4}}>
             <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};});setSelectedDay(null);}}>›</button>
             <button onClick={()=>setShowSearch(true)} style={{background:"none",border:"none",color:TEXT_MUTED,cursor:"pointer",fontSize:13,padding:"4px 6px"}}>🔍</button>
@@ -947,7 +981,7 @@ export default function App() {
   // ============================================================
   const renderWeekly = () => {
     const {y,m}=calMonth;
-    const currentWeekNum = weekInCycle(today, rewardDay);
+    const currentWeekNum = weekInCycle(today, managementStartDay);
 
     return (
       <div>
@@ -956,9 +990,9 @@ export default function App() {
           <span style={{width:40}}/>
         </div>
         <div style={S.monthNav}>
-          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m-1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===today.getFullYear()&&nm===today.getMonth();setExpandedWeek(isNowMonth?weekInCycle(today,rewardDay):null);return{y:ny,m:nm};});}}>‹</button>
-          <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,rewardDay)}</span>
-          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m+1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===today.getFullYear()&&nm===today.getMonth();setExpandedWeek(isNowMonth?weekInCycle(today,rewardDay):null);return{y:ny,m:nm};});}}>›</button>
+          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m-1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===today.getFullYear()&&nm===today.getMonth();setExpandedWeek(isNowMonth?weekInCycle(today,managementStartDay):null);return{y:ny,m:nm};});}}>‹</button>
+          <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,managementStartDay)}</span>
+          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m+1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===today.getFullYear()&&nm===today.getMonth();setExpandedWeek(isNowMonth?weekInCycle(today,managementStartDay):null);return{y:ny,m:nm};});}}>›</button>
         </div>
 
         <div style={{background:CARD_BG,margin:"8px 0 0",padding:"14px 18px"}}>
@@ -967,7 +1001,7 @@ export default function App() {
             // 今月表示中だけ今週を先頭に、それ以外は第1週から順番
             const isCurrentMonth = y===today.getFullYear() && m===today.getMonth();
             if(!isCurrentMonth) return a.weekNum-b.weekNum;
-            const cur = weekInCycle(today, rewardDay);
+            const cur = weekInCycle(today, managementStartDay);
             if(a.weekNum===cur) return -1;
             if(b.weekNum===cur) return 1;
             return a.weekNum-b.weekNum;
@@ -1061,8 +1095,8 @@ export default function App() {
             </div>
           </div>
           {(()=>{
-            const sStr=toDateStr(cycleStart(y,m,rewardDay));
-            const eStr=toDateStr(cycleEnd(y,m,rewardDay));
+            const sStr=toDateStr(cycleStart(y,m,managementStartDay));
+            const eStr=toDateStr(cycleEnd(y,m,managementStartDay));
             const monthTotal=transactions.filter(t=>t.date>=sStr&&t.date<=eStr).reduce((s,t)=>s+t.amount,0);
             return(
               <button onClick={()=>setShowMonthSummary(true)} style={{background:NAVY3,border:`1px solid ${GOLD}66`,borderRadius:16,padding:"4px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:3,flexShrink:0}}>
@@ -1075,7 +1109,7 @@ export default function App() {
           <>
             <div style={S.monthNav}>
               <button style={S.navArrow} onClick={()=>setReportMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};})}>‹</button>
-              <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,rewardDay)}</span>
+              <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,managementStartDay)}</span>
               <button style={S.navArrow} onClick={()=>setReportMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};})}>›</button>
             </div>
             <SummaryBar spent={reportExpense} budget={rBudget} remain={rBudget-reportExpense} labelBudget="月の予算" labelSpent="月の支出" labelRemain="月の残予算"/>
@@ -1547,7 +1581,7 @@ export default function App() {
       // weeks 配列はサイクルベース。常に 4 週(週 1〜3 は 7 日固定、第 4 週は cycleEnd まで)。
       // {weekNum, weekKey, startStr, endStr} の形は従来互換、UI 側のグリッドはこれに合わせ
       // 4 列固定(repeat(weeks.length,1fr) = repeat(4,1fr))で表示される。
-      const weeks = weeksInCycle(y, m, rewardDay);
+      const weeks = weeksInCycle(y, m, managementStartDay);
       const prevM=m===0?11:m-1;const prevY=m===0?y-1:y;
       // 先月コピーも 0 を尊重:truthy チェックだと prev が 0 のときにコピーされないので null 判定に変更。
       const copyLastMonth=()=>{const next={...weekCatBudgets};weeks.forEach(w=>{expenseCats.forEach(cat=>{const prevKey=`${prevY}-${prevM+1}-w${w.weekNum}_${cat.id}`;const thisKey=`${w.weekKey}_${cat.id}`;if(weekCatBudgets[prevKey]!=null)next[thisKey]=weekCatBudgets[prevKey];});});setWeekCatBudgets(next);};
@@ -1564,7 +1598,7 @@ export default function App() {
           <div style={{padding:"8px 12px",fontSize:10,color:TEXT_MUTED}}>カテゴリ名 → 全週統一　／　金額タップ → その週のみ</div>
           <div style={S.monthNav}>
             <button style={S.navArrow} onClick={()=>setWeekBudgetMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};})}>‹</button>
-            <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,rewardDay)}</span>
+            <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,managementStartDay)}</span>
             <button style={S.navArrow} onClick={()=>setWeekBudgetMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};})}>›</button>
           </div>
           <div style={{margin:"0 12px",overflowX:"auto"}}>
@@ -1821,19 +1855,36 @@ export default function App() {
             <span style={{width:40}}/>
           </div>
           <div style={{margin:"12px 16px 0",background:CARD_BG,borderRadius:12,overflow:"hidden",border:`1px solid ${BORDER}`}}>
-            {[{label:"名前",placeholder:"例：山田 太郎",type:"text"},{label:"メールアドレス",placeholder:"例：example@mail.com",type:"email"},{label:"電話番号",placeholder:"例：090-1234-5678",type:"tel"},{label:"報酬日",placeholder:"例：25 または 末",type:"text"},{label:"管理スタート日",placeholder:"例：2026/04/01",type:"date"}].map((field,i,arr)=>(
+            {[
+              {label:"名前",placeholder:"例：山田 太郎",type:"text"},
+              {label:"メールアドレス",placeholder:"例：example@mail.com",type:"email"},
+              {label:"電話番号",placeholder:"例：090-1234-5678",type:"tel"},
+              // 報酬日:legacy フィールド。Phase 1 では cycle 切替機能なし。Phase 2 で複数登録 UI 化予定。
+              {label:"報酬日",placeholder:"例：25",type:"text"},
+              // 管理スタート日:cycle 切替の本体機能(旧 rewardDay の役割)。空欄 → 1 日始まり(従来動作)。
+              {label:"管理スタート日",placeholder:"例：25(空欄なら1日始まり)",type:"text"},
+            ].map((field,i,arr)=>(
               <div key={i} style={{display:"flex",alignItems:"center",padding:"14px 16px",borderBottom:i<arr.length-1?`1px solid ${BORDER}`:"none",gap:12}}>
                 <span style={{fontSize:12,color:TEXT_SECONDARY,minWidth:80,fontWeight:500}}>{field.label}</span>
                 {field.label === "報酬日" ? (
-                  // controlled input:onChange は draft state 更新のみ。
-                  // 永続化(localStorage 書き込み)は下の保存ボタン onClick で実行する。
-                  // ユーティリティ経由なので明日 Supabase profiles.reward_day へ差し替えても
-                  // 保存ボタンの中身を 1 行(setRewardDay → upsert call)に変えるだけで済む。
+                  // 報酬日 (legacy):draft 更新のみ。保存ボタンで cfo_rewardDay_legacy に書き込む。
+                  // サイクル機能には一切影響しない(Phase 1 で剥離済み)。
                   <input
                     type="text"
                     placeholder={field.placeholder}
-                    value={rewardDayDraft}
-                    onChange={(e) => setRewardDayDraft(e.target.value)}
+                    value={legacyRewardDayDraft}
+                    onChange={(e) => setLegacyRewardDayDraft(e.target.value)}
+                    style={{flex:1,border:"none",background:"transparent",fontSize:14,outline:"none",color:TEXT_PRIMARY,textAlign:"right"}}
+                  />
+                ) : field.label === "管理スタート日" ? (
+                  // 管理スタート日:draft 更新のみ。保存ボタンで setManagementStartDay() 経由で
+                  // cfo_managementStartDay に書き込み + commit tick で全画面のサイクル派生 memo を再評価。
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder={field.placeholder}
+                    value={managementStartDayDraft}
+                    onChange={(e) => setManagementStartDayDraft(e.target.value)}
                     style={{flex:1,border:"none",background:"transparent",fontSize:14,outline:"none",color:TEXT_PRIMARY,textAlign:"right"}}
                   />
                 ) : (
@@ -1843,13 +1894,19 @@ export default function App() {
             ))}
           </div>
           <div style={{margin:"16px 16px 0"}}>
-            {/* 保存ボタン:報酬日のみ localStorage 書き込み(他項目は依然 stub)。
-                押下時に rewardDayCommitTick をインクリメントして全画面の rewardDay 派生値を再評価。
-                「保存しました」を 2 秒間ボタン上に上書き表示してユーザーに反映を可視化する。 */}
+            {/* 保存ボタン:管理スタート日と報酬日(legacy)を別キーで永続化。
+                  - 管理スタート日 → setManagementStartDay() 経由で cfo_managementStartDay 書き込み
+                                  + commit tick インクリメントで全画面のサイクル派生 memo を再評価
+                  - 報酬日 (legacy) → 直接 cfo_rewardDay_legacy に文字列書き込み(機能影響なし)
+                他 3 項目(名前/メール/電話)は依然 uncontrolled stub。Phase 2 で報酬日 UI を作り直す際に
+                ここの保存ハンドラも再構成する想定。 */}
             <button
               onClick={() => {
-                setRewardDay(rewardDayDraft);
-                setRewardDayCommitTick(t => t + 1);
+                setManagementStartDay(managementStartDayDraft);
+                setManagementStartDayCommitTick(t => t + 1);
+                if (typeof window !== 'undefined') {
+                  try { window.localStorage.setItem('cfo_rewardDay_legacy', legacyRewardDayDraft); } catch {}
+                }
                 setAccountSavedFlash(true);
                 setTimeout(() => setAccountSavedFlash(false), 2000);
               }}
@@ -1988,8 +2045,8 @@ export default function App() {
         // ※ 締日(closingDay)依存の cardBreakdown 計算は支払い方法側のロジックなので
         //    報酬日サイクルとは別概念のまま据え置き(下のロジックを変更しない)。
         const y=reportMonth.y;const m=reportMonth.m+1;
-        const cycSStr=toDateStr(cycleStart(reportMonth.y,reportMonth.m,rewardDay));
-        const cycEStr=toDateStr(cycleEnd(reportMonth.y,reportMonth.m,rewardDay));
+        const cycSStr=toDateStr(cycleStart(reportMonth.y,reportMonth.m,managementStartDay));
+        const cycEStr=toDateStr(cycleEnd(reportMonth.y,reportMonth.m,managementStartDay));
         const prefix=`${y}-${String(m).padStart(2,'0')}`; // 締日計算側で引き続き使用
         const cashId="cash";const cardPms=paymentMethods.filter(p=>p.id!==cashId);
         const cashTxs=transactions.filter(t=>t.date>=cycSStr&&t.date<=cycEStr&&t.payment===cashId);const cashTotal=cashTxs.reduce((s,t)=>s+t.amount,0);
