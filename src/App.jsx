@@ -1967,12 +1967,12 @@ export default function App() {
       </div>
       {!showTelop&&<div onClick={()=>setShowTelop(true)} style={{position:"fixed",top:"env(safe-area-inset-top)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,zIndex:200,height:8,background:`${GOLD}33`,cursor:"pointer",borderBottom:`1px solid ${GOLD}22`}}/>}
 
-      {/* paddingBottom 60+safe+8:ナビバー(position:fixed, 60+safe)+ 8px 呼吸だけ確保。
-          従来の 108 は「position:fixed のゴールドボタンぶんの領域予約」だったが、
-          サンドイッチ構造化で button は renderDaily 内の flex footer に移行したため、
-          S.main の予約領域としては不要になった。他タブ(週/月/メニュー)のスクロール末尾も
-          ナビバー直上に収まるので 60+safe+8 で十分。 */}
-      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom:"calc(60px + env(safe-area-inset-bottom) + 8px)"}}>
+      {/* paddingBottom = 62 + safe + 8 = ナビバー実高(button~54 + paddingBottom safe+8)+ 8px 呼吸。
+          以前は 60(ナビ button 高さの初期見積もり)+ safe + 8 = 約 6px gap だったが、
+          実測ではナビ button 内部の line-height で ~54px、加えてユーザー要望の 8px 呼吸を
+          確実に確保するために 62 へ調整。サンドイッチ構造の footer はこの paddingBottom 分だけ
+          ナビバー上端から離れて固定される。 */}
+      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom:"calc(62px + env(safe-area-inset-bottom) + 8px)"}}>
         {tab==="daily"&&renderDaily()}
         {tab==="day"&&renderDayView()}
         {tab==="weekly"&&renderWeekly()}

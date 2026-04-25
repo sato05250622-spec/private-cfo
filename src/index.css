@@ -15,15 +15,13 @@
 }
 
 html,
-body,
-#root {
+body {
   margin: 0;
   padding: 0;
   /*
-   * height(min-height ではなく)を 100vh / 100dvh で固定。
-   * min-height だと content が高ければ伸びてしまい、孫要素の height:100% が
-   * 親 content-size に解決される iOS Safari の挙動で 3 層 flex が崩壊する。
-   * 100dvh は iOS Safari 16+ 用、100vh は古いブラウザ向けフォールバック。
+   * height で 100vh / 100dvh を固定。100dvh は iOS Safari 16+ 用、100vh は
+   * 古いブラウザ向けフォールバック。min-height にすると孫要素の height:100% が
+   * iOS Safari で content-size に解決され、3 層 flex が崩壊するため使わない。
    */
   height: 100vh;
   height: 100dvh;
@@ -33,10 +31,29 @@ body,
   overflow: hidden;
 }
 
+#root {
+  margin: 0;
+  padding: 0;
+  /*
+   * #root は height:100dvh ではなく height:100% にする(body の content 領域に追従)。
+   * body の padding-top で safe-top 分が引かれているため、ここで再度 100dvh を取ると
+   * body content 領域より縦に長くなり、下が body の overflow:hidden で見切れる。
+   * その結果 S.main 全体が下にズレ、画面下固定のゴールドボタンが ナビバーに潜り込む。
+   */
+  height: 100%;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  overflow: hidden;
+}
+
 body {
-  /* iOS: respect safe-area (notch / home indicator) */
+  /*
+   * safe-top のみ body 側で確保(top:0 fixed の telop バー直下にコンテンツが
+   * 潜るのを防ぐため)。safe-bottom は **付けない** — nav バー(bottom:0 fixed)が
+   * 自前で paddingBottom:calc(safe+8) を持っているので二重に引くと死角になる。
+   * left/right は横向きでの safe-area 用に維持。
+   */
   padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 
