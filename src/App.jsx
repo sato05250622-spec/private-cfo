@@ -14,6 +14,8 @@ import { fmt, fmtMonth, toDateStr } from "@shared/format";
 import {
   getManagementStartDay, setManagementStartDay,
   cycleStart, cycleEnd, findCycleOfDate, weeksInCycle, weekInCycle, cycleLabel, isInCycle,
+  // Phase 2: 報酬日リスト(複数登録可、ただの記録、サイクル切替には無関係)
+  getRewardDays, addRewardDay, removeRewardDay,
 } from "./utils/cycle";
 import { useExpenses } from "./hooks/useExpenses";
 import { useCategories } from "./hooks/useCategories";
@@ -66,6 +68,27 @@ if (typeof window !== "undefined" && window.localStorage.getItem("cfo_migratedRe
     // 数値以外("末" 等)は新仕様非対応のため移行しない(silent drop)。
   }
   window.localStorage.setItem("cfo_migratedRewardToManagementStart", "1");
+}
+
+// 報酬日 (legacy 単一値) → 報酬日リスト(複数登録可)へのワンタイム移行(Phase 2)。
+// Phase 1 で報酬日 input は cfo_rewardDay_legacy に controlled text として保存されていたが、
+// Phase 2 で iOS 風カレンダー + 複数登録チップ UI に置き換えたため、既存値を配列形式の
+// cfo_rewardDays へコピーする。数値 1-31 でない値(空、"末" 等)は silent drop。
+// 旧キー cfo_rewardDay_legacy は残置(Phase 1 マイグレーション同様、削除しない)。
+// 冪等:cfo_migratedRewardDayToList フラグで二重実行防止。
+if (typeof window !== "undefined" && window.localStorage.getItem("cfo_migratedRewardDayToList") !== "1") {
+  const existing = window.localStorage.getItem("cfo_rewardDays");
+  if (existing == null) {
+    const legacy = window.localStorage.getItem("cfo_rewardDay_legacy");
+    if (legacy != null) {
+      const n = Number(legacy);
+      if (Number.isInteger(n) && n >= 1 && n <= 31) {
+        window.localStorage.setItem("cfo_rewardDays", JSON.stringify([n]));
+      }
+      // 数値以外なら何もしない(空配列状態 = key 不在 を維持)
+    }
+  }
+  window.localStorage.setItem("cfo_migratedRewardDayToList", "1");
 }
 
 // Supabase 取得失敗・未ログイン・0 件時に表示するフォールバック。
@@ -233,20 +256,14 @@ export default function App() {
   // 保存タイミングが UI 上で明示される(「打鍵ごとに自動保存」より顧客への説明が明快)。
   const [managementStartDayCommitTick, setManagementStartDayCommitTick] = useState(0);
   const managementStartDay = useMemo(() => getManagementStartDay(), [managementStartDayCommitTick]);
-  // 報酬日 (legacy):Phase 1 ではサイクル切替機能を完全に剥がし、ただの記録に降格。
-  // Phase 2 で複数登録 UI(iOS 風カレンダーから日付追加)に作り替える予定。
-  // それまでの繋ぎとして controlled text input のまま据え置き、書込先は cfo_rewardDay_legacy。
-  // 旧キー cfo_rewardDay は移行履歴用に保存(Phase 2 の複数登録初期値として再利用予定)。
-  const [legacyRewardDayDraft, setLegacyRewardDayDraft] = useState(() => {
-    if (typeof window === 'undefined') return "";
-    try {
-      // legacy キーを優先、無ければ旧キーの値を引き継ぎ表示(マイグレーション済みでも残置されている)
-      const legacy = window.localStorage.getItem('cfo_rewardDay_legacy');
-      if (legacy != null) return legacy;
-      const old = window.localStorage.getItem('cfo_rewardDay');
-      return old != null ? old : "";
-    } catch { return ""; }
-  });
+  // 報酬日リスト(Phase 2、複数登録可、ただの記録)。
+  // 1-31 の数値の配列。空配列でもアプリは動く(報酬日は記録なので無くても OK)。
+  // サイクル切替には影響しない(Phase 1 で managementStartDay へ完全分離済み)。
+  // 永続化は localStorage('cfo_rewardDays')、UI 操作(チップ追加/削除)で即書き込み。
+  const [rewardDaysList, setRewardDaysList] = useState(() => getRewardDays());
+  // iOS Safari のネイティブカレンダーピッカーを開くための hidden <input type="date">。
+  // 「+ 追加」ボタンエリアの上に opacity:0 で重ねてタップで picker を開く。
+  const rewardDayPickerRef = useRef(null);
   // 「保存しました」フラッシュ表示用(2 秒で自動的に消す)
   const [accountSavedFlash, setAccountSavedFlash] = useState(false);
   const [inputPayment, setInputPayment] = useState("cash");
@@ -1859,23 +1876,48 @@ export default function App() {
               {label:"名前",placeholder:"例：山田 太郎",type:"text"},
               {label:"メールアドレス",placeholder:"例：example@mail.com",type:"email"},
               {label:"電話番号",placeholder:"例：090-1234-5678",type:"tel"},
-              // 報酬日:legacy フィールド。Phase 1 では cycle 切替機能なし。Phase 2 で複数登録 UI 化予定。
-              {label:"報酬日",placeholder:"例：25",type:"text"},
+              // 報酬日:Phase 2 で複数登録チップ UI(iOS ネイティブカレンダーピッカー併用)。
+              {label:"報酬日"},
               // 管理スタート日:cycle 切替の本体機能(旧 rewardDay の役割)。空欄 → 1 日始まり(従来動作)。
               {label:"管理スタート日",placeholder:"例：25(空欄なら1日始まり)",type:"text"},
             ].map((field,i,arr)=>(
               <div key={i} style={{display:"flex",alignItems:"center",padding:"14px 16px",borderBottom:i<arr.length-1?`1px solid ${BORDER}`:"none",gap:12}}>
-                <span style={{fontSize:12,color:TEXT_SECONDARY,minWidth:80,fontWeight:500}}>{field.label}</span>
+                <span style={{fontSize:12,color:TEXT_SECONDARY,minWidth:80,fontWeight:500,alignSelf:field.label==="報酬日"&&rewardDaysList.length>0?"flex-start":"center",paddingTop:field.label==="報酬日"&&rewardDaysList.length>0?6:0}}>{field.label}</span>
                 {field.label === "報酬日" ? (
-                  // 報酬日 (legacy):draft 更新のみ。保存ボタンで cfo_rewardDay_legacy に書き込む。
-                  // サイクル機能には一切影響しない(Phase 1 で剥離済み)。
-                  <input
-                    type="text"
-                    placeholder={field.placeholder}
-                    value={legacyRewardDayDraft}
-                    onChange={(e) => setLegacyRewardDayDraft(e.target.value)}
-                    style={{flex:1,border:"none",background:"transparent",fontSize:14,outline:"none",color:TEXT_PRIMARY,textAlign:"right"}}
-                  />
+                  // 報酬日チップリスト + 「+ 追加」ボタン(=隠した <input type="date"> を覆い被せて
+                  // タップで iOS ネイティブピッカー起動)。各チップは X ボタン付きで個別削除可。
+                  // 値の永続化は addRewardDay/removeRewardDay 経由で即時 localStorage 反映。
+                  <div style={{flex:1,display:"flex",flexWrap:"wrap",gap:6,justifyContent:"flex-end",alignItems:"center"}}>
+                    {rewardDaysList.map(d => (
+                      <span key={d} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"4px 4px 4px 10px",background:NAVY3,border:`1px solid ${GOLD}55`,borderRadius:14,fontSize:12,fontWeight:600,color:GOLD,whiteSpace:"nowrap"}}>
+                        {d}日
+                        <button
+                          type="button"
+                          onClick={() => setRewardDaysList(removeRewardDay(d))}
+                          aria-label={`${d}日を削除`}
+                          style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:18,height:18,padding:0,background:"transparent",border:"none",borderRadius:9,color:TEXT_MUTED,cursor:"pointer",fontSize:12,lineHeight:1}}
+                        >✕</button>
+                      </span>
+                    ))}
+                    <span style={{position:"relative",display:"inline-block"}}>
+                      <span style={{display:"inline-flex",alignItems:"center",padding:"4px 10px",background:"transparent",border:`1px dashed ${GOLD}88`,borderRadius:14,fontSize:12,fontWeight:600,color:GOLD,whiteSpace:"nowrap",cursor:"pointer"}}>＋ 追加</span>
+                      {/* 透明な date input を上に重ねてタップ領域にする(iOS Safari でネイティブピッカー起動)。 */}
+                      <input
+                        ref={rewardDayPickerRef}
+                        type="date"
+                        onChange={(e) => {
+                          const dateStr = e.target.value;
+                          if (!dateStr) return;
+                          const d = new Date(dateStr);
+                          if (Number.isNaN(d.getTime())) return;
+                          setRewardDaysList(addRewardDay(d.getDate()));
+                          // 次の追加に備えて値をクリア(同じ日を再選択しても onChange が再発火するように)
+                          e.target.value = "";
+                        }}
+                        style={{position:"absolute",inset:0,width:"100%",height:"100%",opacity:0,cursor:"pointer",border:"none",padding:0,margin:0,background:"transparent"}}
+                      />
+                    </span>
+                  </div>
                 ) : field.label === "管理スタート日" ? (
                   // 管理スタート日:draft 更新のみ。保存ボタンで setManagementStartDay() 経由で
                   // cfo_managementStartDay に書き込み + commit tick で全画面のサイクル派生 memo を再評価。
@@ -1894,19 +1936,14 @@ export default function App() {
             ))}
           </div>
           <div style={{margin:"16px 16px 0"}}>
-            {/* 保存ボタン:管理スタート日と報酬日(legacy)を別キーで永続化。
+            {/* 保存ボタン:管理スタート日のみを永続化(報酬日は Phase 2 でチップ追加/削除ごとに即時書込みに変更済み)。
                   - 管理スタート日 → setManagementStartDay() 経由で cfo_managementStartDay 書き込み
                                   + commit tick インクリメントで全画面のサイクル派生 memo を再評価
-                  - 報酬日 (legacy) → 直接 cfo_rewardDay_legacy に文字列書き込み(機能影響なし)
-                他 3 項目(名前/メール/電話)は依然 uncontrolled stub。Phase 2 で報酬日 UI を作り直す際に
-                ここの保存ハンドラも再構成する想定。 */}
+                他 3 項目(名前/メール/電話)は依然 uncontrolled stub。 */}
             <button
               onClick={() => {
                 setManagementStartDay(managementStartDayDraft);
                 setManagementStartDayCommitTick(t => t + 1);
-                if (typeof window !== 'undefined') {
-                  try { window.localStorage.setItem('cfo_rewardDay_legacy', legacyRewardDayDraft); } catch {}
-                }
                 setAccountSavedFlash(true);
                 setTimeout(() => setAccountSavedFlash(false), 2000);
               }}

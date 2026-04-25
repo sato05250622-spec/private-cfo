@@ -145,3 +145,93 @@ export function isInCycle(dateOrStr, year, month, managementStartDay) {
   const e = toDateStr(cycleEnd(year, month, managementStartDay));
   return dStr >= s && dStr <= e;
 }
+
+// =============================================================
+// 報酬日リスト(Phase 2):複数登録可能な「ただの記録」
+// -------------------------------------------------------------
+// localStorage('cfo_rewardDays') に number[] を JSON で保存。
+// 値は 1-31 の整数のみ受付。重複は自動で排除。順序は登録順を維持。
+// サイクル切替には一切影響しない(Phase 1 で managementStartDay へ完全移植済み)。
+// =============================================================
+
+const REWARD_DAYS_KEY = 'cfo_rewardDays';
+
+// 1-31 の整数 / null に正規化。文字列・数値どちらも受け付ける(チップ追加時 / 配列読み戻し時)。
+function normalizeDayValue(raw) {
+  if (raw == null) return null;
+  if (typeof raw === 'number') {
+    return Number.isInteger(raw) && raw >= 1 && raw <= 31 ? raw : null;
+  }
+  const s = String(raw).trim();
+  if (s === '') return null;
+  const n = Number(s);
+  return Number.isInteger(n) && n >= 1 && n <= 31 ? n : null;
+}
+
+export function getRewardDays() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(REWARD_DAYS_KEY);
+    if (raw == null) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // 不正値除去 + 重複排除しつつ登録順を維持
+    const seen = new Set();
+    const result = [];
+    for (const v of parsed) {
+      const n = normalizeDayValue(v);
+      if (n != null && !seen.has(n)) {
+        seen.add(n);
+        result.push(n);
+      }
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+export function setRewardDays(arr) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!Array.isArray(arr) || arr.length === 0) {
+      window.localStorage.removeItem(REWARD_DAYS_KEY);
+      return;
+    }
+    const seen = new Set();
+    const cleaned = [];
+    for (const v of arr) {
+      const n = normalizeDayValue(v);
+      if (n != null && !seen.has(n)) {
+        seen.add(n);
+        cleaned.push(n);
+      }
+    }
+    if (cleaned.length === 0) {
+      window.localStorage.removeItem(REWARD_DAYS_KEY);
+    } else {
+      window.localStorage.setItem(REWARD_DAYS_KEY, JSON.stringify(cleaned));
+    }
+  } catch {}
+}
+
+// 単一値を追加。重複なら既存リストをそのまま返す。返り値は最新リスト。
+export function addRewardDay(value) {
+  const n = normalizeDayValue(value);
+  const current = getRewardDays();
+  if (n == null) return current;
+  if (current.includes(n)) return current;
+  const next = [...current, n];
+  setRewardDays(next);
+  return next;
+}
+
+// 単一値を削除。返り値は最新リスト。
+export function removeRewardDay(value) {
+  const n = normalizeDayValue(value);
+  const current = getRewardDays();
+  if (n == null) return current;
+  const next = current.filter(d => d !== n);
+  setRewardDays(next);
+  return next;
+}
