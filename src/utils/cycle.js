@@ -81,53 +81,38 @@ export function findCycleOfDate(date, rewardDay) {
   };
 }
 
-// サイクル内の週リスト。
-// - 報酬日未設定:従来互換(最大 4 週、第4週が月末まで吸収)
-// - 報酬日設定済み:7 日刻み、端数は末週(仕様書の例と一致:5/25 起点→第5週 6/22-6/24)
+// サイクル内の週リスト。常に 4 週固定で、第 4 週がサイクル末日まで吸収する。
+// - 報酬日未設定(rd==null):カレンダー月の 1 日 起点、第 4 週が月末まで吸収。
+//                              28〜31 日月で常に 4 週、短い 2 月でも 4 週(第4週は1日でも残れば成立)。
+// - 報酬日設定済み:サイクル起点から 7 日刻みで 3 週、第 4 週は cycleEnd まで(7〜10 日)。
+//   例 5/25 起点 → 第1週 5/25-5/31、第2週 6/1-6/7、第3週 6/8-6/14、第4週 6/15-6/24(10 日)。
 // 返り値: [{ weekNum, weekKey, startDate, endDate, startStr(表示用 M/D), endStr }]
 export function weeksInCycle(year, month, rewardDay) {
-  const rd = normalizeRewardDay(rewardDay);
-
-  if (rd == null) {
-    const lastDay = new Date(year, month + 1, 0).getDate();
-    const result = [];
-    for (let wn = 1; wn <= 4; wn++) {
-      const startDay = 1 + (wn - 1) * 7;
-      if (startDay > lastDay) break;
-      const endDay = wn === 4 ? lastDay : Math.min(wn * 7, lastDay);
-      const s = new Date(year, month, startDay);
-      const e = new Date(year, month, endDay);
-      result.push({
-        weekNum: wn,
-        weekKey: `${year}-${month + 1}-w${wn}`,
-        startDate: s, endDate: e,
-        startStr: `${month + 1}/${startDay}`,
-        endStr: `${month + 1}/${endDay}`,
-      });
-    }
-    return result;
-  }
-
   const start = cycleStart(year, month, rewardDay);
   const end = cycleEnd(year, month, rewardDay);
   const result = [];
-  let wn = 1;
-  let cur = new Date(start);
-  while (cur <= end) {
-    const wEnd = new Date(cur);
-    wEnd.setDate(wEnd.getDate() + 6);
+  for (let wn = 1; wn <= 4; wn++) {
+    const wStart = new Date(start);
+    wStart.setDate(wStart.getDate() + (wn - 1) * 7);
+    // 第 1〜3 週は 7 日固定、第 4 週は cycleEnd まで(可変長)。
+    let wEnd;
+    if (wn === 4) {
+      wEnd = new Date(end);
+    } else {
+      wEnd = new Date(wStart);
+      wEnd.setDate(wEnd.getDate() + 6);
+    }
+    // セーフガード:cycle が極端に短い(<22 日想定外)場合に week start が end を超えたら打ち切り。
+    if (wStart > end) break;
     if (wEnd > end) wEnd.setTime(end.getTime());
     result.push({
       weekNum: wn,
       weekKey: `${year}-${month + 1}-w${wn}`,
-      startDate: new Date(cur),
-      endDate: new Date(wEnd),
-      startStr: `${cur.getMonth() + 1}/${cur.getDate()}`,
+      startDate: wStart,
+      endDate: wEnd,
+      startStr: `${wStart.getMonth() + 1}/${wStart.getDate()}`,
       endStr: `${wEnd.getMonth() + 1}/${wEnd.getDate()}`,
     });
-    cur = new Date(wEnd);
-    cur.setDate(cur.getDate() + 1);
-    wn++;
   }
   return result;
 }

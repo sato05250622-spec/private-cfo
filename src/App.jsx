@@ -283,7 +283,7 @@ export default function App() {
   }, [transactions, budgets, expenseCats, tmCycleStart, tmCycleEnd, todayCycle]);
 
   // weekSummary:calMonth(現在表示中のサイクル年月)に対応する週リスト + 集計。
-  // 報酬日サイクル準拠で weeksInCycle() を使用。週数は 4 or 5(端数週がある場合)。
+  // 報酬日サイクル準拠で weeksInCycle() を使用。常に 4 週(第 4 週がサイクル末日まで吸収)。
   const weekSummary = useMemo(() => {
     const {y, m} = calMonth;
     const cycWeeks = weeksInCycle(y, m, rewardDay);
@@ -1544,8 +1544,9 @@ export default function App() {
 
     if(menuScreen==="weekBudgetSetting"){
       const y=weekBudgetMonth.y,m=weekBudgetMonth.m;
-      // weeks 配列はサイクルベース。報酬日設定済みなら 4-5 週、未設定なら従来 4 週。
-      // {weekNum, weekKey, startStr, endStr} の形は従来互換、UI 側のグリッドが動的列数に対応する。
+      // weeks 配列はサイクルベース。常に 4 週(週 1〜3 は 7 日固定、第 4 週は cycleEnd まで)。
+      // {weekNum, weekKey, startStr, endStr} の形は従来互換、UI 側のグリッドはこれに合わせ
+      // 4 列固定(repeat(weeks.length,1fr) = repeat(4,1fr))で表示される。
       const weeks = weeksInCycle(y, m, rewardDay);
       const prevM=m===0?11:m-1;const prevY=m===0?y-1:y;
       // 先月コピーも 0 を尊重:truthy チェックだと prev が 0 のときにコピーされないので null 判定に変更。
@@ -1567,8 +1568,8 @@ export default function App() {
             <button style={S.navArrow} onClick={()=>setWeekBudgetMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};})}>›</button>
           </div>
           <div style={{margin:"0 12px",overflowX:"auto"}}>
-            {/* minWidth は週数に応じて動的:90(cat) + 週列(weeks.length × ~70) + 56(合計) + gap。
-                報酬日設定で 5 週になっても横スクロールで対応可能。 */}
+            {/* minWidth は週数に応じて動的(常に 4 週なので実質固定):
+                90(cat) + 4×68(week cells) + 56(合計) + 6×4(gap) = 442px。 */}
             <div style={{minWidth:90 + weeks.length * 68 + 56 + (weeks.length + 2) * 4}}>
               <div style={{display:"grid",gridTemplateColumns:`90px repeat(${weeks.length},1fr) 56px`,gap:4,marginBottom:4}}>
                 <div/>
