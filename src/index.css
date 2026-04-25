@@ -19,10 +19,18 @@ body,
 #root {
   margin: 0;
   padding: 0;
-  min-height: 100vh;
-  min-height: 100dvh;
+  /*
+   * height(min-height ではなく)を 100vh / 100dvh で固定。
+   * min-height だと content が高ければ伸びてしまい、孫要素の height:100% が
+   * 親 content-size に解決される iOS Safari の挙動で 3 層 flex が崩壊する。
+   * 100dvh は iOS Safari 16+ 用、100vh は古いブラウザ向けフォールバック。
+   */
+  height: 100vh;
+  height: 100dvh;
   background-color: var(--color-bg);
   color: var(--color-text);
+  /* iOS Safari でアドレスバー出入りに伴う document スクロールを抑止 */
+  overflow: hidden;
 }
 
 body {

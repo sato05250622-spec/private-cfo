@@ -530,8 +530,12 @@ export default function App() {
   };
 
   const S = {
-    app:{fontFamily:"'Hiragino Sans','Noto Sans JP','Yu Gothic UI','sans-serif'",maxWidth:430,margin:"0 auto",minHeight:"100vh",background:NAVY,display:"flex",flexDirection:"column",position:"relative",overflowX:"hidden"},
-    main:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:140},
+    // height:100%(#root の 100dvh に追従)+ minHeight:0 で flex 子が shrink 可能に。
+    // 旧 minHeight:100vh だと iOS Safari で content-size 依存のレイアウト崩壊が起きていた。
+    app:{fontFamily:"'Hiragino Sans','Noto Sans JP','Yu Gothic UI','sans-serif'",maxWidth:430,margin:"0 auto",height:"100%",minHeight:0,background:NAVY,display:"flex",flexDirection:"column",position:"relative",overflowX:"hidden"},
+    // minHeight:0 が無いと flex item が overflow:auto を持っていても content-size に固着し
+    // 内部スクロールが効かない(iOS Safari の典型バグ)。
+    main:{flex:1,overflowY:"auto",overflowX:"hidden",minHeight:0,paddingBottom:140},
     bottomNav:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:NAVY2,borderTop:`1px solid ${BORDER}`,display:"flex",zIndex:100,paddingBottom:"calc(env(safe-area-inset-bottom) + 8px)"},
     // 固定ゴールドボタン用:module-level 定数への参照で、毎レンダ同一参照を維持。
     // 実体は FIXED_SUBMIT_STYLE(GPU 合成レイヤー化済み)。
@@ -849,8 +853,10 @@ export default function App() {
           })}
         </div>
         </div>
-        {/* 中央ブロック(flex:1 overflow-y:auto):カテゴリグリッドと定期支出だけスクロール可 */}
-        <div style={{flex:1,overflowY:"auto",minHeight:0}}>
+        {/* 中央ブロック(flex:1 overflow-y:auto):カテゴリグリッドと定期支出だけスクロール可。
+            iOS 用に WebkitOverflowScrolling("touch") で慣性スクロール、
+            overscrollBehavior:"contain" で親(S.main / body)への scroll chaining を遮断。 */}
+        <div style={{flex:1,overflowY:"auto",minHeight:0,WebkitOverflowScrolling:"touch",overscrollBehavior:"contain"}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,padding:"8px 14px 0",background:NAVY}}>
           {expenseCats.map(cat=>{
             const isSelected=inputCategory===cat.id;
