@@ -1878,8 +1878,9 @@ export default function App() {
               {label:"電話番号",placeholder:"例：090-1234-5678",type:"tel"},
               // 報酬日:Phase 2 で複数登録チップ UI(iOS ネイティブカレンダーピッカー併用)。
               {label:"報酬日"},
-              // 管理スタート日:cycle 切替の本体機能(旧 rewardDay の役割)。空欄 → 1 日始まり(従来動作)。
-              {label:"管理スタート日",placeholder:"例：25(空欄なら1日始まり)",type:"text"},
+              // 管理スタート日:cycle 切替の本体機能(旧 rewardDay の役割)。
+              // Phase 2 追加修正で iOS ネイティブカレンダー + chip UI 化。空欄 → 1 日始まり(従来動作)。
+              {label:"管理スタート日"},
             ].map((field,i,arr)=>(
               <div key={i} style={{display:"flex",alignItems:"center",padding:"14px 16px",borderBottom:i<arr.length-1?`1px solid ${BORDER}`:"none",gap:12}}>
                 <span style={{fontSize:12,color:TEXT_SECONDARY,minWidth:80,fontWeight:500,alignSelf:field.label==="報酬日"&&rewardDaysList.length>0?"flex-start":"center",paddingTop:field.label==="報酬日"&&rewardDaysList.length>0?6:0}}>{field.label}</span>
@@ -1919,16 +1920,44 @@ export default function App() {
                     </span>
                   </div>
                 ) : field.label === "管理スタート日" ? (
-                  // 管理スタート日:draft 更新のみ。保存ボタンで setManagementStartDay() 経由で
-                  // cfo_managementStartDay に書き込み + commit tick で全画面のサイクル派生 memo を再評価。
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder={field.placeholder}
-                    value={managementStartDayDraft}
-                    onChange={(e) => setManagementStartDayDraft(e.target.value)}
-                    style={{flex:1,border:"none",background:"transparent",fontSize:14,outline:"none",color:TEXT_PRIMARY,textAlign:"right"}}
-                  />
+                  // 管理スタート日:単一値の置き換え式。報酬日と同じく iOS ネイティブカレンダー
+                  // ピッカー(<input type="date"> 上に透明 overlay)で「日」だけ抽出して draft に格納。
+                  // 永続化(localStorage 書込み)は下の保存ボタン onClick で commit する Phase 1 の流れを維持。
+                  // ✕ で空欄に戻せる(空 → 1 日始まりにフォールバック)。
+                  <div style={{flex:1,display:"flex",justifyContent:"flex-end",alignItems:"center",gap:6}}>
+                    {managementStartDayDraft && (
+                      <button
+                        type="button"
+                        onClick={() => setManagementStartDayDraft("")}
+                        aria-label="管理スタート日を空欄に戻す"
+                        style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:18,height:18,padding:0,background:"transparent",border:"none",borderRadius:9,color:TEXT_MUTED,cursor:"pointer",fontSize:12,lineHeight:1}}
+                      >✕</button>
+                    )}
+                    <span style={{position:"relative",display:"inline-block"}}>
+                      <span style={{
+                        display:"inline-flex",alignItems:"center",
+                        padding:"4px 10px",
+                        background: managementStartDayDraft ? NAVY3 : "transparent",
+                        border: `1px ${managementStartDayDraft ? "solid" : "dashed"} ${GOLD}${managementStartDayDraft ? "55" : "88"}`,
+                        borderRadius:14,fontSize:12,fontWeight:600,color:GOLD,whiteSpace:"nowrap",cursor:"pointer",
+                      }}>{managementStartDayDraft ? `${managementStartDayDraft}日` : "＋ 設定"}</span>
+                      {/* 透明な date input を上に重ねてタップ領域にする(iOS Safari でネイティブピッカー起動)。
+                          選択 → date.getDate() を draft state にセット(年月は無視、「日」のみ意味あり)。
+                          値クリア(e.target.value = "")で同じ日を再選択しても onChange を再発火させる。 */}
+                      <input
+                        type="date"
+                        onChange={(e) => {
+                          const dateStr = e.target.value;
+                          if (!dateStr) return;
+                          const d = new Date(dateStr);
+                          if (Number.isNaN(d.getTime())) return;
+                          setManagementStartDayDraft(String(d.getDate()));
+                          e.target.value = "";
+                        }}
+                        style={{position:"absolute",inset:0,width:"100%",height:"100%",opacity:0,cursor:"pointer",border:"none",padding:0,margin:0,background:"transparent"}}
+                      />
+                    </span>
+                  </div>
                 ) : (
                   <input type={field.type} placeholder={field.placeholder} style={{flex:1,border:"none",background:"transparent",fontSize:14,outline:"none",color:TEXT_PRIMARY,textAlign:"right"}}/>
                 )}
