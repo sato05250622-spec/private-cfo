@@ -6,7 +6,7 @@ import App from '../App';
 
 const S = {
   loading: {
-    minHeight: '100vh',
+    minHeight: '100dvh',
     background: NAVY,
     display: 'flex',
     alignItems: 'center',

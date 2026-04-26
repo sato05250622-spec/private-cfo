@@ -55,7 +55,7 @@ export default function AppointmentCard({ onBack }) {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: NAVY }}>
+    <div style={{ minHeight: '100dvh', background: NAVY }}>
       <div style={{ background: NAVY2, padding: '13px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${BORDER}`, position: 'sticky', top: 0, zIndex: 10, boxShadow: SHADOW }}>
         <button onClick={onBack} style={{ background: 'none', border: 'none', color: GOLD, fontSize: 20, cursor: 'pointer' }}>‹</button>
         <span style={{ fontWeight: 600, fontSize: 15, color: TEXT_PRIMARY }}>面談予定</span>

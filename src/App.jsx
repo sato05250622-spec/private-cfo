@@ -605,7 +605,7 @@ export default function App() {
     calGrid:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",background:CARD_BG},
     menuItem:{display:"flex",alignItems:"center",gap:12,padding:"15px 20px",borderBottom:`1px solid ${BORDER}`,cursor:"pointer",background:CARD_BG},
     listItem:{display:"flex",alignItems:"center",gap:12,padding:"13px 20px",borderBottom:`1px solid ${BORDER}`,background:CARD_BG,cursor:"pointer"},
-    overlay:{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:NAVY,zIndex:200,display:"flex",flexDirection:"column",overflowY:"auto"},
+    overlay:{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:NAVY,zIndex:200,display:"flex",flexDirection:"column",overflowY:"auto"},
     overlayHeader:{background:NAVY2,padding:"13px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${BORDER}`,position:"sticky",top:0,zIndex:10,boxShadow:SHADOW},
     summaryBar:{display:"flex",gap:0,background:CARD_BG,borderBottom:`1px solid rgba(212,168,67,0.1)`},
     summaryCell:(border)=>({flex:1,padding:"10px 0",textAlign:"center",borderRight:border?`1px solid ${BORDER}`:"none"}),
@@ -1396,7 +1396,7 @@ export default function App() {
 
   const renderMenu = () => {
     if(menuScreen==="catNew") return (
-      <div style={{display:"flex",flexDirection:"column",minHeight:"100vh",background:CREAM}}>
+      <div style={{display:"flex",flexDirection:"column",minHeight:"100dvh",background:CREAM}}>
         <div style={{...S.overlayHeader,position:"sticky",top:0,zIndex:10}}>
           <button onClick={()=>setMenuScreen("catEdit")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
           <span style={{fontWeight:400,fontSize:15,color:TEXT_PRIMARY}}>新規制作</span>
@@ -1416,7 +1416,7 @@ export default function App() {
           <ColorPicker selected={newCatColor} onSelect={setNewCatColor}/>
           <div style={{height:12,background:CREAM}}/>
         </div>
-        <div style={{position:"fixed",bottom:60,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:CARD_BG,padding:"12px 18px 12px",borderTop:"1px solid #f0f0f0",zIndex:150}}>
+        <div style={{position:"fixed",bottom:"calc(60px + env(safe-area-inset-bottom) + 8px)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:CARD_BG,padding:"12px 18px 12px",borderTop:"1px solid #f0f0f0",zIndex:150}}>
           <button onClick={addNewCategory} style={{display:"block",width:"100%",padding:"16px",background:newCatName.trim()?ORANGE:"#eee",color:newCatName.trim()?"#fff":"#aaa",border:"none",borderRadius:28,fontSize:16,fontWeight:700,cursor:"pointer"}}>保存</button>
         </div>
       </div>
@@ -1463,7 +1463,7 @@ export default function App() {
     );
 
     if(menuScreen==="catEditDetail"&&editingCat) return(
-      <div style={{display:"flex",flexDirection:"column",minHeight:"100vh",background:CREAM}}>
+      <div style={{display:"flex",flexDirection:"column",minHeight:"100dvh",background:CREAM}}>
         <div style={{...S.overlayHeader,position:"sticky",top:0,zIndex:10}}>
           <button onClick={()=>setMenuScreen("catEdit")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
           <span style={{fontWeight:400,fontSize:15,color:TEXT_PRIMARY}}>{editingCat.label}を編集</span>
@@ -1483,7 +1483,7 @@ export default function App() {
           <ColorPicker selected={editColor} onSelect={setEditColor}/>
           <div style={{height:12,background:CREAM}}/>
         </div>
-        <div style={{position:"fixed",bottom:60,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:CARD_BG,padding:"12px 18px 12px",borderTop:"1px solid #f0f0f0",zIndex:150}}>
+        <div style={{position:"fixed",bottom:"calc(60px + env(safe-area-inset-bottom) + 8px)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:CARD_BG,padding:"12px 18px 12px",borderTop:"1px solid #f0f0f0",zIndex:150}}>
           <button
             onClick={() => {
               updateCategoryDb(editingCat.id, { label: editName, iconKey: editIcon, color: editColor })
@@ -1540,7 +1540,7 @@ export default function App() {
     if(menuScreen==="paymentNew"){
       const isEdit = !!editingPaymentId;
       return(
-        <div style={{display:"flex",flexDirection:"column",minHeight:"100vh",background:CREAM}}>
+        <div style={{display:"flex",flexDirection:"column",minHeight:"100dvh",background:CREAM}}>
           <div style={{...S.overlayHeader,position:"sticky",top:0,zIndex:10}}>
             <button onClick={()=>setMenuScreen("paymentEdit")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
             <span style={{fontWeight:700,fontSize:16}}>{isEdit?"支払い方法を編集":"新規支払い方法"}</span>
@@ -1594,7 +1594,7 @@ export default function App() {
             <div style={{height:12,background:CREAM}}/>
           </div>
           {showDayCalc&&(
-            <div onClick={()=>setShowDayCalc(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
+            <div onClick={()=>setShowDayCalc(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
               <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(30px + env(safe-area-inset-bottom))"}}>
                 <div style={{padding:"14px 20px 10px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                   <span style={{fontSize:13,color:TEXT_SECONDARY}}>{showDayCalc==="closing"?"締日":"引き落とし日"}</span>
@@ -1619,7 +1619,7 @@ export default function App() {
               </div>
             </div>
           )}
-          <div style={{position:"fixed",bottom:60,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:CARD_BG,padding:"12px 18px 12px",borderTop:"1px solid #f0f0f0",zIndex:150}}>
+          <div style={{position:"fixed",bottom:"calc(60px + env(safe-area-inset-bottom) + 8px)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:CARD_BG,padding:"12px 18px 12px",borderTop:"1px solid #f0f0f0",zIndex:150}}>
             <button onClick={()=>{if(!paymentDraft.label.trim())return;if(isEdit){setPaymentMethods(p=>p.map(x=>x.id===editingPaymentId?{...x,label:paymentDraft.label,color:paymentDraft.color,closingDay:paymentDraft.closingDay,withdrawalDay:paymentDraft.withdrawalDay,bank:paymentDraft.bank}:x));}else{setPaymentMethods(p=>[...p,{id:`pm_${Date.now()}`,label:paymentDraft.label,color:paymentDraft.color,closingDay:paymentDraft.closingDay,withdrawalDay:paymentDraft.withdrawalDay,bank:paymentDraft.bank}]);}setMenuScreen("paymentEdit");}} style={{display:"block",width:"100%",padding:"16px",background:paymentDraft.label.trim()?ORANGE:"#eee",color:paymentDraft.label.trim()?"#fff":"#aaa",border:"none",borderRadius:28,fontSize:16,fontWeight:700,cursor:"pointer"}}>保存</button>
           </div>
         </div>
@@ -1636,7 +1636,7 @@ export default function App() {
       // 先月コピーも 0 を尊重:truthy チェックだと prev が 0 のときにコピーされないので null 判定に変更。
       const copyLastMonth=()=>{const next={...weekCatBudgets};weeks.forEach(w=>{expenseCats.forEach(cat=>{const prevKey=`${prevY}-${prevM+1}-w${w.weekNum}_${cat.id}`;const thisKey=`${w.weekKey}_${cat.id}`;if(weekCatBudgets[prevKey]!=null)next[thisKey]=weekCatBudgets[prevKey];});});setWeekCatBudgets(next);};
       return(
-        <div style={{minHeight:"100vh",background:NAVY}}>
+        <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}>
             <button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
             <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>週予算設定</span>
@@ -1701,7 +1701,7 @@ export default function App() {
             </div>
           </div>
           {allWeekTarget&&(
-            <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:300,display:"flex",alignItems:"flex-end"}}>
+            <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.6)",zIndex:300,display:"flex",alignItems:"flex-end"}}>
               <div style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(24px + env(safe-area-inset-bottom))"}}>
                 <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px 12px",borderBottom:`1px solid ${BORDER}`}}>
                   <CatSvgIcon cat={allWeekTarget} size={28}/>
@@ -1723,8 +1723,8 @@ export default function App() {
               </div>
             </div>
           )}
-          {showClearConfirm&&(<div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{background:NAVY2,borderRadius:20,padding:"28px 24px",margin:"0 24px",border:`1px solid ${BORDER}`,width:"100%"}}><div style={{textAlign:"center",marginBottom:20}}><div style={{fontSize:24,marginBottom:10}}>🗑️</div><div style={{fontSize:16,fontWeight:700,color:TEXT_PRIMARY,marginBottom:8}}>予算を全て削除</div></div><div style={{display:"flex",gap:10}}><button onClick={()=>{const next={...weekCatBudgets};weeks.forEach(w=>{expenseCats.forEach(cat=>{delete next[`${w.weekKey}_${cat.id}`];});});setWeekCatBudgets(next);setShowClearConfirm(false);}} style={{flex:1,padding:"14px",background:`${RED}22`,border:`1px solid ${RED}44`,borderRadius:14,fontSize:15,fontWeight:700,color:RED,cursor:"pointer"}}>はい</button><button onClick={()=>setShowClearConfirm(false)} style={{flex:1,padding:"14px",background:"none",border:`1px solid ${BORDER}`,borderRadius:14,fontSize:15,fontWeight:600,color:TEXT_SECONDARY,cursor:"pointer"}}>いいえ</button></div></div></div>)}
-          {showCopyConfirm&&(<div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{background:NAVY2,borderRadius:20,padding:"28px 24px",margin:"0 24px",border:`1px solid ${BORDER}`,width:"100%"}}><div style={{textAlign:"center",marginBottom:20}}><div style={{fontSize:24,marginBottom:10}}>📋</div><div style={{fontSize:16,fontWeight:700,color:TEXT_PRIMARY,marginBottom:8}}>先月と同じ予算を設定</div></div><div style={{display:"flex",gap:10}}><button onClick={()=>{copyLastMonth();setShowCopyConfirm(false);}} style={{flex:1,padding:"14px",background:GOLD_GRAD,border:"none",borderRadius:14,fontSize:15,fontWeight:700,color:"#0A1628",cursor:"pointer"}}>はい</button><button onClick={()=>setShowCopyConfirm(false)} style={{flex:1,padding:"14px",background:"none",border:`1px solid ${BORDER}`,borderRadius:14,fontSize:15,fontWeight:600,color:TEXT_SECONDARY,cursor:"pointer"}}>いいえ</button></div></div></div>)}
+          {showClearConfirm&&(<div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{background:NAVY2,borderRadius:20,padding:"28px 24px",margin:"0 24px",border:`1px solid ${BORDER}`,width:"100%"}}><div style={{textAlign:"center",marginBottom:20}}><div style={{fontSize:24,marginBottom:10}}>🗑️</div><div style={{fontSize:16,fontWeight:700,color:TEXT_PRIMARY,marginBottom:8}}>予算を全て削除</div></div><div style={{display:"flex",gap:10}}><button onClick={()=>{const next={...weekCatBudgets};weeks.forEach(w=>{expenseCats.forEach(cat=>{delete next[`${w.weekKey}_${cat.id}`];});});setWeekCatBudgets(next);setShowClearConfirm(false);}} style={{flex:1,padding:"14px",background:`${RED}22`,border:`1px solid ${RED}44`,borderRadius:14,fontSize:15,fontWeight:700,color:RED,cursor:"pointer"}}>はい</button><button onClick={()=>setShowClearConfirm(false)} style={{flex:1,padding:"14px",background:"none",border:`1px solid ${BORDER}`,borderRadius:14,fontSize:15,fontWeight:600,color:TEXT_SECONDARY,cursor:"pointer"}}>いいえ</button></div></div></div>)}
+          {showCopyConfirm&&(<div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{background:NAVY2,borderRadius:20,padding:"28px 24px",margin:"0 24px",border:`1px solid ${BORDER}`,width:"100%"}}><div style={{textAlign:"center",marginBottom:20}}><div style={{fontSize:24,marginBottom:10}}>📋</div><div style={{fontSize:16,fontWeight:700,color:TEXT_PRIMARY,marginBottom:8}}>先月と同じ予算を設定</div></div><div style={{display:"flex",gap:10}}><button onClick={()=>{copyLastMonth();setShowCopyConfirm(false);}} style={{flex:1,padding:"14px",background:GOLD_GRAD,border:"none",borderRadius:14,fontSize:15,fontWeight:700,color:"#0A1628",cursor:"pointer"}}>はい</button><button onClick={()=>setShowCopyConfirm(false)} style={{flex:1,padding:"14px",background:"none",border:`1px solid ${BORDER}`,borderRadius:14,fontSize:15,fontWeight:600,color:TEXT_SECONDARY,cursor:"pointer"}}>いいえ</button></div></div></div>)}
           <div style={{height:20}}/>
         </div>
       );
@@ -1736,7 +1736,7 @@ export default function App() {
 
     if(menuScreen==="contact"){
       return(
-        <div style={{minHeight:"100vh",background:NAVY}}>
+        <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}>
             <button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
             <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>お問い合わせ</span>
@@ -1802,7 +1802,7 @@ export default function App() {
 
     if(menuScreen==="loanSetting"){
       return(
-        <div style={{minHeight:"100vh",background:NAVY}}>
+        <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}>
             <button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
             <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>🔁 定期支出</span>
@@ -1837,7 +1837,7 @@ export default function App() {
     }
 
     if(menuScreen==="pointHistory") return(
-      <div style={{minHeight:"100vh",background:NAVY}}>
+      <div style={{minHeight:"100dvh",background:NAVY}}>
         <div style={S.overlayHeader}><button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>ポイント履歴</span><span style={{width:40}}/></div>
         <div style={{margin:"12px 16px 0",background:`linear-gradient(135deg,${NAVY2},#1A2C42)`,borderRadius:16,padding:"20px",border:`1px solid ${GOLD}55`,textAlign:"center"}}>
           <div style={{fontSize:11,color:TEXT_MUTED,marginBottom:6}}>保有ポイント</div>
@@ -1857,7 +1857,7 @@ export default function App() {
       // 今日が属するサイクルの y / 1-indexed month を表示用に取得。
       const y=todayCycle.year, m=todayCycle.month+1;
       return(
-        <div style={{minHeight:"100vh",background:NAVY}}>
+        <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}>
             <button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer",fontWeight:300}}>‹</button>
             <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{y}年{m}月　レポート</span>
@@ -1898,7 +1898,7 @@ export default function App() {
 
     if(menuScreen==="accountSetting"){
       return(
-        <div style={{minHeight:"100vh",background:NAVY}}>
+        <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}>
             <button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
             <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>アカウント設定</span>
@@ -2019,7 +2019,7 @@ export default function App() {
     }
 
     if(menuScreen==="monthlyReport") return(
-      <div style={{minHeight:"100vh",background:NAVY,display:"flex",flexDirection:"column"}}>
+      <div style={{minHeight:"100dvh",background:NAVY,display:"flex",flexDirection:"column"}}>
         <div style={S.overlayHeader}><button onClick={()=>{setMenuScreen("main");setReportSearchQuery("");}} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>月別レポート</span><span style={{width:40}}/></div>
         <div style={{padding:"10px 16px",background:NAVY2,borderBottom:`1px solid ${BORDER}`}}>
           <div style={{display:"flex",alignItems:"center",background:NAVY3,borderRadius:10,padding:"8px 14px",gap:8,border:`1px solid ${BORDER}`}}>
@@ -2055,7 +2055,7 @@ export default function App() {
     if(menuScreen&&menuScreen.startsWith("report_")){
       const parts=menuScreen.split("_");const ry=Number(parts[1]);const rm=Number(parts[2]);
       return(
-        <div style={{minHeight:"100vh",background:NAVY}}>
+        <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}><button onClick={()=>setMenuScreen("monthlyReport")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{ry}年{rm}月　レポート</span><span style={{width:40}}/></div>
           <div style={{margin:"16px 16px 0",display:"flex",flexDirection:"column",gap:12}}>
             <div style={{background:CARD_BG,borderRadius:16,border:`1px solid ${BORDER}`,overflow:"hidden"}}><div style={{padding:"16px 18px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",gap:12}}><div style={{width:44,height:44,borderRadius:12,background:`${GOLD}22`,border:`1px solid ${GOLD}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>📄</div><div><div style={{fontSize:14,fontWeight:700,color:TEXT_PRIMARY}}>管理繰越票</div><div style={{fontSize:10,color:TEXT_MUTED,marginTop:2}}>{ry}年{rm}月分</div></div></div><div style={{padding:"14px 18px",background:NAVY2,textAlign:"center"}}><div style={{fontSize:11,color:TEXT_MUTED,marginBottom:6}}>Supabase連携後に本部から送付されます</div><div style={{fontSize:10,color:`${GOLD}88`,background:`${GOLD}11`,borderRadius:8,padding:"6px 12px",display:"inline-block"}}>準備中</div></div></div>
@@ -2157,7 +2157,7 @@ export default function App() {
         });
         const cardTotal=cardBreakdown.reduce((s,c)=>s+c.total,0);const grandTotal=cashTotal+cardTotal;
         return(
-          <div onClick={()=>setShowMonthSummary(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex",alignItems:"flex-end"}}>
+          <div onClick={()=>setShowMonthSummary(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex",alignItems:"flex-end"}}>
             <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,maxHeight:"85vh",display:"flex",flexDirection:"column"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px 8px",flexShrink:0}}>
                 <span style={{fontSize:15,fontWeight:700,color:TEXT_PRIMARY}}>{y}年{m}月 支出サマリー</span>
@@ -2265,7 +2265,7 @@ export default function App() {
       {/* 定期モーダル */}
       {/* 定期支出削除確認モーダル */}
       {deleteLoanTarget&&(
-        <div onClick={()=>setDeleteLoanTarget(null)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.7)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div onClick={()=>setDeleteLoanTarget(null)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.7)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center"}}>
           <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,borderRadius:20,padding:"28px 24px",margin:"0 24px",border:`1px solid ${BORDER}`,width:"100%"}}>
             <div style={{textAlign:"center",marginBottom:20}}>
               <div style={{fontSize:32,marginBottom:10}}>🗑️</div>
@@ -2282,8 +2282,8 @@ export default function App() {
 
       {/* ローンフォームモーダル */}
       {showLoanForm&&(
-        <div onClick={()=>setShowLoanForm(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:24,maxHeight:"85vh",overflowY:"auto"}}>
+        <div onClick={()=>setShowLoanForm(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(24px + env(safe-area-inset-bottom))",maxHeight:"85dvh",overflowY:"auto"}}>
             <div style={{padding:"16px 20px 10px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <span style={{fontSize:15,fontWeight:700,color:TEXT_PRIMARY}}>🔁 {editingLoanId?"定期支出編集":"定期支出追加"}</span>
               <button onClick={()=>setShowLoanForm(false)} style={{background:"none",border:"none",fontSize:22,color:TEXT_MUTED,cursor:"pointer"}}>✕</button>
@@ -2328,8 +2328,8 @@ export default function App() {
 
       {/* 定期支出月額電卓モーダル */}
       {showLoanCalc&&(
-        <div onClick={()=>setShowLoanCalc(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.7)",zIndex:700,display:"flex",alignItems:"flex-end"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:24}}>
+        <div onClick={()=>setShowLoanCalc(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.7)",zIndex:700,display:"flex",alignItems:"flex-end"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(24px + env(safe-area-inset-bottom))"}}>
             <div style={{padding:"14px 20px 10px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"baseline",justifyContent:"flex-end",gap:6}}>
               <span style={{fontSize:42,fontWeight:700,color:loanDraft.amount?TEXT_PRIMARY:TEXT_MUTED}}>{loanDraft.amount||"0"}</span>
               <span style={{fontSize:16,color:TEXT_SECONDARY}}>円</span>
@@ -2350,8 +2350,8 @@ export default function App() {
 
       {/* ── 日付カレンダーモーダル ── */}
       {showDatePicker&&(
-        <div onClick={()=>setShowDatePicker(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.65)",zIndex:400,display:"flex",alignItems:"flex-end"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:28}}>
+        <div onClick={()=>setShowDatePicker(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.65)",zIndex:400,display:"flex",alignItems:"flex-end"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(28px + env(safe-area-inset-bottom))"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px 12px",borderBottom:`1px solid ${BORDER}`}}>
               <button onClick={()=>setDatePickerMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};})} style={{background:"none",border:"none",color:GOLD,fontSize:22,cursor:"pointer",padding:"0 8px"}}>‹</button>
               <span style={{fontSize:16,fontWeight:700,color:TEXT_PRIMARY}}>{datePickerMonth.y}年{datePickerMonth.m+1}月</span>
@@ -2401,7 +2401,7 @@ export default function App() {
 
       {/* 電卓モーダル */}
       {showCalc&&(
-        <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex",flexDirection:"column",justifyContent:"flex-end"}} onClick={()=>setShowCalc(false)}>
+        <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex",flexDirection:"column",justifyContent:"flex-end"}} onClick={()=>setShowCalc(false)}>
           <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(30px + env(safe-area-inset-bottom))"}}>
             <div style={{padding:"16px 20px 10px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"flex-end",justifyContent:"flex-end",gap:8}}>
               <span style={{fontSize:46,fontWeight:400,color:inputAmount?TEXT_PRIMARY:TEXT_MUTED,lineHeight:1}}>{inputAmount||"0"}</span>
@@ -2421,7 +2421,7 @@ export default function App() {
 
       {/* カテゴリ予算モーダル */}
       {showCatBudgetModal&&catBudgetTarget&&(
-        <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:300,display:"flex",alignItems:"flex-end"}}>
+        <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.6)",zIndex:300,display:"flex",alignItems:"flex-end"}}>
           <div style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(24px + env(safe-area-inset-bottom))"}}>
             <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px 12px",borderBottom:`1px solid ${BORDER}`}}>
               <CatSvgIcon cat={catBudgetTarget} size={28}/>

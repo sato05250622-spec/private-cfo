@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext';
 
 const S = {
   wrap: {
-    minHeight: '100vh', background: NAVY,
+    minHeight: '100dvh', background: NAVY,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     padding: 24,
   },
