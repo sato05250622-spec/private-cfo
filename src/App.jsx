@@ -774,11 +774,16 @@ export default function App() {
   // ============================================================
   // ★ カテゴリボックス（絶対配置フィル＋縦線・テキスト絶対切れない）
   // ============================================================
-  const CatTwoBox = ({ cat, spent, weekCatBudget, catPct, catPctRaw, isLast, periodLabel = '週' }) => {
-    const isOver = weekCatBudget > 0 && spent > weekCatBudget;
-    const isWarn = weekCatBudget > 0 && catPct >= 80 && !isOver;
-    // 〜79%: TEAL / 80〜99%: 黄 / 100%+: 赤
-    const themeColor = catPct >= 100 ? RED : catPct >= 80 ? "#FFC107" : TEAL;
+  const CatTwoBox = ({ cat, spent, weekCatBudget, catPct, catPctRaw, hasBudget, isLast, periodLabel = '週' }) => {
+    // hasBudget:明示的に予算が設定されているか(0 円も「立派な予算設定」として true)。
+    // 旧呼び出し互換:hasBudget が未指定の場合は weekCatBudget>0 で代用。
+    const hasBudgetSafe = hasBudget != null ? hasBudget : weekCatBudget > 0;
+    // 予算 0 円 + 支出 0 円 = 残 0(超過なし)。予算 0 円 + 支出>0 = 即超過(spent > 0)。
+    const isOver = hasBudgetSafe && spent > weekCatBudget;
+    const isWarn = hasBudgetSafe && catPct >= 80 && !isOver;
+    // 〜79%: TEAL / 80〜99%: 黄 / 100%+ または超過: 赤
+    // 予算 0 円で支出ありの場合、catPct は 100 にクランプされるが isOver で確実に赤化される。
+    const themeColor = (isOver || catPct >= 100) ? RED : catPct >= 80 ? "#FFC107" : TEAL;
     const cRemain = weekCatBudget - spent;
     const displayCatPct = catPctRaw != null ? catPctRaw : catPct;
     // 呼び出し側でフィルタリング済みなので、ここでは早期returnしない
@@ -789,7 +794,7 @@ export default function App() {
             <CatSvgIcon cat={cat} size={15}/>
             <span style={{fontSize:12,fontWeight:700,color:TEXT_PRIMARY}}>{cat.label}</span>
           </div>
-          {weekCatBudget > 0 && (
+          {hasBudgetSafe && (
             <span style={{fontSize:10,color:TEXT_MUTED}}>
               予算 <span style={{color:TEXT_PRIMARY,fontWeight:700}}>{weekCatBudget.toLocaleString()}</span>円（{periodLabel}）
             </span>
@@ -801,8 +806,8 @@ export default function App() {
           overflow:"hidden",
           position:"relative",
         }}>
-          {/* 進捗フィル背景 */}
-          {weekCatBudget > 0 && (
+          {/* 進捗フィル背景:予算 0 円のときも catPct(=spent クランプ)で赤フィル表示 */}
+          {hasBudgetSafe && (
             <div style={{
               position:"absolute", top:0, left:0, height:"100%",
               width:`${Math.min(100,catPct)}%`,
@@ -811,8 +816,8 @@ export default function App() {
               pointerEvents:"none",
             }}/>
           )}
-          {/* 縦の仕切り線 */}
-          {weekCatBudget > 0 && (
+          {/* 縦の仕切り線:予算 0 円では分子分母比が無いので非表示(weekCatBudget>0 時のみ) */}
+          {hasBudgetSafe && weekCatBudget > 0 && (
             <div style={{
               position:"absolute", top:0, left:`${Math.min(100,catPct)}%`,
               width:1.5, height:"100%",
@@ -824,15 +829,15 @@ export default function App() {
           {/* 左テキスト */}
           <div style={{flex:1,padding:"4px 12px",position:"relative",zIndex:1,display:"flex",alignItems:"center",gap:4,overflow:"hidden"}}>
             <span style={{fontSize:13,fontWeight:700,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{spent.toLocaleString()}円</span>
-            {weekCatBudget > 0 && (
+            {hasBudgetSafe && (
               <span style={{fontSize:11,fontWeight:700,color:themeColor,whiteSpace:"nowrap"}}>({displayCatPct}%)</span>
             )}
           </div>
           {/* 右テキスト（右寄せ） */}
           <div style={{flex:1,padding:"4px 12px",position:"relative",zIndex:1,display:"flex",alignItems:"center",justifyContent:"flex-end",gap:2}}>
             <span style={{fontSize:10,color:TEXT_MUTED,whiteSpace:"nowrap"}}>残</span>
-            <span style={{fontSize:13,fontWeight:700,color:weekCatBudget>0?themeColor:TEXT_MUTED,whiteSpace:"nowrap"}}>
-              {weekCatBudget>0?(isOver?`-${Math.abs(cRemain).toLocaleString()}`:cRemain.toLocaleString()):"−"}円
+            <span style={{fontSize:13,fontWeight:700,color:hasBudgetSafe?themeColor:TEXT_MUTED,whiteSpace:"nowrap"}}>
+              {hasBudgetSafe?(isOver?`-${Math.abs(cRemain).toLocaleString()}`:cRemain.toLocaleString()):"−"}円
             </span>
           </div>
         </div>
@@ -913,13 +918,17 @@ export default function App() {
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,padding:"8px 14px 0",background:NAVY}}>
           {expenseCats.map(cat=>{
             const isSelected=inputCategory===cat.id;
-            // inputDate が属するサイクルの「現在週」のキーで予算/支出を引く
+            // inputDate が属するサイクルの「現在週」のキーで予算/支出を引く。
+            // 0 円明示も「予算あり」扱い:rawWeekCatBudget が null/undefined のときだけ未設定。
             const wKey = thisWeek.weekKey;
-            const weekCatBudget = weekCatBudgets[`${wKey}_${cat.id}`] || 0;
+            const rawWeekCatBudget = weekCatBudgets[`${wKey}_${cat.id}`];
+            const hasWeekCatBudget = rawWeekCatBudget != null;
+            const weekCatBudget = hasWeekCatBudget ? rawWeekCatBudget : 0;
             const wStart = toDateStr(thisWeek.startDate);
             const wEnd = toDateStr(thisWeek.endDate);
             const weekCatSpent = transactions.filter(t=>t.category===cat.id&&t.date>=wStart&&t.date<=wEnd).reduce((s,t)=>s+t.amount,0);
-            const weekRemainCat = weekCatBudget>0 ? weekCatBudget - weekCatSpent : null;
+            // 予算明示済みなら remainCat 計算(0 円 - 支出 N = -N で「超 N」表示に乗せる)。
+            const weekRemainCat = hasWeekCatBudget ? (weekCatBudget - weekCatSpent) : null;
             const isOver = weekRemainCat!==null&&weekRemainCat<0;
             const alertItem=budgetAlerts.find(a=>a.cat.id===cat.id);
             return(
@@ -1035,13 +1044,20 @@ export default function App() {
 
             const catBreakdownData = expenseCats.map(cat=>{
               const spent = transactions.filter(t=>t.category===cat.id&&t.date>=w.startStr&&t.date<=w.endStr).reduce((s,t)=>s+t.amount,0);
-              const weekCatBudget = weekCatBudgets[`${w.weekKey}_${cat.id}`] || 0;
-              // 月予算もチェック（週予算がなければ月予算/4を参考値として使用）
-              const directBudget = budgets[`${y}-${m+1}-${cat.id}`] || 0;
-              const hasAnyBudget = weekCatBudget > 0 || directBudget > 0;
-              const catPctRaw = weekCatBudget>0 ? Math.round(spent/weekCatBudget*100) : 0;
+              // 週予算キーが localStorage に存在するか(0 円明示も含む)で hasWeekCatBudget を判定。
+              const rawWeekCatBudget = weekCatBudgets[`${w.weekKey}_${cat.id}`];
+              const hasWeekCatBudget = rawWeekCatBudget != null;
+              const weekCatBudget = hasWeekCatBudget ? rawWeekCatBudget : 0;
+              // 月予算も同様に明示判定(0 円明示も含む)。
+              const rawDirectBudget = budgets[`${y}-${m+1}-${cat.id}`];
+              const hasDirectBudget = rawDirectBudget != null;
+              const hasAnyBudget = hasWeekCatBudget || hasDirectBudget;
+              // 予算 0 円: 1 円 = 1% 換算(spent 円 = spent %)。予算 > 0: 通常比率。予算なし: 0%。
+              const catPctRaw = hasWeekCatBudget
+                ? (weekCatBudget > 0 ? Math.round(spent/weekCatBudget*100) : spent)
+                : 0;
               const catPct = Math.min(100, catPctRaw);
-              return {cat, spent, weekCatBudget, catPct, catPctRaw, hasAnyBudget};
+              return {cat, spent, weekCatBudget, hasWeekCatBudget, catPct, catPctRaw, hasAnyBudget};
             });
 
             return (
@@ -1077,12 +1093,13 @@ export default function App() {
                 {/* ── 展開：カテゴリ別内訳（2ボックス形式） ── */}
                 {isExpanded&&(
                   <div style={{borderTop:`1px solid ${BORDER}`,padding:"14px 16px 14px",background:"#1E2330"}}>
-                    {catBreakdownData.map(({cat,spent,weekCatBudget,catPct,catPctRaw,hasAnyBudget},idx,arr)=>{
-                      const visible = arr.filter(x=>x.spent>0||x.weekCatBudget>0||x.hasAnyBudget);
+                    {catBreakdownData.map(({cat,spent,weekCatBudget,hasWeekCatBudget,catPct,catPctRaw,hasAnyBudget},idx,arr)=>{
+                      // 0 円明示も「予算あり」扱い。spent も hasAnyBudget も 0/false なら非表示。
+                      const visible = arr.filter(x=>x.spent>0||x.hasAnyBudget);
                       const visIdx = visible.findIndex(x=>x.cat.id===cat.id);
-                      if(spent===0&&weekCatBudget===0&&!hasAnyBudget) return null;
+                      if(spent===0&&!hasAnyBudget) return null;
                       return(
-                        <CatTwoBox key={cat.id} cat={cat} spent={spent} weekCatBudget={weekCatBudget} catPct={catPct} catPctRaw={catPctRaw} isLast={visIdx===visible.length-1}/>
+                        <CatTwoBox key={cat.id} cat={cat} spent={spent} weekCatBudget={weekCatBudget} catPct={catPct} catPctRaw={catPctRaw} hasBudget={hasWeekCatBudget} isLast={visIdx===visible.length-1}/>
                       );
                     })}
                     <div style={{borderTop:`1px solid rgba(255,255,255,0.1)`,marginTop:16,paddingTop:14}}>
@@ -1188,17 +1205,30 @@ export default function App() {
               <div style={{fontWeight:400,fontSize:13,padding:"16px 18px 10px",color:TEXT_SECONDARY}}>カテゴリー別支出</div>
               <div style={{padding:"0 18px 16px"}}>
                 {(()=>{
-                  // 月予算:直接設定 → なければ週予算×4週の合計
+                  // 月予算:直接設定 → なければ週予算×4週の合計。0 円明示も「予算あり」扱い。
                   const items = expenseCats.map(cat=>{
                     const spent = reportTxs.filter(t=>t.category===cat.id).reduce((s,t)=>s+t.amount,0);
-                    const directBudget = budgets[`${y}-${m+1}-${cat.id}`] || 0;
-                    const weeklyBudgetSum = [1,2,3,4].reduce((s,wn)=>s+(weekCatBudgets[`${y}-${m+1}-w${wn}_${cat.id}`]||0),0);
-                    const catBudget = directBudget>0 ? directBudget : weeklyBudgetSum;
-                    return { cat, spent, catBudget };
-                  }).filter(x => x.spent>0 || x.catBudget>0);
+                    const rawDirect = budgets[`${y}-${m+1}-${cat.id}`];
+                    const hasDirectBudget = rawDirect != null;
+                    const directBudget = hasDirectBudget ? rawDirect : 0;
+                    // 週予算の sum と「いずれか 1 週でも明示設定があるか」の両方を取る。
+                    let weeklyBudgetSum = 0;
+                    let hasAnyWeekBudget = false;
+                    for (const wn of [1,2,3,4]) {
+                      const v = weekCatBudgets[`${y}-${m+1}-w${wn}_${cat.id}`];
+                      if (v != null) { hasAnyWeekBudget = true; weeklyBudgetSum += v; }
+                    }
+                    // 表示する予算値:直接設定があればそれ(0 含む)、無ければ週予算合計。
+                    const catBudget = hasDirectBudget ? directBudget : weeklyBudgetSum;
+                    const hasBudget = hasDirectBudget || hasAnyWeekBudget;
+                    return { cat, spent, catBudget, hasBudget };
+                  }).filter(x => x.spent>0 || x.hasBudget);
                   return items.map((item, idx)=>{
-                    const { cat, spent, catBudget } = item;
-                    const catPctRaw = catBudget>0 ? Math.round(spent/catBudget*100) : 0;
+                    const { cat, spent, catBudget, hasBudget } = item;
+                    // 予算 0 円: 1 円 = 1% 換算。予算 > 0: 通常比率。予算なし: 0%。
+                    const catPctRaw = hasBudget
+                      ? (catBudget > 0 ? Math.round(spent/catBudget*100) : spent)
+                      : 0;
                     const catPct = Math.min(100, catPctRaw);
                     return (
                       <CatTwoBox
@@ -1208,6 +1238,7 @@ export default function App() {
                         weekCatBudget={catBudget}
                         catPct={catPct}
                         catPctRaw={catPctRaw}
+                        hasBudget={hasBudget}
                         isLast={idx === items.length - 1}
                         periodLabel="月"
                       />
