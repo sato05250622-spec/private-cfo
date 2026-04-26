@@ -2137,7 +2137,11 @@ export default function App() {
                   <button key={t.id} onClick={()=>setSummaryTab(t.id)} style={{flex:1,padding:"8px",borderRadius:20,border:`1px solid ${summaryTab===t.id?GOLD:BORDER}`,background:summaryTab===t.id?`${GOLD}22`:"transparent",color:summaryTab===t.id?GOLD:TEXT_MUTED,fontSize:12,fontWeight:summaryTab===t.id?700:400,cursor:"pointer"}}>{t.label}</button>
                 ))}
               </div>
-              <div style={{overflowY:"auto",flex:1,padding:"0 16px 28px"}}>
+              {/* paddingBottom = max(28px, env(safe-area-inset-bottom)):
+                  iPhone のホームインジケーター領域(safe-area-inset-bottom = ~34px)に
+                  最下部の「当月現金支出」ブロックが被って見切れる問題を解消。
+                  Phase 2 の電卓モーダル safe-area 対応と同じ手法。 */}
+              <div style={{overflowY:"auto",flex:1,padding:"0 16px max(28px, env(safe-area-inset-bottom))"}}>
                 {summaryTab==="summary"?(
                   <>
                     <div style={{background:NAVY2,borderRadius:14,padding:"14px 18px",marginBottom:10,border:`1px solid ${BORDER}`}}>
