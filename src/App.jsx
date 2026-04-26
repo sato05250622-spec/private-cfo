@@ -16,6 +16,8 @@ import {
   cycleStart, cycleEnd, findCycleOfDate, weeksInCycle, weekInCycle, cycleLabel, isInCycle,
   // Phase 2: 報酬日リスト(複数登録可、ただの記録、サイクル切替には無関係)
   getRewardDays, addRewardDay, removeRewardDay,
+  // Phase 3: カード billing 期間をサイクル月基準で計算(closingDay 連動)
+  cardBillingRange,
 } from "./utils/cycle";
 import { useExpenses } from "./hooks/useExpenses";
 import { useCategories } from "./hooks/useCategories";
@@ -2107,16 +2109,21 @@ export default function App() {
 
       {/* 今月サマリーモーダル */}
       {showMonthSummary&&(()=>{
-        // y は カレンダー年、m は 1-indexed 月。サイクル範囲は cycSStr-cycEStr で表現。
-        // ※ 締日(closingDay)依存の cardBreakdown 計算は支払い方法側のロジックなので
-        //    報酬日サイクルとは別概念のまま据え置き(下のロジックを変更しない)。
+        // y は カレンダー年、m は 1-indexed 月(ヘッダ「{y}年{m}月 支出サマリー」表示で使用)。
+        // サイクル範囲は cycSStr-cycEStr。
+        // cardBreakdown は cardBillingRange ヘルパ経由でサイクル月対応(Phase 3)。
+        // 末締(closingDay="末") も full cycle 扱いに統一(Phase 2 までの 2 ヶ月範囲バグも併せて解消)。
         const y=reportMonth.y;const m=reportMonth.m+1;
         const cycSStr=toDateStr(cycleStart(reportMonth.y,reportMonth.m,managementStartDay));
         const cycEStr=toDateStr(cycleEnd(reportMonth.y,reportMonth.m,managementStartDay));
-        const prefix=`${y}-${String(m).padStart(2,'0')}`; // 締日計算側で引き続き使用
         const cashId="cash";const cardPms=paymentMethods.filter(p=>p.id!==cashId);
         const cashTxs=transactions.filter(t=>t.date>=cycSStr&&t.date<=cycEStr&&t.payment===cashId);const cashTotal=cashTxs.reduce((s,t)=>s+t.amount,0);
-        const cardBreakdown=cardPms.map(pm=>{let pmTxs;if(pm.closingDay&&pm.closingDay!=="末"){const closingDay=Number(pm.closingDay);const prevMonth=m===1?12:m-1;const prevYear=m===1?y-1:y;const prevLastDay=new Date(prevYear,prevMonth,0).getDate();const fromDay=Math.min(closingDay+1,prevLastDay);const fromDate=`${prevYear}-${String(prevMonth).padStart(2,'0')}-${String(fromDay).padStart(2,'0')}`;const thisLastDay=new Date(y,m,0).getDate();const toDay=Math.min(closingDay,thisLastDay);const toDate=`${y}-${String(m).padStart(2,'0')}-${String(toDay).padStart(2,'0')}`;pmTxs=transactions.filter(t=>t.payment===pm.id&&t.date>=fromDate&&t.date<=toDate);}else if(pm.closingDay==="末"){const prevMonth=m===1?12:m-1;const prevYear=m===1?y-1:y;const fromDate=`${prevYear}-${String(prevMonth).padStart(2,'0')}-01`;const lastDay=new Date(y,m,0).getDate();const toDate=`${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;pmTxs=transactions.filter(t=>t.payment===pm.id&&t.date>=fromDate&&t.date<=toDate);}else{pmTxs=transactions.filter(t=>t.payment===pm.id&&t.date>=cycSStr&&t.date<=cycEStr);}const total=pmTxs.reduce((s,t)=>s+t.amount,0);return{pm,total,pmTxs};});
+        const cardBreakdown=cardPms.map(pm=>{
+          const { fromStr, toStr } = cardBillingRange(pm.closingDay, reportMonth.y, reportMonth.m, managementStartDay);
+          const pmTxs=transactions.filter(t=>t.payment===pm.id&&t.date>=fromStr&&t.date<=toStr);
+          const total=pmTxs.reduce((s,t)=>s+t.amount,0);
+          return{pm,total,pmTxs};
+        });
         const cardTotal=cardBreakdown.reduce((s,c)=>s+c.total,0);const grandTotal=cashTotal+cardTotal;
         return(
           <div onClick={()=>setShowMonthSummary(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100vh",background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex",alignItems:"flex-end"}}>

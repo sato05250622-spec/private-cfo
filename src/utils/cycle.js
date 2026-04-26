@@ -235,3 +235,79 @@ export function removeRewardDay(value) {
   setRewardDays(next);
   return next;
 }
+
+// =============================================================
+// カード billing 期間(Phase 3):サイクル月内の closingDay を起点とする
+// -------------------------------------------------------------
+// 入力:
+//   closingDay        … "" / null / undefined / "末" → full cycle 扱い
+//                       "1"〜"31" or 1-31 数値    → 締日連動 billing
+//   cycleY, cycleM    … サイクル月の年・月(month は 0-indexed、reportMonth.y/m と同じ系)
+//   managementStartDay
+// 戻り値: { fromStr: "YYYY-MM-DD", toStr: "YYYY-MM-DD" }
+//
+// アルゴリズム(closingDay が数値の場合):
+//   a. cycleStart 〜 cycleEnd の範囲で「日 == closingDay」となる日付を探す
+//      (該当日が無い場合は cycleEnd を fallback。例:closingDay=31 で 30 日サイクル等)
+//   b. その日付を thisCloseDate = billing.to とする
+//   c. billing.from = thisCloseDate を 1 ヶ月戻して翌日
+//      JS の Date は短月で繰上げ正規化される(例:5/31 → -1mo → 5/1 → +1d → 5/2)
+//
+// 動作確認(managementStartDay = 25 のテストケース):
+//   closingDay = 15, 5月サイクル(5/25-6/24) → 5/16-6/15   ✓
+//   closingDay = 27, 5月サイクル(5/25-6/24) → 4/28-5/27   ✓
+//   closingDay = 24, 5月サイクル(5/25-6/24) → 5/25-6/24   (full cycle と同等)
+//   closingDay = 25, 5月サイクル(5/25-6/24) → 4/26-5/25
+//   closingDay = 空,   5月サイクル          → 5/25-6/24   (full cycle)
+//   closingDay = "末", 5月サイクル          → 5/25-6/24   (full cycle、Phase 2 の 2ヶ月バグ解消)
+// =============================================================
+export function cardBillingRange(closingDay, cycleY, cycleM, managementStartDay) {
+  const start = cycleStart(cycleY, cycleM, managementStartDay);
+  const end = cycleEnd(cycleY, cycleM, managementStartDay);
+  const fullFrom = toDateStr(start);
+  const fullTo = toDateStr(end);
+
+  // 空 / null / "末" → サイクル全体
+  if (closingDay == null) return { fromStr: fullFrom, toStr: fullTo };
+  if (closingDay === '末') return { fromStr: fullFrom, toStr: fullTo };
+
+  // 1-31 の整数に正規化(文字列 / 数値 両対応、不正値は null)
+  let cd = null;
+  if (typeof closingDay === 'number') {
+    if (Number.isInteger(closingDay) && closingDay >= 1 && closingDay <= 31) cd = closingDay;
+  } else {
+    const s = String(closingDay).trim();
+    if (s !== '' && s !== '末') {
+      const n = Number(s);
+      if (Number.isInteger(n) && n >= 1 && n <= 31) cd = n;
+    }
+  }
+  // 不正値は safe fallback として full cycle
+  if (cd == null) return { fromStr: fullFrom, toStr: fullTo };
+
+  // サイクル内で「日 == closingDay」の最初の日を線形探索
+  let thisCloseDate = null;
+  const cur = new Date(start);
+  while (cur <= end) {
+    if (cur.getDate() === cd) {
+      thisCloseDate = new Date(cur);
+      break;
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  // 該当日がサイクル内に無い(短月で 31 日不在等)→ cycleEnd を fallback
+  if (thisCloseDate == null) {
+    thisCloseDate = new Date(end);
+  }
+
+  // billing.to = thisCloseDate
+  const toStr = toDateStr(thisCloseDate);
+
+  // billing.from = thisCloseDate − 1 ヶ月 + 1 日
+  const fromDate = new Date(thisCloseDate);
+  fromDate.setMonth(fromDate.getMonth() - 1);
+  fromDate.setDate(fromDate.getDate() + 1);
+  const fromStr = toDateStr(fromDate);
+
+  return { fromStr, toStr };
+}
