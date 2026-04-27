@@ -30,6 +30,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState(null);
   const [approved, setApproved] = useState(null);
+  const [appEnabled, setAppEnabled] = useState(null);
 
   useEffect(() => {
     // eslint-disable-next-line no-console
@@ -42,7 +43,7 @@ export function AuthProvider({ children }) {
       try {
         const q = supabase
           .from('profiles')
-          .select('role, approved')
+          .select('role, approved, app_enabled')
           .eq('id', userId)
           .maybeSingle();
         const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles fetch');
@@ -53,15 +54,19 @@ export function AuthProvider({ children }) {
           console.error('[auth] loadProfile error', error);
           setRole(null);
           setApproved(null);
+          setAppEnabled(null);
           return;
         }
         setRole(data?.role ?? null);
         setApproved(data?.approved ?? null);
+        // app_enabled は DB デフォルト true なので未取得時は null のまま AuthGate に任せる
+        setAppEnabled(data?.app_enabled ?? null);
       } catch (e) {
         console.error('[auth] loadProfile exception', e);
         if (!mounted) return;
         setRole(null);
         setApproved(null);
+        setAppEnabled(null);
       }
     }
 
@@ -107,6 +112,7 @@ export function AuthProvider({ children }) {
         } else {
           setRole(null);
           setApproved(null);
+          setAppEnabled(null);
         }
       } catch (e) {
         console.error('[auth] onAuthStateChange loadProfile exception', e);
@@ -126,17 +132,46 @@ export function AuthProvider({ children }) {
     if (error) throw error;
   };
 
-  const signUp = async (email, password) => {
-    const { error } = await supabase.auth.signUp({ email, password });
+  const signUp = async (email, password, displayName) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { display_name: displayName ?? null } },
+    });
     if (error) throw error;
-    // 成功後の profiles INSERT は handle_new_user トリガ任せ。
-    // Email Confirmation が OFF なら onAuthStateChange(SIGNED_IN) が
-    // 即発火 → loadProfile → role='client' / approved=false が state に入り、
-    // AuthGate が PendingApprovalMessage に切り替える。
+    // 成功後の profiles INSERT は handle_new_user トリガ任せ
+    // (現行トリガは id/email/role のみ INSERT し display_name は埋めない)。
+    // Email Confirmation OFF の現状はセッションが即発行されるので、
+    // 自分の profile を RLS 越しに UPDATE して display_name をセットする。
+    // 失敗しても Auth フローは止めない(ベストエフォート)。
+    const userId = data?.user?.id;
+    const trimmed = (displayName ?? '').trim();
+    if (userId && trimmed) {
+      try {
+        const { error: upErr } = await supabase
+          .from('profiles')
+          .update({ display_name: trimmed })
+          .eq('id', userId);
+        if (upErr) console.warn('[auth] display_name UPDATE skipped:', upErr);
+      } catch (e) {
+        console.warn('[auth] display_name UPDATE exception:', e);
+      }
+    }
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
+  };
+
+  // パスワードリセットメール送信(フェーズA は送信のみ)。
+  // リダイレクト先は本番でも Preview でも window.location.origin に倒しておく
+  // (Supabase の Site URL / Redirect URLs に同 origin が登録されている前提)。
+  // TODO(フェーズA次): URL に access_token が乗って戻ってきたケースを検知し、
+  // 新パスワード入力フォームを出す UI を追加する。
+  const resetPassword = async (email) => {
+    const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+    if (error) throw error;
   };
 
   // 承認待ち画面の「再確認」ボタンから呼ぶ。
@@ -146,7 +181,7 @@ export function AuthProvider({ children }) {
     try {
       const q = supabase
         .from('profiles')
-        .select('role, approved')
+        .select('role, approved, app_enabled')
         .eq('id', session.user.id)
         .maybeSingle();
       const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles refresh');
@@ -156,6 +191,7 @@ export function AuthProvider({ children }) {
       }
       setRole(data?.role ?? null);
       setApproved(data?.approved ?? null);
+      setAppEnabled(data?.app_enabled ?? null);
     } catch (e) {
       console.error('[auth] refreshProfile exception', e);
     }
@@ -167,11 +203,14 @@ export function AuthProvider({ children }) {
     loading,
     role,
     approved,
+    appEnabled,
     isAdmin: role === 'admin',
     isApproved: approved === true,
+    isAppEnabled: appEnabled !== false, // 未取得(null)は許容、明示的 false のみ停止
     signIn,
     signUp,
     signOut,
+    resetPassword,
     refreshProfile,
   };
 

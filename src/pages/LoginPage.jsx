@@ -5,6 +5,7 @@ import {
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, RED,
 } from '@shared/theme';
 import { useAuth } from '../context/AuthContext';
+import PasswordReset from '../components/PasswordReset';
 
 const S = {
   wrap: {
@@ -101,6 +102,17 @@ const S = {
     textAlign: 'center',
     lineHeight: 1.6,
   },
+  forgotBtn: {
+    marginTop: 10,
+    background: 'transparent',
+    border: 'none',
+    color: TEXT_SECONDARY,
+    fontSize: 11,
+    textDecoration: 'underline',
+    cursor: 'pointer',
+    padding: 4,
+    alignSelf: 'center',
+  },
 };
 
 export default function LoginPage() {
@@ -109,8 +121,10 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
 
   const switchTo = (next) => {
     if (next === mode) return;
@@ -118,6 +132,7 @@ export default function LoginPage() {
     setError(null);
     setPassword('');
     setPasswordConfirm('');
+    setDisplayName('');
   };
 
   const onSubmit = async (e) => {
@@ -126,6 +141,10 @@ export default function LoginPage() {
     setError(null);
 
     if (mode === 'signup') {
+      if (!displayName.trim()) {
+        setError('氏名を入力してください。');
+        return;
+      }
       if (password.length < 6) {
         setError('パスワードは 6 文字以上で入力してください。');
         return;
@@ -139,7 +158,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       if (mode === 'signup') {
-        await signUp(email.trim(), password);
+        await signUp(email.trim(), password, displayName.trim());
         // signUp 成功後、Email Confirmation が OFF なら自動でセッションが発行され、
         // onAuthStateChange → loadProfile → role='client' / approved=false 。
         // AuthGate がそのまま PendingApprovalMessage に切り替わる。
@@ -169,6 +188,19 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={onSubmit} style={S.form}>
+          {isSignup && (
+            <label style={S.labelRow}>
+              氏名
+              <input
+                type="text"
+                required
+                autoComplete="name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                style={S.input}
+              />
+            </label>
+          )}
           <label style={S.labelRow}>
             メールアドレス
             <input
@@ -210,6 +242,11 @@ export default function LoginPage() {
               ? (isSignup ? '登録中…' : 'ログイン中…')
               : (isSignup ? '新規登録' : 'ログイン')}
           </button>
+          {!isSignup && (
+            <button type="button" onClick={() => setResetOpen(true)} style={S.forgotBtn}>
+              パスワードをお忘れの方
+            </button>
+          )}
         </form>
 
         <div style={S.footer}>
@@ -226,6 +263,12 @@ export default function LoginPage() {
           )}
         </div>
       </div>
+      {resetOpen && (
+        <PasswordReset
+          initialEmail={email}
+          onClose={() => setResetOpen(false)}
+        />
+      )}
     </div>
   );
 }

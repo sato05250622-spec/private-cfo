@@ -605,7 +605,12 @@ export default function App() {
     calGrid:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",background:CARD_BG},
     menuItem:{display:"flex",alignItems:"center",gap:12,padding:"15px 20px",borderBottom:`1px solid ${BORDER}`,cursor:"pointer",background:CARD_BG},
     listItem:{display:"flex",alignItems:"center",gap:12,padding:"13px 20px",borderBottom:`1px solid ${BORDER}`,background:CARD_BG,cursor:"pointer"},
-    overlay:{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:NAVY,zIndex:200,display:"flex",flexDirection:"column",overflowY:"auto"},
+    // paddingTop: iPhone のノッチ/Dynamic Island に被らないよう safe-area 分だけ
+    // 内側に押し下げる。position:fixed; top:0 は body の padding-top を無視して
+    // viewport 最上端から始まるため、ここで自前で safe-top を確保する。
+    // box-sizing:border-box(* で global)なので height:100dvh に padding が含まれ、
+    // 内側コンテンツは自動で 100dvh - safeTop になる。
+    overlay:{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:NAVY,zIndex:200,display:"flex",flexDirection:"column",overflowY:"auto",paddingTop:"env(safe-area-inset-top)"},
     overlayHeader:{background:NAVY2,padding:"13px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${BORDER}`,position:"sticky",top:0,zIndex:10,boxShadow:SHADOW},
     summaryBar:{display:"flex",gap:0,background:CARD_BG,borderBottom:`1px solid rgba(212,168,67,0.1)`},
     summaryCell:(border)=>({flex:1,padding:"10px 0",textAlign:"center",borderRight:border?`1px solid ${BORDER}`:"none"}),
