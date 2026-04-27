@@ -47,3 +47,38 @@
 - [ ] 予算・支払方法・ローン類の Supabase 化(現状 localStorage)
 - [ ] ログインフォームの UI 微調整(error 表示のアニメーション等)
 - [ ] PWA 更新通知(service worker の new-version prompt)
+
+## DB スキーマ — フェーズ B 範囲外(2026-04-27 追加)
+
+フェーズ B-2 Step 1-bis で migrations/ 整備中に発見した、本フェーズでは触らない課題。
+
+- [ ] **profiles 重複トリガーの整理**
+  - `trg_profiles_updated_at` (`set_updated_at()`) と `on_profiles_updated`
+    (`handle_updated_at()`) の 2 つが BEFORE UPDATE で発火
+  - 挙動 (= `updated_at = NOW()`) は同等 (2026-04-27 検証済)
+  - 関数本体の書式に差異あり (= 別タイミング / 別の人による定義の可能性):
+    - `handle_updated_at`: 大文字 `BEGIN ... NEW.updated_at = NOW(); RETURN NEW; END;`
+    - `set_updated_at`  : 小文字 `begin ... new.updated_at = now(); return new; end;`
+  - 機能重複は冗長のみ (実害なし)
+  - 解消案: どちらかを drop。`set_updated_at()` を残し `on_profiles_updated`
+    + `handle_updated_at()` を drop するのが他テーブルとの統一性で自然
+  - 関連: `supabase/migrations/005_profiles_updated_trigger.sql`
+- [x] **`profiles_pending_idx` の列名最終確認** (✅ 2026-04-27 深夜 完了)
+  - 列名: **`created_at`** で確定
+  - WHERE 句: **`((approved = false) AND (role = 'client'::text))`** で確定
+  - `migrations/003_profiles_app_gate_columns.sql` の推定と **完全一致**、修正不要
+- [x] **`handle_updated_at()` 関数本体の実体確認** (✅ 2026-04-27 深夜 完了)
+  - 本体: `NEW.updated_at = NOW(); RETURN NEW;` (大文字書式)
+  - `migrations/005_profiles_updated_trigger.sql` の推定と **本質的に同一**、機能差なし
+  - `set_updated_at()` も同等挙動と確認 (書式のみ小文字で異なる、上記重複トリガー項目参照)
+  - 念のため migrations/005 の本体を **大文字書式** に揃えるかは後日判断 (再適用予定なしのため放置可)
+- [ ] **`expenses.category` の FK 不在**
+  - フェーズ B-2 §8.2(5) で「B 範囲外」と判断済
+  - `expenses` の `category` 列は `categories` テーブルへの参照整合性が無い
+  - Step 2 で孤児 0 件を確認済のため緊急性なし
+  - 解消時はカテゴリ削除動線 (UI) と一緒に検討
+- [ ] **`profiles.management_start_date` (date) の用途確認**
+  - admin アプリ (`admin175-project`) でこの列がどう使われているか未確認
+  - 仮説 A (CFO 管理開始日) / 仮説 B (サイクル起点日) の判別が必要
+  - 詳細: `docs/phase-b-schema.md` §1.2.1
+  - 確認方法: admin リポで `grep -rn "management_start_date" admin175-project/src/`

@@ -29,3 +29,7 @@ dev-dist
 # Vite cache
 .vite
 .vercel
+
+# Supabase 論理バックアップ (B-3 で取得する pg_dump 出力。本番接続情報を含む可能性あり)
+backups/
+supabase/.temp/
