@@ -55,11 +55,11 @@
 
 ## Step 2. DB 適用 (15 分)
 
-`supabase/migrations/004_phase_b3a_budgets.sql` を新規作成し、**そのファイルの中身を Dashboard SQL Editor に貼って Run**。
+`supabase/migrations/006_phase_b3a_budgets.sql` を新規作成し、**そのファイルの中身を Dashboard SQL Editor に貼って Run**。
 
 ### 2-1. DDL ファイル作成
 
-`supabase/migrations/004_phase_b3a_budgets.sql`:
+`supabase/migrations/006_phase_b3a_budgets.sql`:
 
 ```sql
 -- =============================================================
@@ -458,7 +458,7 @@ drop table if exists public.budgets          cascade;
 
 | # | リスク | 発生確率 | 対応 |
 |---|---|---|---|
-| R1 | Dashboard SQL Editor で構文エラー | 低 | DDL を `supabase/migrations/004_*.sql` に保存しているのでそのままコピペ。エラー時は Rollback A |
+| R1 | Dashboard SQL Editor で構文エラー | 低 | DDL を `supabase/migrations/006_*.sql` に保存しているのでそのままコピペ。エラー時は Rollback A |
 | R2 | RLS の `auth.uid()` が JWT 引けず常に NULL → 顧客が自分の行も見えない | 低 (既存テーブル動作中なので) | テストアカウントでの動作確認 (Step 3-5) で先に検出 |
 | R3 | App.jsx の差し替えで UI リグレッション (週サマリーが空表示等) | **中** | Step 7 で <client_A> さん立ち会い必須。事前に開発環境で fixture データで確認 |
 | R4 | Realtime 購読が動かない | 中 | Step 3-4 で publication 登録を確認。アプリ側は B-3a では subscribe しない (read on mount のみ) のでブロッカーにはならない |
