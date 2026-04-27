@@ -90,3 +90,22 @@
   - 後日 `supabase/migrations/007_add_week_budgets_comments.sql` として
     追加可能 (実害なし、可読性向上目的)
   - 関連: `supabase/migrations/006_phase_b3a_budgets.sql`
+
+## 実施記録 (Phase B-3a)
+
+### 2026-04-27 — B-3a Step 1〜3 完了 (DB 側)
+
+- ✅ **Step 1-bis (migrations/ 整備)**: `001_init.sql` 〜 `005_profiles_updated_trigger.sql` を作成。schema.sql ドリフト解消、profiles 22 列の履歴復元
+- ✅ **Step 1 (Pre-flight)**: 退避ブランチ `feat/phase-a-auth-gate` で Category B を隔離、main クリーン化、`feat/phase-b-3a-budgets` 切り出し
+- ✅ **Step 2 (DDL 適用)**: `006_phase_b3a_budgets.sql` 作成 → Dashboard SQL Editor で Run、"Success. No rows returned" 確認
+- ✅ **Step 3 (DB 検証)**: 拡張版検証 7 本 (テーブル / index / trigger / RLS / RLS policy / publication / FK+CHECK) 全件期待一致
+  - 検証 1: 3 行 (テーブル存在)
+  - 検証 2: 6 行 (PK + 通常 index)
+  - 検証 3: 3 行 (全 `set_updated_at()`)
+  - 検証 4: relrowsecurity 全 t (RLS 有効)
+  - 検証 5: 6 行 (RLS ポリシー、qual / with_check 完璧)
+  - 検証 6: 3 行 (Realtime publication 登録済)
+  - 検証 7: 16 行 (複合 FK + ON DELETE CASCADE + 4 種 CHECK)
+- 🟡 **Step 4 (アプリ実装) 未着手**: 次フェーズ。`src/lib/api/budgets.js` + `src/hooks/useBudgets.js` 作成 + App.jsx 差し替え
+
+DB 側は完全に揃っているため、アプリ実装で何かあっても **DB 側のロールバック不要**。最悪 Vercel デプロイのロールバック (前バージョン Promote) で復旧可能。

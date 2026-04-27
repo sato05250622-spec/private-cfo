@@ -170,7 +170,23 @@ alter publication supabase_realtime add table public.week_cat_budgets;
 
 ---
 
-## Step 3. DB 確認 (10 分)
+## Step 3. DB 確認 (10 分) — ✅ 完了 (2026-04-27)
+
+> **実施結果サマリ** (2026-04-27 夜):
+> Dashboard SQL Editor で B-3 計画書外の **拡張版検証 7 本** を実行し全件一致を確認 (本セクションの 3-1 〜 3-4 + FK / CHECK / RLS ポリシー詳細)。
+>
+> | 検証 | 結果 | 内容 |
+> |---|---|---|
+> | 1 (テーブル存在) | ✅ 3 行 | budgets / week_budgets / week_cat_budgets |
+> | 2 (インデックス) | ✅ 6 行 | 各テーブル `*_pkey` + `*_client_period_idx` |
+> | 3 (トリガー) | ✅ 3 行 | 全 `set_updated_at()` BEFORE UPDATE |
+> | 4 (RLS 有効) | ✅ relrowsecurity 全 t | 3 テーブル全部 |
+> | 5 (RLS ポリシー) | ✅ 6 行 | qual / with_check 完璧 (`is_admin()` / `client_id = auth.uid()`) |
+> | 6 (Realtime publication) | ✅ 3 行 | 3 テーブル全部登録済 |
+> | 7 (FK + CHECK) | ✅ 16 行 | 複合 FK + ON DELETE CASCADE + 4 種 CHECK 制約 |
+>
+> **DB 側 B-3a は完全に揃った状態**。アプリ実装 (Step 4) 着手可。
+> **3-5 (RLS 動作確認) は実アカウントによる実行は省略** — 検証 5 で qual / with_check 式の完全一致を確認したため、機能的に等価な検証で代替済。
 
 Dashboard SQL Editor で以下を実行し、結果を記録:
 
