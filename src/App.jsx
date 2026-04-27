@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useCallback, useState, useMemo, useRef } from "react";
 import { PieChart, Pie, Cell, BarChart, Bar, LineChart, Line, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
 import {
   GOLD, GOLD_LIGHT, GOLD_GRAD,
@@ -21,6 +21,7 @@ import {
 } from "./utils/cycle";
 import { useExpenses } from "./hooks/useExpenses";
 import { useCategories } from "./hooks/useCategories";
+import { useBudgets } from "./hooks/useBudgets";
 import { usePoints } from "./hooks/usePoints";
 import LogoutButton from "./components/LogoutButton";
 import AppointmentCard from "./components/AppointmentCard";
@@ -216,7 +217,54 @@ export default function App() {
   const [reportYear, setReportYear] = useState(today.getFullYear());
   const [reportType, setReportType] = useState("monthly");
   const [budgetMonth, setBudgetMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
-  const [budgets, setBudgets] = useLocalStorage("cfo_budgets", {});
+
+  // === B-3a Step 4-3 phase 1: budgets / weekBudgets / weekCatBudgets を Supabase 経由に切替 ===
+  // 旧 localStorage 行は rollback 用にコメントアウトで残置 (Phase 3 で削除予定):
+  //   const [budgets, setBudgets] = useLocalStorage("cfo_budgets", {});
+  //   const [weekBudgets, setWeekBudgets] = useLocalStorage("cfo_weekBudgets", {});  ← L243 元位置
+  //   const [weekCatBudgets, setWeekCatBudgets] = useLocalStorage("cfo_weekCatBudgets", {});  ← L244 元位置
+  const {
+    budgets, weekBudgets, weekCatBudgets,
+    setBudget, deleteBudget,
+    setWeekBudget, deleteWeekBudget,
+    setWeekCatBudget, deleteWeekCatBudget,
+    refetch: refetchBudgets,
+  } = useBudgets();
+
+  // 旧 setter の互換 shim (Phase 2 で順次 hook 直呼びに置換、Phase 3 で削除予定)。
+  // updater が関数なら現 Record で評価、そうでなければそのまま next とみなす。
+  // 差分から set/delete を決定し、hook の action を fire-and-forget で呼ぶ。
+  // 失敗時は console.error + alert (App.jsx の他 setter と同じ UX)。
+  const setBudgets = useCallback((updater) => {
+    const next = typeof updater === 'function' ? updater(budgets) : updater;
+    const allKeys = new Set([...Object.keys(budgets), ...Object.keys(next)]);
+    for (const key of allKeys) {
+      const cur = budgets[key];
+      const upd = next[key];
+      if (upd === undefined && cur !== undefined) {
+        deleteBudget(key).catch(e => { console.error('[budgets] delete failed', key, e); alert('予算の削除に失敗しました'); });
+      } else if (upd !== cur) {
+        setBudget(key, upd).catch(e => { console.error('[budgets] save failed', key, e); alert('予算の保存に失敗しました'); });
+      }
+    }
+  }, [budgets, setBudget, deleteBudget]);
+
+  const setWeekCatBudgets = useCallback((updater) => {
+    const next = typeof updater === 'function' ? updater(weekCatBudgets) : updater;
+    const allKeys = new Set([...Object.keys(weekCatBudgets), ...Object.keys(next)]);
+    for (const key of allKeys) {
+      const cur = weekCatBudgets[key];
+      const upd = next[key];
+      if (upd === undefined && cur !== undefined) {
+        deleteWeekCatBudget(key).catch(e => { console.error('[weekCatBudgets] delete failed', key, e); alert('週予算の削除に失敗しました'); });
+      } else if (upd !== cur) {
+        setWeekCatBudget(key, upd).catch(e => { console.error('[weekCatBudgets] save failed', key, e); alert('週予算の保存に失敗しました'); });
+      }
+    }
+  }, [weekCatBudgets, setWeekCatBudget, deleteWeekCatBudget]);
+  // setWeekBudgets は callsite ゼロ (grep 確認済) のため shim 作成しない。
+  // === B-3a Step 4-3 phase 1 end ===
+
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState({});
   const [menuScreen, setMenuScreen] = useState("main");
@@ -240,8 +288,8 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState(toDateStr(today));
   const [expandedWeek, setExpandedWeek] = useState(weekInCycle(today, getManagementStartDay()));
   const [weekBudgetInput, setWeekBudgetInput] = useState("");
-  const [weekBudgets, setWeekBudgets] = useLocalStorage("cfo_weekBudgets", {});
-  const [weekCatBudgets, setWeekCatBudgets] = useLocalStorage("cfo_weekCatBudgets", {});
+  // weekBudgets / weekCatBudgets は B-3a Step 4-3 phase 1 で useBudgets() に統合済 (L219 周辺参照)。
+  // 旧 localStorage 行は L219 のコメント内に残置 (rollback 用)。
   const [showCatBudgetModal, setShowCatBudgetModal] = useState(false);
   const [catBudgetTarget, setCatBudgetTarget] = useState(null);
   const [catBudgetInput, setCatBudgetInput] = useState("");
