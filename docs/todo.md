@@ -82,3 +82,11 @@
   - 仮説 A (CFO 管理開始日) / 仮説 B (サイクル起点日) の判別が必要
   - 詳細: `docs/phase-b-schema.md` §1.2.1
   - 確認方法: admin リポで `grep -rn "management_start_date" admin175-project/src/`
+- [ ] **`week_budgets` / `week_cat_budgets` の列コメント追加**
+  - 設計書 `phase-b-schema.md` §3.2 にコメント定義があるが、計画書
+    `phase-b-3a-plan.md` §2-1 のテンプレでは省略されていた
+  - B-3a Step 2 (`supabase/migrations/006_phase_b3a_budgets.sql`) では
+    `budgets` テーブルのみコメント追加済 (`cycle_month` / `legacy_key`)
+  - 後日 `supabase/migrations/007_add_week_budgets_comments.sql` として
+    追加可能 (実害なし、可読性向上目的)
+  - 関連: `supabase/migrations/006_phase_b3a_budgets.sql`
