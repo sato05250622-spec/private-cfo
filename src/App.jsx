@@ -632,9 +632,14 @@ export default function App() {
       // 全週一括設定でも 0 入力を許可(全週を明示的に 0 円としてセットできる)。
       // 空欄 / NaN / 負数は「何もしない」= モーダルを閉じずに留まる動作を維持。
       const val=allWeekInput; const num=Number(val); if(!val||isNaN(num)||num<0) return;
-      const next={...weekCatBudgets};
-      weeks.forEach(w=>{next[`${w.weekKey}_${allWeekTarget.id}`]=num;});
-      setWeekCatBudgets(next);setAllWeekTarget(null);setAllWeekInput(""); return;
+      weeks.forEach(w=>{
+        const key=`${w.weekKey}_${allWeekTarget.id}`;
+        const cur=weekCatBudgets[key];
+        if(num!==cur){
+          setWeekCatBudget(key,num).catch(e=>{console.error('[weekCatBudgets] save failed',key,e);alert('週予算の保存に失敗しました');});
+        }
+      });
+      setAllWeekTarget(null);setAllWeekInput(""); return;
     }
     setAllWeekInput(p=>{ if(p===""&&v==="0")return "0"; if(p==="0")return String(v); return p+String(v); });
   };
