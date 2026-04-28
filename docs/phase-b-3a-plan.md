@@ -39,8 +39,8 @@
 | **4** | アプリ実装 | `lib/api/budgets.js` + `hooks/useBudgets.js` 等を実装、App.jsx を hook 駆動へ差し替え | 90 〜 150 分 | 高 (UI リグレッションリスク) |
 | **5** | クライアント移行 | `migrateLocalToSupabase` の budgets ブロック実装 + 動作確認 | 30 分 | 中 |
 | **6** | デプロイ | `git push origin main` → Vercel 自動デプロイ | 5 分 | 中 (Vercel ビルド失敗) |
-| **7** | 本番動作確認 | <client_A> さん立ち会いでログイン → Dashboard で行確認 | 20 分 | 中 |
-| **8** | 後始末 | <client_A> さん `cfo_migratedToSupabase` フラグの値とテーブル件数を記録 | 5 分 | 低 |
+| **7** | 本番動作確認 | <client_A>立ち会いでログイン → Dashboard で行確認 | 20 分 | 中 |
+| **8** | 後始末 | <client_A> `cfo_migratedToSupabase` フラグの値とテーブル件数を記録 | 5 分 | 低 |
 
 ---
 
@@ -388,27 +388,27 @@ const FORCE_LOCALSTORAGE_BUDGETS = false;
 
 ---
 
-## Step 7. 本番動作確認 (20 分、<client_A> さん立ち会い)
+## Step 7. 本番動作確認 (20 分、<client_A>立ち会い)
 
-- [ ] <client_A> さんに本番 URL でログインしてもらう (DevTools 開く)
+- [ ] <client_A>に本番 URL でログインしてもらう (DevTools 開く)
 - [ ] Console に `[migrate]` ログが出ることを確認
 - [ ] `localStorage.cfo_migratedToSupabase` が `"1"` になっていることを確認
-- [ ] Dashboard で <client_A> さん uuid の budgets 行件数を確認:
+- [ ] Dashboard で <client_A> uuid の budgets 行件数を確認:
   ```sql
-  select count(*) from public.budgets where client_id = '<<client_A> の uuid>';
-  select count(*) from public.week_budgets where client_id = '<<client_A> の uuid>';
-  select count(*) from public.week_cat_budgets where client_id = '<<client_A> の uuid>';
+  select count(*) from public.budgets where client_id = '<client_A_uuid>';
+  select count(*) from public.week_budgets where client_id = '<client_A_uuid>';
+  select count(*) from public.week_cat_budgets where client_id = '<client_A_uuid>';
   ```
 - [ ] Step 3 の checklist Step 3-3 (localStorage 集計) と件数が一致することを確認 (skip 数を引いて)
 - [ ] 予算編集モーダルを 1 件触ってもらい、保存 → ページリロード → 値が残っていることを確認 (= read/write 双方向動作)
 - [ ] アラート (赤バー、80% 黄色) が予算に応じて出ることを確認
-- [ ] <client_A> さんから「予期せぬ表示崩れ・データ消失が無い」確認をもらう
+- [ ] <client_A>から「予期せぬ表示崩れ・データ消失が無い」確認をもらう
 
 ---
 
 ## Step 8. 後始末 (5 分)
 
-- [ ] <client_A> さんの localStorage に `cfo_*` キーが残っていることを確認 (削除しない方針)
+- [ ] <client_A>の localStorage に `cfo_*` キーが残っていることを確認 (削除しない方針)
 - [ ] 本書 末尾の「実施結果ログ」欄に以下を記入:
   - 開始時刻 / 終了時刻
   - skip 件数 (もしあれば)
@@ -440,13 +440,13 @@ drop table if exists public.budgets          cascade;
 1. **Vercel Dashboard で 1 つ前のデプロイメントに Promote to Production**
    - 本番 URL は変わらず、コードのみ前バージョンに戻る
    - localStorage 側のデータは消していないので即座に復旧
-2. クライアント側の `cfo_migratedToSupabase` フラグが残っているとアプリが「移行済」と誤認するので、**hot-fix デプロイで `localStorage.removeItem('cfo_migratedToSupabase')` を 1 回だけ実行する版** を出すか、<client_A> さんに DevTools から直接消してもらう
+2. クライアント側の `cfo_migratedToSupabase` フラグが残っているとアプリが「移行済」と誤認するので、**hot-fix デプロイで `localStorage.removeItem('cfo_migratedToSupabase')` を 1 回だけ実行する版** を出すか、<client_A>に DevTools から直接消してもらう
 3. DB の budgets 行は **drop しなくて良い** (legacy_key で identify 可能、害は無い)。次の修正版で再 upsert する
 
 ### Rollback C — DB データ汚染、原因不明 (最悪ケース)
 
 1. Step 1-1 の snapshot から DB をリストア (Dashboard → Backups → Restore)
-   - **影響範囲**: snapshot 取得時刻以降の全テーブル変更が消える (expenses 含む) → <client_A> さんが移行後に新規追加した支出が消える可能性 → **取り扱い注意**
+   - **影響範囲**: snapshot 取得時刻以降の全テーブル変更が消える (expenses 含む) → <client_A>が移行後に新規追加した支出が消える可能性 → **取り扱い注意**
 2. リストア前に必ず:
    - 取得時刻以降の expenses を CSV エクスポート (`select * from expenses where created_at > '<snapshot 時刻>'`)
    - リストア後に CSV を再 INSERT
@@ -464,7 +464,7 @@ drop table if exists public.budgets          cascade;
 □ DB week_cat_budgets 件数 = localStorage 件数 - skip 数
 □ 予算編集モーダル: 保存 → reload → 残る
 □ 予算アラート (赤・黄): 期待通り表示
-□ <client_A> さん「表示崩れ無し」確認
+□ <client_A>「表示崩れ無し」確認
 □ skip された catId が存在すれば内容を本人に共有
 ```
 
@@ -476,9 +476,9 @@ drop table if exists public.budgets          cascade;
 |---|---|---|---|
 | R1 | Dashboard SQL Editor で構文エラー | 低 | DDL を `supabase/migrations/006_*.sql` に保存しているのでそのままコピペ。エラー時は Rollback A |
 | R2 | RLS の `auth.uid()` が JWT 引けず常に NULL → 顧客が自分の行も見えない | 低 (既存テーブル動作中なので) | テストアカウントでの動作確認 (Step 3-5) で先に検出 |
-| R3 | App.jsx の差し替えで UI リグレッション (週サマリーが空表示等) | **中** | Step 7 で <client_A> さん立ち会い必須。事前に開発環境で fixture データで確認 |
+| R3 | App.jsx の差し替えで UI リグレッション (週サマリーが空表示等) | **中** | Step 7 で <client_A>立ち会い必須。事前に開発環境で fixture データで確認 |
 | R4 | Realtime 購読が動かない | 中 | Step 3-4 で publication 登録を確認。アプリ側は B-3a では subscribe しない (read on mount のみ) のでブロッカーにはならない |
-| R5 | <client_A> さんのカテゴリ削除済み事象が想定より多く skip 大量発生 | **極低** (Step 2 で全 client `cat_count >= 9` 確認済) | skip コードは保険として残すが実発動見込みゼロ。万一 <client_A> さんの localStorage budgets キーが DB と乖離していたら個別判断 |
+| R5 | <client_A>のカテゴリ削除済み事象が想定より多く skip 大量発生 | **極低** (Step 2 で全 client `cat_count >= 9` 確認済) | skip コードは保険として残すが実発動見込みゼロ。万一 <client_A>の localStorage budgets キーが DB と乖離していたら個別判断 |
 | R6 | `cfo_migratedToSupabase` フラグがバグで二重起動 → upsert が走り重複処理 | 低 | upsert 自体は冪等 (PK 衝突で overwrite)。実害なし |
 
 ---
@@ -492,7 +492,7 @@ drop table if exists public.budgets          cascade;
 | 実施者 | `____________` |
 | Step 2 SQL 実行結果 | `____________` |
 | Step 3 RLS テスト結果 | `____________` |
-| Step 7 <client_A> さん立ち会い時刻 | `____________` |
+| Step 7 <client_A>立ち会い時刻 | `____________` |
 | skip 件数 (budgets / wb / wcb) | `___ / ___ / ___` |
 | 本番 budgets 行数 | `___` |
 | 本番 week_budgets 行数 | `___` |
@@ -505,7 +505,7 @@ drop table if exists public.budgets          cascade;
 
 - 本 B-3a 完了後、最低 **24 時間は本番運用を観察** してから B-3b 着手
 - 観察期間中:
-  - <client_A> さんからの「予算が消えた」「数字が違う」報告がゼロ
+  - <client_A>からの「予算が消えた」「数字が違う」報告がゼロ
   - Dashboard で `legacy_key` 列が空 (= 通常書き込み) の行が増えていく (新規予算編集が DB に届いている証拠)
   - 行数が日に 1 件以上は増減する (アクティブ性の確認)
 - 24 時間後問題なければ B-3b (`payment_methods` + `loans` + `expenses.payment_method` FK) へ進む

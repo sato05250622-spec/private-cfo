@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |---|---|
 | 作成日 | 2026-04-27 |
-| 想定実施者 | 瑠星さん (Dashboard 操作) + <client_A> さん (端末スナップショット 1 回のみ) |
+| 想定実施者 | 瑠星さん (Dashboard 操作) + <client_A> (端末スナップショット 1 回のみ) |
 | 推定所要時間 | 合計 60-90 分 (待ち時間含む) |
 | 関連 | `docs/phase-b-schema.md`, `docs/phase-b-3a-plan.md` |
 
@@ -106,7 +106,7 @@ supabase db dump \
 
 - [ ] **1-5-a**: コマンドが正常終了
 - [ ] **1-5-b**: ファイル生成確認: `ls -lh ~/Desktop/private-cfo-app/backups/backup-pre-b3-${DATE}-data.sql`
-  - サイズ目安: <client_A> さん本データの量に依存 (数十 KB〜数 MB)
+  - サイズ目安: <client_A>本データの量に依存 (数十 KB〜数 MB)
   - サイズ記入欄: `___ KB`
 
 ### 1-6. dump 中身の健全性チェック (2 分)
@@ -177,7 +177,7 @@ from public.profiles;
 
 ⇒ **total: 3 / admin: 1 / client: 2**
 
-> client 2 名の内訳 (<client_A> さん vs 他テストアカウント) の判別は B-4 (アプリ側フック差し替え) 直前で十分。本 Step では特定不要。
+> client 2 名の内訳 (<client_A> vs 他テストアカウント) の判別は B-4 (アプリ側フック差し替え) 直前で十分。本 Step では特定不要。
 
 ### 2-2. `profiles` の実列構造 ✅ — **22 列**判明 (schema.sql 7 列 + 追加 15 列)
 
@@ -295,11 +295,11 @@ group by category;
 
 ---
 
-## Step 3. <client_A> さんの localStorage スナップショット取得 (10 分、本人立ち会い)
+## Step 3. <client_A>の localStorage スナップショット取得 (10 分、本人立ち会い)
 
 > 懸念 1 / 4 の正確な見積もりに必須。**B-3 着手前に必ず取る**。
 
-- [ ] **3-1**: <client_A> さんに以下の手順を依頼 (LINE / Slack 経由):
+- [ ] **3-1**: <client_A>に以下の手順を依頼 (LINE / Slack 経由):
 
   1. アプリ (`private-cfo-app.vercel.app`) を **Safari** または **Chrome** で開く
   2. ログイン状態であることを確認
@@ -326,7 +326,7 @@ group by category;
   - `cfo_managementStartDay` の値: `___`
   - `cfo_rewardDays` の値 (配列): `___`
 - [ ] **3-4**: 上記 `cfo_paymentMethods[].id` のリストと、Step 2-4 の DB 側 `payment_method` 値 (cash 以外) が **完全一致** することを確認 → 一致しなければ §8.2(1) の clean-up SQL で吸収可能か判断
-- [ ] **3-5**: `cfo_budgets` のキー第 3 セグメント (catId) と、<client_A> さんの `categories` 行の id 集合を突合 → カテゴリ削除済み事象の有無を実測
+- [ ] **3-5**: `cfo_budgets` のキー第 3 セグメント (catId) と、<client_A>の `categories` 行の id 集合を突合 → カテゴリ削除済み事象の有無を実測
   - 削除済みカテゴリ参照キー数: `___` 件 (= 移行時 skip 予定件数)
 
 ---

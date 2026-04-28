@@ -617,13 +617,13 @@ async function migrateLocalToSupabase(userId) {
 - **`legacy_key` / `legacy_id` を必ず埋める** ことで事後追跡可能
 - **skip した行も `console.warn` で必ず出す** (admin 側で `cfo_migratedToSupabase` セット後にユーザーへ「N 件 skip しました」ヒアリングできる)
 
-### 5.4 <client_A> さんデータ最優先 (人手介入)
+### 5.4 <client_A>データ最優先 (人手介入)
 
-<client_A> さんの本データ移行はトライアル運用に直接影響するため、自動移行任せ
+<client_A>の本データ移行はトライアル運用に直接影響するため、自動移行任せ
 にせず **次の段取り** を強く推奨:
 
 1. B-3a/b/c の SQL を本番に適用
-2. **<client_A> さん端末 (本人立ち会い) で 1 度ログインしてもらい、自動移行を発火 → 直後に Supabase Dashboard で行を目視確認**
+2. **<client_A>端末 (本人立ち会い) で 1 度ログインしてもらい、自動移行を発火 → 直後に Supabase Dashboard で行を目視確認**
 3. 確認後、`cfo_migratedToSupabase` の値とテーブル件数のスクリーンショットを保管
 4. ローカル `cfo_*` キーは **削除しない**。万一トラブった際のロールバック原資
 
