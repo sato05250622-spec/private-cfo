@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { PieChart, Pie, Cell, BarChart, Bar, LineChart, Line, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
 import {
   GOLD, GOLD_LIGHT, GOLD_GRAD,
@@ -31,6 +31,8 @@ import SortableCategoryRow from "./components/SortableCategoryRow";
 import SortablePaymentRow from "./components/SortablePaymentRow";
 import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
+import { useAuth } from "./context/AuthContext";
+import { migratePaymentsLoans } from "./lib/migratePaymentsLoans";
 import { DndContext, closestCenter, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
 
@@ -316,6 +318,30 @@ export default function App() {
     createLoan, updateLoan, deleteLoan,
     refetch: refetchLoans,
   } = useLoans();
+
+  // === B-3b Step 5: payment_methods / loans の localStorage → Supabase 移行 ===
+  // ログイン直後に 1 回だけ実行。冪等 (cfo_paymentsLoansMigrated フラグ + idempotent upsert)。
+  // ref ガードで StrictMode 二重起動を抑止。失敗は console.warn のみで UI 阻害しない。
+  // 完了後に refetchPaymentMethods / refetchLoans で UI を最新 DB 状態へ同期。
+  const { user: authUser } = useAuth();
+  const authUserId = authUser?.id ?? null;
+  const paymentsLoansMigrationStartedRef = useRef(false);
+  useEffect(() => {
+    if (!authUserId) return;
+    if (paymentsLoansMigrationStartedRef.current) return;
+    paymentsLoansMigrationStartedRef.current = true;
+    (async () => {
+      try {
+        const result = await migratePaymentsLoans(authUserId);
+        if (!result.skipped && (result.pmWritten > 0 || result.loanWritten > 0)) {
+          await Promise.all([refetchPaymentMethods(), refetchLoans()]);
+        }
+      } catch (e) {
+        console.error('[migrate] payments/loans migration crashed', e);
+      }
+    })();
+  }, [authUserId, refetchPaymentMethods, refetchLoans]);
+  // === B-3b Step 5 end ===
 
   const [showLoanForm, setShowLoanForm] = useState(false);
   const [deleteLoanTarget, setDeleteLoanTarget] = useState(null);
