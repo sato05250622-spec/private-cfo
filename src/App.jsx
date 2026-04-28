@@ -1710,7 +1710,20 @@ export default function App() {
       const weeks = weeksInCycle(y, m, managementStartDay);
       const prevM=m===0?11:m-1;const prevY=m===0?y-1:y;
       // 先月コピーも 0 を尊重:truthy チェックだと prev が 0 のときにコピーされないので null 判定に変更。
-      const copyLastMonth=()=>{const next={...weekCatBudgets};weeks.forEach(w=>{expenseCats.forEach(cat=>{const prevKey=`${prevY}-${prevM+1}-w${w.weekNum}_${cat.id}`;const thisKey=`${w.weekKey}_${cat.id}`;if(weekCatBudgets[prevKey]!=null)next[thisKey]=weekCatBudgets[prevKey];});});setWeekCatBudgets(next);};
+      const copyLastMonth=()=>{
+        weeks.forEach(w=>{
+          expenseCats.forEach(cat=>{
+            const prevKey=`${prevY}-${prevM+1}-w${w.weekNum}_${cat.id}`;
+            const thisKey=`${w.weekKey}_${cat.id}`;
+            const prevVal=weekCatBudgets[prevKey];
+            if(prevVal==null) return;
+            const cur=weekCatBudgets[thisKey];
+            if(prevVal!==cur){
+              setWeekCatBudget(thisKey,prevVal).catch(e=>{console.error('[weekCatBudgets] save failed',thisKey,e);alert('週予算の保存に失敗しました');});
+            }
+          });
+        });
+      };
       return(
         <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}>
