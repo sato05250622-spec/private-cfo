@@ -584,11 +584,13 @@ export default function App() {
       //  - 0 以上の有効値     → 値として保存(0 も「明示的に 0 円」として保存される)
       const isInvalid = !val || isNaN(num) || num < 0;
       if(catBudgetTarget._isWeek){
-        if(isInvalid){setWeekCatBudgets(p=>{const next={...p};delete next[`${catBudgetTarget._weekKey}_${catBudgetTarget.id}`];return next;});}
-        else{setWeekCatBudgets(p=>({...p,[`${catBudgetTarget._weekKey}_${catBudgetTarget.id}`]:num}));}
+        const wkKey = `${catBudgetTarget._weekKey}_${catBudgetTarget.id}`;
+        if(isInvalid){deleteWeekCatBudget(wkKey).catch(e=>{console.error('[weekCatBudgets] delete failed',wkKey,e);alert('週予算の削除に失敗しました');});}
+        else{setWeekCatBudget(wkKey,num).catch(e=>{console.error('[weekCatBudgets] save failed',wkKey,e);alert('週予算の保存に失敗しました');});}
       } else {
-        if(isInvalid){setBudgets(prev=>{const next={...prev};delete next[monthBudgetKey(catBudgetTarget.id)];return next;});}
-        else{setBudgets(prev=>({...prev,[monthBudgetKey(catBudgetTarget.id)]:num}));}
+        const mKey = monthBudgetKey(catBudgetTarget.id);
+        if(isInvalid){deleteBudget(mKey).catch(e=>{console.error('[budgets] delete failed',mKey,e);alert('予算の削除に失敗しました');});}
+        else{setBudget(mKey,num).catch(e=>{console.error('[budgets] save failed',mKey,e);alert('予算の保存に失敗しました');});}
       }
       setShowCatBudgetModal(false);setCatBudgetInput(""); return;
     }
@@ -1728,8 +1730,8 @@ export default function App() {
                     return(
                     <button key={w.weekKey}
                       onClick={()=>{setCatBudgetTarget({...cat,_weekKey:w.weekKey,_isWeek:true});setCatBudgetInput(hasVal?String(val):"");setShowCatBudgetModal(true);}}
-                      onContextMenu={e=>{e.preventDefault();if(hasVal){const next={...weekCatBudgets};delete next[key];setWeekCatBudgets(next);}}}
-                      onTouchStart={()=>{if(hasVal){longPressTimer.current=setTimeout(()=>{const next={...weekCatBudgets};delete next[key];setWeekCatBudgets(next);},700);}}}
+                      onContextMenu={e=>{e.preventDefault();if(hasVal){deleteWeekCatBudget(key).catch(err=>{console.error('[weekCatBudgets] delete failed',key,err);alert('週予算の削除に失敗しました');});}}}
+                      onTouchStart={()=>{if(hasVal){longPressTimer.current=setTimeout(()=>{deleteWeekCatBudget(key).catch(err=>{console.error('[weekCatBudgets] delete failed',key,err);alert('週予算の削除に失敗しました');});},700);}}}
                       onTouchEnd={()=>{clearTimeout(longPressTimer.current);}}
                       onTouchMove={()=>{clearTimeout(longPressTimer.current);}}
                       style={{padding:"8px 4px",textAlign:"center",background:hasVal?`${GOLD}15`:NAVY2,border:`1px solid ${hasVal?`${GOLD}44`:BORDER}`,borderRadius:8,cursor:"pointer"}}>
