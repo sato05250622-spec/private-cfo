@@ -18,6 +18,11 @@ export async function listPaymentMethods(clientId) {
 }
 
 // (client_id, id) 複合 PK で upsert。
+// アプリ側の paymentDraft は <input> 由来の文字列を保持するため、
+// 数値カラム (closing_day / withdrawal_day / sort_order) は空文字列 → null,
+// それ以外 → Number に正規化する。`?? null` だけだと "" がそのまま送られ、
+// PostgreSQL の smallint cast (`invalid input syntax for type smallint: ""`)
+// で 400 になる (B-3b Phase 1 smoke test で発覚)。
 export async function upsertPaymentMethod(clientId, {
   id, label, color, closingDay, withdrawalDay, bank, sortOrder, legacyKey,
 }) {
@@ -27,11 +32,11 @@ export async function upsertPaymentMethod(clientId, {
       client_id: clientId,
       id,
       label,
-      color: color ?? null,
-      closing_day: closingDay ?? null,
-      withdrawal_day: withdrawalDay ?? null,
-      bank: bank ?? null,
-      sort_order: sortOrder ?? 0,
+      color: color || null,
+      closing_day: closingDay === '' || closingDay == null ? null : Number(closingDay),
+      withdrawal_day: withdrawalDay === '' || withdrawalDay == null ? null : Number(withdrawalDay),
+      bank: bank || null,
+      sort_order: Number(sortOrder ?? 0),
       legacy_key: legacyKey ?? null,
     });
   if (error) throw error;

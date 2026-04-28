@@ -17,6 +17,9 @@ export async function listLoans(clientId) {
 }
 
 // (client_id, id) 複合 PK で upsert。
+// loanDraft の withdrawalDay は <input> 由来の文字列なので空文字列 → null に
+// 正規化 (paymentMethods.js と同じ理由、smallint cast 防止)。
+// pm_id / bank も空文字列 → null に統一。
 export async function upsertLoan(clientId, {
   id, label, amount, bank, withdrawalDay, pmId, legacyKey,
 }) {
@@ -27,9 +30,9 @@ export async function upsertLoan(clientId, {
       id,
       label,
       amount: Number(amount) || 0,
-      bank: bank ?? null,
-      withdrawal_day: withdrawalDay ?? null,
-      pm_id: pmId ?? null,
+      bank: bank || null,
+      withdrawal_day: withdrawalDay === '' || withdrawalDay == null ? null : Number(withdrawalDay),
+      pm_id: pmId || null,
       legacy_key: legacyKey ?? null,
     });
   if (error) throw error;
