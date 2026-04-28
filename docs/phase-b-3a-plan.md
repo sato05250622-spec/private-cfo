@@ -509,3 +509,34 @@ drop table if exists public.budgets          cascade;
   - Dashboard で `legacy_key` 列が空 (= 通常書き込み) の行が増えていく (新規予算編集が DB に届いている証拠)
   - 行数が日に 1 件以上は増減する (アクティブ性の確認)
 - 24 時間後問題なければ B-3b (`payment_methods` + `loans` + `expenses.payment_method` FK) へ進む
+
+---
+
+## B-3a 完了記録（2026/4/28）
+
+### 完了ステータス
+- ブランチ: feat/phase-b-3a-budgets（13 commits ahead of main）
+- Step 4-3 phase 3 まで完走、shim 完全除去
+- Step 5 動作確認: 全項目クリア（単月CRUD / allWeek / copyLastMonth / clearAll / リロード永続化 / StrictMode）
+
+### commit 履歴（Step 4-3）
+| commit | 内容 |
+|--------|------|
+| 595ada2 | phase 1: useBudgets 切替 + shim 設置 |
+| d86ffb2 | phase 2a: simple 6 callsite |
+| ee3967d | phase 2b-1: saveBudgets (unreachable) |
+| 1cdd6af | phase 2b-2: allWeek 一括 |
+| 1b8e03d | phase 2b-3: copyLastMonth |
+| b789d9a | phase 2b-4: clear all confirm |
+| 01f6795 | phase 3: shim 削除 |
+
+### 設計確定事項
+- state 3分割 Record / action 文字列キー / エラー revert+throw
+- optimistic キー単位 / loading 1個 / refetch 公開
+- deps=[userId] / StrictMode 対策 ref ミラー
+- delete = key 削除 / zero-budget 互換
+
+### 残課題（scope 外、別件 ToDo へ）
+- L221-225 useLocalStorage rollback breadcrumb 整理
+- catBudget OK で budgetDraft 更新されない sync 漏れ（ee3967d 詳細）
+- auth context timeout 5000ms console エラー多発
