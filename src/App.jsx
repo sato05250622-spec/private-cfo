@@ -483,7 +483,28 @@ export default function App() {
   const totalBudget=getEffectiveMonthBudget(budgetMonth.y, budgetMonth.m);
   const totalSpending=transactions.filter(t=>t.date>=budgetCycleStartStr&&t.date<=budgetCycleEndStr).reduce((s,t)=>s+t.amount,0);
   const openBudgetModal=()=>{const draft={};expenseCats.forEach(c=>{const b=getBudget(c.id);if(b)draft[c.id]=String(b);});setBudgetDraft(draft);setShowBudgetModal(true);};
-  const saveBudgets=()=>{const next={...budgets};expenseCats.forEach(c=>{const k=budgetKey(c.id);if(budgetDraft[c.id]&&!isNaN(Number(budgetDraft[c.id])))next[k]=Number(budgetDraft[c.id]);else delete next[k];});setBudgets(next);setShowBudgetModal(false);};
+  // NOTE: 現状 UI から到達不可 (showBudgetModal を開く path が意図的に無効化されてる)。
+  // shim 経由実装と完全等価に書かれているため、将来 UI 経路を再有効化した際に
+  // そのまま動作する想定。Phase 2b-1 で hook 直呼び化したが動作確認は未実施。
+  // 既知の別件 (本 commit のスコープ外): catBudget OK 押下で親モーダルの
+  // budgetDraft が更新されない sync 漏れがコード上存在するが、現状
+  // showBudgetModal が UI から開かれないため発火しない。UI 再有効化時に
+  // 併せて修正が必要。
+  const saveBudgets=()=>{
+    expenseCats.forEach(c=>{
+      const k=budgetKey(c.id);
+      const draft=budgetDraft[c.id];
+      const valid=draft&&!isNaN(Number(draft));
+      const cur=budgets[k];
+      if(valid){
+        const num=Number(draft);
+        if(num!==cur){setBudget(k,num).catch(e=>{console.error('[budgets] save failed',k,e);alert('予算の保存に失敗しました');});}
+      }else if(cur!==undefined){
+        deleteBudget(k).catch(e=>{console.error('[budgets] delete failed',k,e);alert('予算の削除に失敗しました');});
+      }
+    });
+    setShowBudgetModal(false);
+  };
   const searchResults=useMemo(()=>{if(!searchQuery.trim())return transactions;const q=searchQuery.toLowerCase();return transactions.filter(t=>{const cat=expenseCats.find(c=>c.id===t.category);return t.memo.toLowerCase().includes(q)||(cat&&cat.label.toLowerCase().includes(q))||String(t.amount).includes(q);});},[searchQuery,transactions,expenseCats]);
 
   const addNewCategory = () => {
