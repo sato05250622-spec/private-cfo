@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useCallback, useState, useMemo, useRef } from "react";
 import { PieChart, Pie, Cell, BarChart, Bar, LineChart, Line, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
 import {
   GOLD, GOLD_LIGHT, GOLD_GRAD,
@@ -22,6 +22,8 @@ import {
 import { useExpenses } from "./hooks/useExpenses";
 import { useCategories } from "./hooks/useCategories";
 import { useBudgets } from "./hooks/useBudgets";
+import { usePaymentMethods } from "./hooks/usePaymentMethods";
+import { useLoans } from "./hooks/useLoans";
 import { usePoints } from "./hooks/usePoints";
 import LogoutButton from "./components/LogoutButton";
 import AppointmentCard from "./components/AppointmentCard";
@@ -259,7 +261,47 @@ export default function App() {
   const [showCatBudgetModal, setShowCatBudgetModal] = useState(false);
   const [catBudgetTarget, setCatBudgetTarget] = useState(null);
   const [catBudgetInput, setCatBudgetInput] = useState("");
-  const [paymentMethods, setPaymentMethods] = useLocalStorage("cfo_paymentMethods", [{ id:"cash", label:"現金", color:"#4CAF50" }]);
+  // === B-3b Step 4-2 phase 1: payment_methods を Supabase 経由に切替 ===
+  // 旧 localStorage 行は rollback 用にコメントアウトで残置 (Phase 3 で削除予定):
+  //   const [paymentMethods, setPaymentMethods] = useLocalStorage("cfo_paymentMethods", [{ id:"cash", label:"現金", color:"#4CAF50" }]);
+  const {
+    paymentMethods,
+    createPaymentMethod, updatePaymentMethod, deletePaymentMethod, reorderPaymentMethods,
+    refetch: refetchPaymentMethods,
+  } = usePaymentMethods();
+
+  // 旧 setter の互換 shim (Phase 2 で順次 hook 直呼びに置換、Phase 3 で削除予定)。
+  // updater が関数なら現配列で評価、そうでなければそのまま next とみなす。
+  // 配列差分から create / update / delete / reorder を決定し fire-and-forget で発火。
+  // 失敗時は console.error + alert (App.jsx の他 setter と同じ UX)。
+  const setPaymentMethods = useCallback((updater) => {
+    const prev = paymentMethods;
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    // 削除: prev にあるが next にない id
+    const nextIds = new Set(next.map(x => x.id));
+    for (const p of prev) {
+      if (!nextIds.has(p.id)) {
+        deletePaymentMethod(p.id).catch(e => { console.error('[paymentMethods] delete failed', p.id, e); alert('決済手段の削除に失敗しました'); });
+      }
+    }
+    // 新規 / 更新
+    const prevById = new Map(prev.map(x => [x.id, x]));
+    for (const n of next) {
+      const p = prevById.get(n.id);
+      if (!p) {
+        createPaymentMethod(n).catch(e => { console.error('[paymentMethods] create failed', n.id, e); alert('決済手段の追加に失敗しました'); });
+      } else if (JSON.stringify(p) !== JSON.stringify(n)) {
+        updatePaymentMethod(n.id, n).catch(e => { console.error('[paymentMethods] update failed', n.id, e); alert('決済手段の更新に失敗しました'); });
+      }
+    }
+    // 順序変化: 長さ同じ + どこかで id 順が変わってる
+    const orderChanged = prev.length === next.length &&
+      prev.some((p, i) => next[i] && p.id !== next[i].id);
+    if (orderChanged) {
+      reorderPaymentMethods(next).catch(e => { console.error('[paymentMethods] reorder failed', e); alert('並び替えに失敗しました'); });
+    }
+  }, [paymentMethods, createPaymentMethod, updatePaymentMethod, deletePaymentMethod, reorderPaymentMethods]);
+  // === B-3b Step 4-2 phase 1 end (paymentMethods) ===
   // 管理スタート日(サイクル切替の本体機能、旧 rewardDay の役割を引き継ぐ)。
   // localStorage 永続化、空 → 1 日起点フォールバック。数値 1-31 のみ受け付ける("末" 等は無効)。
   // 明日 Supabase profiles.management_start_day 列に β 移行予定 → そのときも getter/setter
@@ -298,7 +340,37 @@ export default function App() {
   const [contactSent, setContactSent] = useState(false);
   const { submitting: contactSubmitting, sendInquiry } = useInquiries();
   const [summaryTab, setSummaryTab] = useState("summary");
-  const [loans, setLoans] = useLocalStorage("cfo_loans", []);
+  // === B-3b Step 4-2 phase 1: loans を Supabase 経由に切替 ===
+  // 旧 localStorage 行は rollback 用にコメントアウトで残置 (Phase 3 で削除予定):
+  //   const [loans, setLoans] = useLocalStorage("cfo_loans", []);
+  const {
+    loans,
+    createLoan, updateLoan, deleteLoan,
+    refetch: refetchLoans,
+  } = useLoans();
+
+  // 旧 setter の互換 shim (Phase 2 で順次 hook 直呼びに置換、Phase 3 で削除予定)。
+  // reorder なし (loans は drag-drop 並び替え非対応)。
+  const setLoans = useCallback((updater) => {
+    const prev = loans;
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    const nextIds = new Set(next.map(x => x.id));
+    for (const p of prev) {
+      if (!nextIds.has(p.id)) {
+        deleteLoan(p.id).catch(e => { console.error('[loans] delete failed', p.id, e); alert('借入の削除に失敗しました'); });
+      }
+    }
+    const prevById = new Map(prev.map(x => [x.id, x]));
+    for (const n of next) {
+      const p = prevById.get(n.id);
+      if (!p) {
+        createLoan(n).catch(e => { console.error('[loans] create failed', n.id, e); alert('借入の追加に失敗しました'); });
+      } else if (JSON.stringify(p) !== JSON.stringify(n)) {
+        updateLoan(n.id, n).catch(e => { console.error('[loans] update failed', n.id, e); alert('借入の更新に失敗しました'); });
+      }
+    }
+  }, [loans, createLoan, updateLoan, deleteLoan]);
+  // === B-3b Step 4-2 phase 1 end (loans) ===
   const [showLoanForm, setShowLoanForm] = useState(false);
   const [deleteLoanTarget, setDeleteLoanTarget] = useState(null);
   const [showLoanCalc, setShowLoanCalc] = useState(false);
@@ -1557,7 +1629,7 @@ export default function App() {
               const oldIndex = paymentMethods.findIndex((pm) => pm.id === active.id);
               const newIndex = paymentMethods.findIndex((pm) => pm.id === over.id);
               if (oldIndex < 0 || newIndex < 0) return;
-              setPaymentMethods(arrayMove(paymentMethods, oldIndex, newIndex));
+              reorderPaymentMethods(arrayMove(paymentMethods, oldIndex, newIndex)).catch(e => { console.error('[paymentMethods] reorder failed', e); alert('並び替えに失敗しました'); });
             }}
           >
             <SortableContext items={paymentMethods.map((pm) => pm.id)} strategy={verticalListSortingStrategy}>
@@ -1570,7 +1642,7 @@ export default function App() {
                     setEditingPaymentId(p.id);
                     setMenuScreen("paymentNew");
                   }}
-                  onRemove={(id) => setPaymentMethods((prev) => prev.filter((x) => x.id !== id))}
+                  onRemove={(id) => { deletePaymentMethod(id).catch(e => { console.error('[paymentMethods] delete failed', id, e); alert('決済手段の削除に失敗しました'); }); }}
                 />
               ))}
             </SortableContext>
@@ -1662,7 +1734,7 @@ export default function App() {
             </div>
           )}
           <div style={{position:"fixed",bottom:"calc(60px + env(safe-area-inset-bottom) + 8px)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:CARD_BG,padding:"12px 18px 12px",borderTop:"1px solid #f0f0f0",zIndex:150}}>
-            <button onClick={()=>{if(!paymentDraft.label.trim())return;if(isEdit){setPaymentMethods(p=>p.map(x=>x.id===editingPaymentId?{...x,label:paymentDraft.label,color:paymentDraft.color,closingDay:paymentDraft.closingDay,withdrawalDay:paymentDraft.withdrawalDay,bank:paymentDraft.bank}:x));}else{setPaymentMethods(p=>[...p,{id:`pm_${Date.now()}`,label:paymentDraft.label,color:paymentDraft.color,closingDay:paymentDraft.closingDay,withdrawalDay:paymentDraft.withdrawalDay,bank:paymentDraft.bank}]);}setMenuScreen("paymentEdit");}} style={{display:"block",width:"100%",padding:"16px",background:paymentDraft.label.trim()?ORANGE:"#eee",color:paymentDraft.label.trim()?"#fff":"#aaa",border:"none",borderRadius:28,fontSize:16,fontWeight:700,cursor:"pointer"}}>保存</button>
+            <button onClick={()=>{if(!paymentDraft.label.trim())return;const patch={label:paymentDraft.label,color:paymentDraft.color,closingDay:paymentDraft.closingDay,withdrawalDay:paymentDraft.withdrawalDay,bank:paymentDraft.bank};if(isEdit){updatePaymentMethod(editingPaymentId,patch).catch(e=>{console.error('[paymentMethods] update failed',editingPaymentId,e);alert('決済手段の更新に失敗しました');});}else{createPaymentMethod({id:`pm_${Date.now()}`,...patch}).catch(e=>{console.error('[paymentMethods] create failed',e);alert('決済手段の追加に失敗しました');});}setMenuScreen("paymentEdit");}} style={{display:"block",width:"100%",padding:"16px",background:paymentDraft.label.trim()?ORANGE:"#eee",color:paymentDraft.label.trim()?"#fff":"#aaa",border:"none",borderRadius:28,fontSize:16,fontWeight:700,cursor:"pointer"}}>保存</button>
           </div>
         </div>
       );
@@ -2328,7 +2400,7 @@ export default function App() {
               <div style={{fontSize:13,color:TEXT_SECONDARY}}>「{deleteLoanTarget.label}」</div>
             </div>
             <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>{setLoans(p=>p.filter(x=>x.id!==deleteLoanTarget.id));setDeleteLoanTarget(null);}} style={{flex:1,padding:"14px",background:`${RED}22`,border:`1px solid ${RED}44`,borderRadius:14,fontSize:15,fontWeight:700,color:RED,cursor:"pointer"}}>削除する</button>
+              <button onClick={()=>{const id=deleteLoanTarget.id;deleteLoan(id).catch(e=>{console.error('[loans] delete failed',id,e);alert('借入の削除に失敗しました');});setDeleteLoanTarget(null);}} style={{flex:1,padding:"14px",background:`${RED}22`,border:`1px solid ${RED}44`,borderRadius:14,fontSize:15,fontWeight:700,color:RED,cursor:"pointer"}}>削除する</button>
               <button onClick={()=>setDeleteLoanTarget(null)} style={{flex:1,padding:"14px",background:"none",border:`1px solid ${BORDER}`,borderRadius:14,fontSize:15,fontWeight:600,color:TEXT_SECONDARY,cursor:"pointer"}}>キャンセル</button>
             </div>
           </div>
@@ -2369,10 +2441,11 @@ export default function App() {
               </div>
               <button onClick={()=>{
                 if(!loanDraft.label.trim()||!loanDraft.amount||Number(loanDraft.amount)<=0)return;
+                const patch={...loanDraft,amount:Number(loanDraft.amount)};
                 if(editingLoanId){
-                  setLoans(p=>p.map(x=>x.id===editingLoanId?{...loanDraft,id:editingLoanId,amount:Number(loanDraft.amount)}:x));
+                  updateLoan(editingLoanId,patch).catch(e=>{console.error('[loans] update failed',editingLoanId,e);alert('借入の更新に失敗しました');});
                 } else {
-                  setLoans(p=>[...p,{...loanDraft,id:`loan_${Date.now()}`,amount:Number(loanDraft.amount)}]);
+                  createLoan({...patch,id:`loan_${Date.now()}`}).catch(e=>{console.error('[loans] create failed',e);alert('借入の追加に失敗しました');});
                 }
                 setShowLoanForm(false);setEditingLoanId(null);setLoanDraft({label:"",amount:"",bank:"",withdrawalDay:"",pmId:""});
               }} style={{width:"100%",padding:"14px",background:loanDraft.label.trim()&&loanDraft.amount?GOLD_GRAD:"rgba(255,255,255,0.1)",border:"none",borderRadius:24,fontSize:15,fontWeight:700,color:loanDraft.label.trim()&&loanDraft.amount?"#0A1628":TEXT_MUTED,cursor:"pointer"}}>{editingLoanId?"変更を保存":"登録する"}</button>
