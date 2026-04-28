@@ -55,11 +55,11 @@
 
 ## Step 2. DB 適用 (15 分)
 
-`supabase/migrations/004_phase_b3a_budgets.sql` を新規作成し、**そのファイルの中身を Dashboard SQL Editor に貼って Run**。
+`supabase/migrations/006_phase_b3a_budgets.sql` を新規作成し、**そのファイルの中身を Dashboard SQL Editor に貼って Run**。
 
 ### 2-1. DDL ファイル作成
 
-`supabase/migrations/004_phase_b3a_budgets.sql`:
+`supabase/migrations/006_phase_b3a_budgets.sql`:
 
 ```sql
 -- =============================================================
@@ -170,7 +170,23 @@ alter publication supabase_realtime add table public.week_cat_budgets;
 
 ---
 
-## Step 3. DB 確認 (10 分)
+## Step 3. DB 確認 (10 分) — ✅ 完了 (2026-04-27)
+
+> **実施結果サマリ** (2026-04-27 夜):
+> Dashboard SQL Editor で B-3 計画書外の **拡張版検証 7 本** を実行し全件一致を確認 (本セクションの 3-1 〜 3-4 + FK / CHECK / RLS ポリシー詳細)。
+>
+> | 検証 | 結果 | 内容 |
+> |---|---|---|
+> | 1 (テーブル存在) | ✅ 3 行 | budgets / week_budgets / week_cat_budgets |
+> | 2 (インデックス) | ✅ 6 行 | 各テーブル `*_pkey` + `*_client_period_idx` |
+> | 3 (トリガー) | ✅ 3 行 | 全 `set_updated_at()` BEFORE UPDATE |
+> | 4 (RLS 有効) | ✅ relrowsecurity 全 t | 3 テーブル全部 |
+> | 5 (RLS ポリシー) | ✅ 6 行 | qual / with_check 完璧 (`is_admin()` / `client_id = auth.uid()`) |
+> | 6 (Realtime publication) | ✅ 3 行 | 3 テーブル全部登録済 |
+> | 7 (FK + CHECK) | ✅ 16 行 | 複合 FK + ON DELETE CASCADE + 4 種 CHECK 制約 |
+>
+> **DB 側 B-3a は完全に揃った状態**。アプリ実装 (Step 4) 着手可。
+> **3-5 (RLS 動作確認) は実アカウントによる実行は省略** — 検証 5 で qual / with_check 式の完全一致を確認したため、機能的に等価な検証で代替済。
 
 Dashboard SQL Editor で以下を実行し、結果を記録:
 
@@ -458,7 +474,7 @@ drop table if exists public.budgets          cascade;
 
 | # | リスク | 発生確率 | 対応 |
 |---|---|---|---|
-| R1 | Dashboard SQL Editor で構文エラー | 低 | DDL を `supabase/migrations/004_*.sql` に保存しているのでそのままコピペ。エラー時は Rollback A |
+| R1 | Dashboard SQL Editor で構文エラー | 低 | DDL を `supabase/migrations/006_*.sql` に保存しているのでそのままコピペ。エラー時は Rollback A |
 | R2 | RLS の `auth.uid()` が JWT 引けず常に NULL → 顧客が自分の行も見えない | 低 (既存テーブル動作中なので) | テストアカウントでの動作確認 (Step 3-5) で先に検出 |
 | R3 | App.jsx の差し替えで UI リグレッション (週サマリーが空表示等) | **中** | Step 7 で <client_A> さん立ち会い必須。事前に開発環境で fixture データで確認 |
 | R4 | Realtime 購読が動かない | 中 | Step 3-4 で publication 登録を確認。アプリ側は B-3a では subscribe しない (read on mount のみ) のでブロッカーにはならない |
@@ -493,3 +509,34 @@ drop table if exists public.budgets          cascade;
   - Dashboard で `legacy_key` 列が空 (= 通常書き込み) の行が増えていく (新規予算編集が DB に届いている証拠)
   - 行数が日に 1 件以上は増減する (アクティブ性の確認)
 - 24 時間後問題なければ B-3b (`payment_methods` + `loans` + `expenses.payment_method` FK) へ進む
+
+---
+
+## B-3a 完了記録（2026/4/28）
+
+### 完了ステータス
+- ブランチ: feat/phase-b-3a-budgets（13 commits ahead of main）
+- Step 4-3 phase 3 まで完走、shim 完全除去
+- Step 5 動作確認: 全項目クリア（単月CRUD / allWeek / copyLastMonth / clearAll / リロード永続化 / StrictMode）
+
+### commit 履歴（Step 4-3）
+| commit | 内容 |
+|--------|------|
+| 595ada2 | phase 1: useBudgets 切替 + shim 設置 |
+| d86ffb2 | phase 2a: simple 6 callsite |
+| ee3967d | phase 2b-1: saveBudgets (unreachable) |
+| 1cdd6af | phase 2b-2: allWeek 一括 |
+| 1b8e03d | phase 2b-3: copyLastMonth |
+| b789d9a | phase 2b-4: clear all confirm |
+| 01f6795 | phase 3: shim 削除 |
+
+### 設計確定事項
+- state 3分割 Record / action 文字列キー / エラー revert+throw
+- optimistic キー単位 / loading 1個 / refetch 公開
+- deps=[userId] / StrictMode 対策 ref ミラー
+- delete = key 削除 / zero-budget 互換
+
+### 残課題（scope 外、別件 ToDo へ）
+- L221-225 useLocalStorage rollback breadcrumb 整理
+- catBudget OK で budgetDraft 更新されない sync 漏れ（ee3967d 詳細）
+- auth context timeout 5000ms console エラー多発

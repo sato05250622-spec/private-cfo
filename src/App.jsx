@@ -21,6 +21,7 @@ import {
 } from "./utils/cycle";
 import { useExpenses } from "./hooks/useExpenses";
 import { useCategories } from "./hooks/useCategories";
+import { useBudgets } from "./hooks/useBudgets";
 import { usePoints } from "./hooks/usePoints";
 import LogoutButton from "./components/LogoutButton";
 import AppointmentCard from "./components/AppointmentCard";
@@ -216,7 +217,20 @@ export default function App() {
   const [reportYear, setReportYear] = useState(today.getFullYear());
   const [reportType, setReportType] = useState("monthly");
   const [budgetMonth, setBudgetMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
-  const [budgets, setBudgets] = useLocalStorage("cfo_budgets", {});
+
+  // === B-3a Step 4-3 phase 1: budgets / weekBudgets / weekCatBudgets を Supabase 経由に切替 ===
+  // 旧 localStorage 行は rollback 用にコメントアウトで残置 (Phase 3 で削除予定):
+  //   const [budgets, setBudgets] = useLocalStorage("cfo_budgets", {});
+  //   const [weekBudgets, setWeekBudgets] = useLocalStorage("cfo_weekBudgets", {});  ← L243 元位置
+  //   const [weekCatBudgets, setWeekCatBudgets] = useLocalStorage("cfo_weekCatBudgets", {});  ← L244 元位置
+  const {
+    budgets, weekBudgets, weekCatBudgets,
+    setBudget, deleteBudget,
+    setWeekBudget, deleteWeekBudget,
+    setWeekCatBudget, deleteWeekCatBudget,
+    refetch: refetchBudgets,
+  } = useBudgets();
+
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState({});
   const [menuScreen, setMenuScreen] = useState("main");
@@ -240,8 +254,8 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState(toDateStr(today));
   const [expandedWeek, setExpandedWeek] = useState(weekInCycle(today, getManagementStartDay()));
   const [weekBudgetInput, setWeekBudgetInput] = useState("");
-  const [weekBudgets, setWeekBudgets] = useLocalStorage("cfo_weekBudgets", {});
-  const [weekCatBudgets, setWeekCatBudgets] = useLocalStorage("cfo_weekCatBudgets", {});
+  // weekBudgets / weekCatBudgets は B-3a Step 4-3 phase 1 で useBudgets() に統合済 (L219 周辺参照)。
+  // 旧 localStorage 行は L219 のコメント内に残置 (rollback 用)。
   const [showCatBudgetModal, setShowCatBudgetModal] = useState(false);
   const [catBudgetTarget, setCatBudgetTarget] = useState(null);
   const [catBudgetInput, setCatBudgetInput] = useState("");
@@ -435,7 +449,28 @@ export default function App() {
   const totalBudget=getEffectiveMonthBudget(budgetMonth.y, budgetMonth.m);
   const totalSpending=transactions.filter(t=>t.date>=budgetCycleStartStr&&t.date<=budgetCycleEndStr).reduce((s,t)=>s+t.amount,0);
   const openBudgetModal=()=>{const draft={};expenseCats.forEach(c=>{const b=getBudget(c.id);if(b)draft[c.id]=String(b);});setBudgetDraft(draft);setShowBudgetModal(true);};
-  const saveBudgets=()=>{const next={...budgets};expenseCats.forEach(c=>{const k=budgetKey(c.id);if(budgetDraft[c.id]&&!isNaN(Number(budgetDraft[c.id])))next[k]=Number(budgetDraft[c.id]);else delete next[k];});setBudgets(next);setShowBudgetModal(false);};
+  // NOTE: 現状 UI から到達不可 (showBudgetModal を開く path が意図的に無効化されてる)。
+  // shim 経由実装と完全等価に書かれているため、将来 UI 経路を再有効化した際に
+  // そのまま動作する想定。Phase 2b-1 で hook 直呼び化したが動作確認は未実施。
+  // 既知の別件 (本 commit のスコープ外): catBudget OK 押下で親モーダルの
+  // budgetDraft が更新されない sync 漏れがコード上存在するが、現状
+  // showBudgetModal が UI から開かれないため発火しない。UI 再有効化時に
+  // 併せて修正が必要。
+  const saveBudgets=()=>{
+    expenseCats.forEach(c=>{
+      const k=budgetKey(c.id);
+      const draft=budgetDraft[c.id];
+      const valid=draft&&!isNaN(Number(draft));
+      const cur=budgets[k];
+      if(valid){
+        const num=Number(draft);
+        if(num!==cur){setBudget(k,num).catch(e=>{console.error('[budgets] save failed',k,e);alert('予算の保存に失敗しました');});}
+      }else if(cur!==undefined){
+        deleteBudget(k).catch(e=>{console.error('[budgets] delete failed',k,e);alert('予算の削除に失敗しました');});
+      }
+    });
+    setShowBudgetModal(false);
+  };
   const searchResults=useMemo(()=>{if(!searchQuery.trim())return transactions;const q=searchQuery.toLowerCase();return transactions.filter(t=>{const cat=expenseCats.find(c=>c.id===t.category);return t.memo.toLowerCase().includes(q)||(cat&&cat.label.toLowerCase().includes(q))||String(t.amount).includes(q);});},[searchQuery,transactions,expenseCats]);
 
   const addNewCategory = () => {
@@ -536,11 +571,13 @@ export default function App() {
       //  - 0 以上の有効値     → 値として保存(0 も「明示的に 0 円」として保存される)
       const isInvalid = !val || isNaN(num) || num < 0;
       if(catBudgetTarget._isWeek){
-        if(isInvalid){setWeekCatBudgets(p=>{const next={...p};delete next[`${catBudgetTarget._weekKey}_${catBudgetTarget.id}`];return next;});}
-        else{setWeekCatBudgets(p=>({...p,[`${catBudgetTarget._weekKey}_${catBudgetTarget.id}`]:num}));}
+        const wkKey = `${catBudgetTarget._weekKey}_${catBudgetTarget.id}`;
+        if(isInvalid){deleteWeekCatBudget(wkKey).catch(e=>{console.error('[weekCatBudgets] delete failed',wkKey,e);alert('週予算の削除に失敗しました');});}
+        else{setWeekCatBudget(wkKey,num).catch(e=>{console.error('[weekCatBudgets] save failed',wkKey,e);alert('週予算の保存に失敗しました');});}
       } else {
-        if(isInvalid){setBudgets(prev=>{const next={...prev};delete next[monthBudgetKey(catBudgetTarget.id)];return next;});}
-        else{setBudgets(prev=>({...prev,[monthBudgetKey(catBudgetTarget.id)]:num}));}
+        const mKey = monthBudgetKey(catBudgetTarget.id);
+        if(isInvalid){deleteBudget(mKey).catch(e=>{console.error('[budgets] delete failed',mKey,e);alert('予算の削除に失敗しました');});}
+        else{setBudget(mKey,num).catch(e=>{console.error('[budgets] save failed',mKey,e);alert('予算の保存に失敗しました');});}
       }
       setShowCatBudgetModal(false);setCatBudgetInput(""); return;
     }
@@ -561,9 +598,14 @@ export default function App() {
       // 全週一括設定でも 0 入力を許可(全週を明示的に 0 円としてセットできる)。
       // 空欄 / NaN / 負数は「何もしない」= モーダルを閉じずに留まる動作を維持。
       const val=allWeekInput; const num=Number(val); if(!val||isNaN(num)||num<0) return;
-      const next={...weekCatBudgets};
-      weeks.forEach(w=>{next[`${w.weekKey}_${allWeekTarget.id}`]=num;});
-      setWeekCatBudgets(next);setAllWeekTarget(null);setAllWeekInput(""); return;
+      weeks.forEach(w=>{
+        const key=`${w.weekKey}_${allWeekTarget.id}`;
+        const cur=weekCatBudgets[key];
+        if(num!==cur){
+          setWeekCatBudget(key,num).catch(e=>{console.error('[weekCatBudgets] save failed',key,e);alert('週予算の保存に失敗しました');});
+        }
+      });
+      setAllWeekTarget(null);setAllWeekInput(""); return;
     }
     setAllWeekInput(p=>{ if(p===""&&v==="0")return "0"; if(p==="0")return String(v); return p+String(v); });
   };
@@ -1634,7 +1676,20 @@ export default function App() {
       const weeks = weeksInCycle(y, m, managementStartDay);
       const prevM=m===0?11:m-1;const prevY=m===0?y-1:y;
       // 先月コピーも 0 を尊重:truthy チェックだと prev が 0 のときにコピーされないので null 判定に変更。
-      const copyLastMonth=()=>{const next={...weekCatBudgets};weeks.forEach(w=>{expenseCats.forEach(cat=>{const prevKey=`${prevY}-${prevM+1}-w${w.weekNum}_${cat.id}`;const thisKey=`${w.weekKey}_${cat.id}`;if(weekCatBudgets[prevKey]!=null)next[thisKey]=weekCatBudgets[prevKey];});});setWeekCatBudgets(next);};
+      const copyLastMonth=()=>{
+        weeks.forEach(w=>{
+          expenseCats.forEach(cat=>{
+            const prevKey=`${prevY}-${prevM+1}-w${w.weekNum}_${cat.id}`;
+            const thisKey=`${w.weekKey}_${cat.id}`;
+            const prevVal=weekCatBudgets[prevKey];
+            if(prevVal==null) return;
+            const cur=weekCatBudgets[thisKey];
+            if(prevVal!==cur){
+              setWeekCatBudget(thisKey,prevVal).catch(e=>{console.error('[weekCatBudgets] save failed',thisKey,e);alert('週予算の保存に失敗しました');});
+            }
+          });
+        });
+      };
       return(
         <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}>
@@ -1680,8 +1735,8 @@ export default function App() {
                     return(
                     <button key={w.weekKey}
                       onClick={()=>{setCatBudgetTarget({...cat,_weekKey:w.weekKey,_isWeek:true});setCatBudgetInput(hasVal?String(val):"");setShowCatBudgetModal(true);}}
-                      onContextMenu={e=>{e.preventDefault();if(hasVal){const next={...weekCatBudgets};delete next[key];setWeekCatBudgets(next);}}}
-                      onTouchStart={()=>{if(hasVal){longPressTimer.current=setTimeout(()=>{const next={...weekCatBudgets};delete next[key];setWeekCatBudgets(next);},700);}}}
+                      onContextMenu={e=>{e.preventDefault();if(hasVal){deleteWeekCatBudget(key).catch(err=>{console.error('[weekCatBudgets] delete failed',key,err);alert('週予算の削除に失敗しました');});}}}
+                      onTouchStart={()=>{if(hasVal){longPressTimer.current=setTimeout(()=>{deleteWeekCatBudget(key).catch(err=>{console.error('[weekCatBudgets] delete failed',key,err);alert('週予算の削除に失敗しました');});},700);}}}
                       onTouchEnd={()=>{clearTimeout(longPressTimer.current);}}
                       onTouchMove={()=>{clearTimeout(longPressTimer.current);}}
                       style={{padding:"8px 4px",textAlign:"center",background:hasVal?`${GOLD}15`:NAVY2,border:`1px solid ${hasVal?`${GOLD}44`:BORDER}`,borderRadius:8,cursor:"pointer"}}>
@@ -1723,7 +1778,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {showClearConfirm&&(<div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{background:NAVY2,borderRadius:20,padding:"28px 24px",margin:"0 24px",border:`1px solid ${BORDER}`,width:"100%"}}><div style={{textAlign:"center",marginBottom:20}}><div style={{fontSize:24,marginBottom:10}}>🗑️</div><div style={{fontSize:16,fontWeight:700,color:TEXT_PRIMARY,marginBottom:8}}>予算を全て削除</div></div><div style={{display:"flex",gap:10}}><button onClick={()=>{const next={...weekCatBudgets};weeks.forEach(w=>{expenseCats.forEach(cat=>{delete next[`${w.weekKey}_${cat.id}`];});});setWeekCatBudgets(next);setShowClearConfirm(false);}} style={{flex:1,padding:"14px",background:`${RED}22`,border:`1px solid ${RED}44`,borderRadius:14,fontSize:15,fontWeight:700,color:RED,cursor:"pointer"}}>はい</button><button onClick={()=>setShowClearConfirm(false)} style={{flex:1,padding:"14px",background:"none",border:`1px solid ${BORDER}`,borderRadius:14,fontSize:15,fontWeight:600,color:TEXT_SECONDARY,cursor:"pointer"}}>いいえ</button></div></div></div>)}
+          {showClearConfirm&&(<div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{background:NAVY2,borderRadius:20,padding:"28px 24px",margin:"0 24px",border:`1px solid ${BORDER}`,width:"100%"}}><div style={{textAlign:"center",marginBottom:20}}><div style={{fontSize:24,marginBottom:10}}>🗑️</div><div style={{fontSize:16,fontWeight:700,color:TEXT_PRIMARY,marginBottom:8}}>予算を全て削除</div></div><div style={{display:"flex",gap:10}}><button onClick={()=>{weeks.forEach(w=>{expenseCats.forEach(cat=>{const key=`${w.weekKey}_${cat.id}`;if(weekCatBudgets[key]!==undefined){deleteWeekCatBudget(key).catch(e=>{console.error('[weekCatBudgets] delete failed',key,e);alert('週予算の削除に失敗しました');});}});});setShowClearConfirm(false);}} style={{flex:1,padding:"14px",background:`${RED}22`,border:`1px solid ${RED}44`,borderRadius:14,fontSize:15,fontWeight:700,color:RED,cursor:"pointer"}}>はい</button><button onClick={()=>setShowClearConfirm(false)} style={{flex:1,padding:"14px",background:"none",border:`1px solid ${BORDER}`,borderRadius:14,fontSize:15,fontWeight:600,color:TEXT_SECONDARY,cursor:"pointer"}}>いいえ</button></div></div></div>)}
           {showCopyConfirm&&(<div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{background:NAVY2,borderRadius:20,padding:"28px 24px",margin:"0 24px",border:`1px solid ${BORDER}`,width:"100%"}}><div style={{textAlign:"center",marginBottom:20}}><div style={{fontSize:24,marginBottom:10}}>📋</div><div style={{fontSize:16,fontWeight:700,color:TEXT_PRIMARY,marginBottom:8}}>先月と同じ予算を設定</div></div><div style={{display:"flex",gap:10}}><button onClick={()=>{copyLastMonth();setShowCopyConfirm(false);}} style={{flex:1,padding:"14px",background:GOLD_GRAD,border:"none",borderRadius:14,fontSize:15,fontWeight:700,color:"#0A1628",cursor:"pointer"}}>はい</button><button onClick={()=>setShowCopyConfirm(false)} style={{flex:1,padding:"14px",background:"none",border:`1px solid ${BORDER}`,borderRadius:14,fontSize:15,fontWeight:600,color:TEXT_SECONDARY,cursor:"pointer"}}>いいえ</button></div></div></div>)}
           <div style={{height:20}}/>
         </div>
