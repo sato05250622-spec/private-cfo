@@ -1,4 +1,4 @@
-import { useCallback, useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef } from "react";
 import { PieChart, Pie, Cell, BarChart, Bar, LineChart, Line, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
 import {
   GOLD, GOLD_LIGHT, GOLD_GRAD,
@@ -230,40 +230,6 @@ export default function App() {
     setWeekCatBudget, deleteWeekCatBudget,
     refetch: refetchBudgets,
   } = useBudgets();
-
-  // 旧 setter の互換 shim (Phase 2 で順次 hook 直呼びに置換、Phase 3 で削除予定)。
-  // updater が関数なら現 Record で評価、そうでなければそのまま next とみなす。
-  // 差分から set/delete を決定し、hook の action を fire-and-forget で呼ぶ。
-  // 失敗時は console.error + alert (App.jsx の他 setter と同じ UX)。
-  const setBudgets = useCallback((updater) => {
-    const next = typeof updater === 'function' ? updater(budgets) : updater;
-    const allKeys = new Set([...Object.keys(budgets), ...Object.keys(next)]);
-    for (const key of allKeys) {
-      const cur = budgets[key];
-      const upd = next[key];
-      if (upd === undefined && cur !== undefined) {
-        deleteBudget(key).catch(e => { console.error('[budgets] delete failed', key, e); alert('予算の削除に失敗しました'); });
-      } else if (upd !== cur) {
-        setBudget(key, upd).catch(e => { console.error('[budgets] save failed', key, e); alert('予算の保存に失敗しました'); });
-      }
-    }
-  }, [budgets, setBudget, deleteBudget]);
-
-  const setWeekCatBudgets = useCallback((updater) => {
-    const next = typeof updater === 'function' ? updater(weekCatBudgets) : updater;
-    const allKeys = new Set([...Object.keys(weekCatBudgets), ...Object.keys(next)]);
-    for (const key of allKeys) {
-      const cur = weekCatBudgets[key];
-      const upd = next[key];
-      if (upd === undefined && cur !== undefined) {
-        deleteWeekCatBudget(key).catch(e => { console.error('[weekCatBudgets] delete failed', key, e); alert('週予算の削除に失敗しました'); });
-      } else if (upd !== cur) {
-        setWeekCatBudget(key, upd).catch(e => { console.error('[weekCatBudgets] save failed', key, e); alert('週予算の保存に失敗しました'); });
-      }
-    }
-  }, [weekCatBudgets, setWeekCatBudget, deleteWeekCatBudget]);
-  // setWeekBudgets は callsite ゼロ (grep 確認済) のため shim 作成しない。
-  // === B-3a Step 4-3 phase 1 end ===
 
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState({});
