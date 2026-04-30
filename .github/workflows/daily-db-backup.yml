@@ -1,0 +1,97 @@
+# =============================================================
+# 本番 Supabase DB の日次バックアップ (二次バックアップ、自前運用)
+#
+# Free プランの 7 日自動バックアップだけでは長期保管が不足のため、
+# 自前で pg_dump を取り、別 private repo (sato05250622-spec/private-cfo-backups)
+# に gzip 圧縮で push する。
+#
+# 動作:
+#   - JST 毎日 03:00 (= UTC 前日 18:00) に自動実行
+#   - workflow_dispatch で手動実行可能
+#   - pg_dump → gzip → private-cfo-backups の backups/ 配下に push
+#
+# 必要な GitHub Secrets:
+#   - SUPABASE_DB_URL: Session pooler 接続文字列 (port 5432)
+#   - BACKUP_REPO_TOKEN: private-cfo-backups への Contents:write 権限 PAT
+#
+# 注:
+#   - PostgreSQL 16 client を使用 (pg_dump の互換性確保)
+#     Supabase 本番は実測 PG 17.6 のため、新 feature の dump で警告が出る
+#     可能性あり。気になるなら postgresql-client-17 への昇格を検討。
+#   - 失敗時の通知は未実装 (将来課題、Slack / Discord webhook 候補)
+#   - 復旧手順は docs/db-operation-rules.md「事故時の対応フロー」参照
+#   - ローテーション (古い backup の自動削除) は未実装。1 日 ~30KB 想定で
+#     1 年 ~10MB 程度なので当面不要、必要になったら別 workflow で対応
+# =============================================================
+
+name: Daily DB Backup
+
+on:
+  schedule:
+    # JST 03:00 = UTC 18:00 前日
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    name: Backup Supabase DB
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install PostgreSQL 16 client
+        run: |
+          # PostgreSQL 公式 APT リポジトリを追加して postgresql-client-16 を取得
+          # (Ubuntu 標準 repo の PG version は古い可能性があるため明示)
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-16
+          pg_dump --version
+
+      - name: Compute JST date
+        id: meta
+        run: |
+          DATE=$(TZ='Asia/Tokyo' date +%Y-%m-%d)
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          echo "filename=backup-$DATE.sql.gz" >> "$GITHUB_OUTPUT"
+
+      - name: pg_dump and gzip
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          # --no-owner --no-acl: Supabase の所有者/権限情報を持ち込まない
+          #                      (restore 時に new project でも適用しやすい)
+          # --clean --if-exists: restore 時に既存オブジェクトを安全に DROP 可能
+          pg_dump --no-owner --no-acl --clean --if-exists "$DATABASE_URL" \
+            | gzip -9 > "${{ steps.meta.outputs.filename }}"
+          ls -lh "${{ steps.meta.outputs.filename }}"
+          # サイズ sanity check: 1KB 未満なら異常 (空 dump / 認証失敗等)
+          test "$(stat -c%s "${{ steps.meta.outputs.filename }}")" -gt 1024
+
+      - name: Clone backup repo
+        env:
+          BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+        run: |
+          git clone --depth 1 \
+            "https://x-access-token:${BACKUP_REPO_TOKEN}@github.com/sato05250622-spec/private-cfo-backups.git" \
+            backup-repo
+
+      - name: Place backup file
+        run: |
+          mkdir -p backup-repo/backups
+          mv "${{ steps.meta.outputs.filename }}" "backup-repo/backups/${{ steps.meta.outputs.filename }}"
+
+      - name: Commit and push
+        run: |
+          cd backup-repo
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions (daily DB backup)"
+          git add backups/
+          # 同日 manual re-run で内容変化が無い場合 (まず起きないが) は skip
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "backup: ${{ steps.meta.outputs.date }}"
+          git push origin HEAD
