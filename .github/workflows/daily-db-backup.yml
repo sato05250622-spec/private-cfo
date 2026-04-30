@@ -15,9 +15,9 @@
 #   - BACKUP_REPO_TOKEN: private-cfo-backups への Contents:write 権限 PAT
 #
 # 注:
-#   - PostgreSQL 16 client を使用 (pg_dump の互換性確保)
-#     Supabase 本番は実測 PG 17.6 のため、新 feature の dump で警告が出る
-#     可能性あり。気になるなら postgresql-client-17 への昇格を検討。
+#   - PostgreSQL 17 client を使用 (Supabase 本番が実測 PG 17.6 で version 一致)
+#     初版は 16 client だったが、server version mismatch error が出たため
+#     17 に昇格 (2026-04-30、server: 17.6 / 旧 client: 16.13)
 #   - 失敗時の通知は未実装 (将来課題、Slack / Discord webhook 候補)
 #   - 復旧手順は docs/db-operation-rules.md「事故時の対応フロー」参照
 #   - ローテーション (古い backup の自動削除) は未実装。1 日 ~30KB 想定で
@@ -37,15 +37,16 @@ jobs:
     name: Backup Supabase DB
     runs-on: ubuntu-latest
     steps:
-      - name: Install PostgreSQL 16 client
+      - name: Install PostgreSQL 17 client
         run: |
-          # PostgreSQL 公式 APT リポジトリを追加して postgresql-client-16 を取得
+          # PostgreSQL 公式 APT リポジトリを追加して postgresql-client-17 を取得
           # (Ubuntu 標準 repo の PG version は古い可能性があるため明示)
+          # Supabase 本番 server (PG 17.6) と version 一致させて mismatch error 回避
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
           sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           sudo apt-get update
-          sudo apt-get install -y postgresql-client-16
+          sudo apt-get install -y postgresql-client-17
           pg_dump --version
 
       - name: Compute JST date
@@ -54,35 +55,6 @@ jobs:
           DATE=$(TZ='Asia/Tokyo' date +%Y-%m-%d)
           echo "date=$DATE" >> "$GITHUB_OUTPUT"
           echo "filename=backup-$DATE.sql.gz" >> "$GITHUB_OUTPUT"
-
-      # ===== TEMPORARY DEBUG (削除予定) =====
-      # SUPABASE_DB_URL の構造確認用、一時的なデバッグステップ。
-      # 確認終了後は別ブランチで削除すること。
-      # 注: head -c 30 に短縮済 (password 領域に届かない安全位置、推奨案 A)
-      #     仕様の head -c 50 は password 先頭 ~6 文字を露出するリスクあり
-      - name: Debug SUPABASE_DB_URL structure (TEMPORARY)
-        env:
-          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-        run: |
-          # URL の長さ
-          echo "URL length: ${#DB_URL}"
-          # 先頭部分 (postgresql://USER の途中まで、password に届かない安全位置)
-          echo "Prefix check (first 30 chars):"
-          echo "$DB_URL" | head -c 30
-          echo ""
-          # ユーザー名抽出 (postgresql:// から : まで)
-          USER_PART=$(echo "$DB_URL" | sed -n 's|postgresql://\([^:]*\):.*|\1|p')
-          echo "Extracted user: $USER_PART"
-          # ホスト部分 (@ から : まで)
-          HOST_PART=$(echo "$DB_URL" | sed -n 's|.*@\([^:]*\):.*|\1|p')
-          echo "Extracted host: $HOST_PART"
-          # 末尾 (DB名)
-          DB_NAME=$(echo "$DB_URL" | sed -n 's|.*/\([^/]*\)$|\1|p')
-          echo "Extracted db: $DB_NAME"
-          # パスワード長 (中身は出さない、長さのみ)
-          PASS_PART=$(echo "$DB_URL" | sed -n 's|postgresql://[^:]*:\(.*\)@.*|\1|p')
-          echo "Password length: ${#PASS_PART}"
-      # ===== END TEMPORARY DEBUG =====
 
       - name: pg_dump and gzip
         env:
