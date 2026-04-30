@@ -55,6 +55,35 @@ jobs:
           echo "date=$DATE" >> "$GITHUB_OUTPUT"
           echo "filename=backup-$DATE.sql.gz" >> "$GITHUB_OUTPUT"
 
+      # ===== TEMPORARY DEBUG (削除予定) =====
+      # SUPABASE_DB_URL の構造確認用、一時的なデバッグステップ。
+      # 確認終了後は別ブランチで削除すること。
+      # 注: head -c 30 に短縮済 (password 領域に届かない安全位置、推奨案 A)
+      #     仕様の head -c 50 は password 先頭 ~6 文字を露出するリスクあり
+      - name: Debug SUPABASE_DB_URL structure (TEMPORARY)
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          # URL の長さ
+          echo "URL length: ${#DB_URL}"
+          # 先頭部分 (postgresql://USER の途中まで、password に届かない安全位置)
+          echo "Prefix check (first 30 chars):"
+          echo "$DB_URL" | head -c 30
+          echo ""
+          # ユーザー名抽出 (postgresql:// から : まで)
+          USER_PART=$(echo "$DB_URL" | sed -n 's|postgresql://\([^:]*\):.*|\1|p')
+          echo "Extracted user: $USER_PART"
+          # ホスト部分 (@ から : まで)
+          HOST_PART=$(echo "$DB_URL" | sed -n 's|.*@\([^:]*\):.*|\1|p')
+          echo "Extracted host: $HOST_PART"
+          # 末尾 (DB名)
+          DB_NAME=$(echo "$DB_URL" | sed -n 's|.*/\([^/]*\)$|\1|p')
+          echo "Extracted db: $DB_NAME"
+          # パスワード長 (中身は出さない、長さのみ)
+          PASS_PART=$(echo "$DB_URL" | sed -n 's|postgresql://[^:]*:\(.*\)@.*|\1|p')
+          echo "Password length: ${#PASS_PART}"
+      # ===== END TEMPORARY DEBUG =====
+
       - name: pg_dump and gzip
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
