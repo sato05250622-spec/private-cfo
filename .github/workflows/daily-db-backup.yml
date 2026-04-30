@@ -47,7 +47,9 @@ jobs:
           sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
-          pg_dump --version
+          # PG17 binary を明示パスで呼ぶ (Ubuntu runner には PG16 が同居しているため
+          # PATH 上の pg_dump が 16 を指してしまう。/usr/lib/postgresql/17/bin/ で 17 を強制)
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       - name: Compute JST date
         id: meta
@@ -64,7 +66,8 @@ jobs:
           # --no-owner --no-acl: Supabase の所有者/権限情報を持ち込まない
           #                      (restore 時に new project でも適用しやすい)
           # --clean --if-exists: restore 時に既存オブジェクトを安全に DROP 可能
-          pg_dump --no-owner --no-acl --clean --if-exists "$DATABASE_URL" \
+          # PG17 binary を明示パスで呼ぶ (Ubuntu runner には PG16 が同居しているため)
+          /usr/lib/postgresql/17/bin/pg_dump --no-owner --no-acl --clean --if-exists "$DATABASE_URL" \
             | gzip -9 > "${{ steps.meta.outputs.filename }}"
           ls -lh "${{ steps.meta.outputs.filename }}"
           # サイズ sanity check: 1KB 未満なら異常 (空 dump / 認証失敗等)
