@@ -1095,6 +1095,14 @@ export default function App() {
   // ============================================================
   const renderWeekly = () => {
     const {y,m}=calMonth;
+    // calMonth は cycle 月 (例: msd=25 で {y:2026,m:4} = 「5月サイクル」=5/25-6/24) を表す。
+    // 一方 today.getMonth() は calendar 月。両者の整合判定はカレンダー比較ではなく
+    // cycle 比較 (today が属するサイクルと calMonth が指すサイクルの一致) で行う必要がある。
+    // 旧コードは today.getMonth() を直接比較していたため、msd≠1 のとき「今週」バッジが
+    // 未来サイクルに付くなどの週ズレ表示を起こしていた (renderDaily 側は L962-975 で
+    // 既に findCycleOfDate ベースに移行済、こちら側がリファクタを免れていた)。
+    const todayCycle = findCycleOfDate(today, managementStartDay);
+    const isShowingTodayCycle = (y === todayCycle.year && m === todayCycle.month);
     const currentWeekNum = weekInCycle(today, managementStartDay);
 
     return (
@@ -1104,16 +1112,16 @@ export default function App() {
           <span style={{width:40}}/>
         </div>
         <div style={S.monthNav}>
-          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m-1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===today.getFullYear()&&nm===today.getMonth();setExpandedWeek(isNowMonth?weekInCycle(today,managementStartDay):null);return{y:ny,m:nm};});}}>‹</button>
+          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m-1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===todayCycle.year&&nm===todayCycle.month;setExpandedWeek(isNowMonth?currentWeekNum:null);return{y:ny,m:nm};});}}>‹</button>
           <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,managementStartDay)}</span>
-          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m+1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===today.getFullYear()&&nm===today.getMonth();setExpandedWeek(isNowMonth?weekInCycle(today,managementStartDay):null);return{y:ny,m:nm};});}}>›</button>
+          <button style={S.navArrow} onClick={()=>{setCalMonth(p=>{const d=new Date(p.y,p.m+1);const nm=d.getMonth(),ny=d.getFullYear();const isNowMonth=ny===todayCycle.year&&nm===todayCycle.month;setExpandedWeek(isNowMonth?currentWeekNum:null);return{y:ny,m:nm};});}}>›</button>
         </div>
 
         <div style={{background:CARD_BG,margin:"8px 0 0",padding:"14px 18px"}}>
           <div style={{fontWeight:400,fontSize:11,marginBottom:12,color:TEXT_SECONDARY}}>週間サマリー（{m+1}月）</div>
           {[...weekSummary].sort((a,b)=>{
             // 今月表示中だけ今週を先頭に、それ以外は第1週から順番
-            const isCurrentMonth = y===today.getFullYear() && m===today.getMonth();
+            const isCurrentMonth = isShowingTodayCycle;
             if(!isCurrentMonth) return a.weekNum-b.weekNum;
             const cur = weekInCycle(today, managementStartDay);
             if(a.weekNum===cur) return -1;
@@ -1125,7 +1133,7 @@ export default function App() {
             const remain = w.weekBudget - w.expense;
             const barColor = pctRaw>=100 ? RED : pctRaw>=80 ? "#D4A017" : GOLD;
             const isExpanded = expandedWeek === w.weekNum;
-            const isCurrentMonth = y===today.getFullYear() && m===today.getMonth();
+            const isCurrentMonth = isShowingTodayCycle;
             const isCurrentWeek = isCurrentMonth && w.weekNum === currentWeekNum;
 
             const catBreakdownData = expenseCats.map(cat=>{
