@@ -33,6 +33,7 @@ import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
 import { useAuth } from "./context/AuthContext";
 import { migratePaymentsLoans } from "./lib/migratePaymentsLoans";
+import { migrateBudgets } from "./lib/migrateBudgets";
 import { DndContext, closestCenter, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
 
@@ -342,6 +343,31 @@ export default function App() {
     })();
   }, [authUserId, refetchPaymentMethods, refetchLoans]);
   // === B-3b Step 5 end ===
+
+  // === B-3a Step 5: budgets localStorage → Supabase ワンタイム移行 ===
+  // B-3a で useLocalStorage("cfo_budgets" 等) → useBudgets() に置換した結果、
+  // 既存ユーザーの localStorage に残った予算データが UI から不可視になっていた問題への対処。
+  // migratePaymentsLoans とは独立したフラグ + 独立 ref で並行起動 (片方失敗の巻き添え防止)。
+  // 完了後 refetchBudgets() で UI を最新 DB 状態に同期。
+  const budgetsMigrationStartedRef = useRef(false);
+  useEffect(() => {
+    if (!authUserId) return;
+    if (budgetsMigrationStartedRef.current) return;
+    budgetsMigrationStartedRef.current = true;
+    (async () => {
+      try {
+        const result = await migrateBudgets(authUserId);
+        // 何か実書き込みが発生したら refetch して UI を最新化。
+        // skip / no-localstorage-data ケースは refetch 不要 (DB 状態は変わってない)。
+        if (!result.skipped && (result.bWritten > 0 || result.wWritten > 0 || result.wcWritten > 0)) {
+          await refetchBudgets();
+        }
+      } catch (e) {
+        console.error('[migrate] budgets migration crashed', e);
+      }
+    })();
+  }, [authUserId, refetchBudgets]);
+  // === B-3a Step 5 end ===
 
   const [showLoanForm, setShowLoanForm] = useState(false);
   const [deleteLoanTarget, setDeleteLoanTarget] = useState(null);
