@@ -34,6 +34,7 @@ import { useInquiries } from "./hooks/useInquiries";
 import { useAuth } from "./context/AuthContext";
 import { migratePaymentsLoans } from "./lib/migratePaymentsLoans";
 import { migrateBudgets } from "./lib/migrateBudgets";
+import { supabase } from "./lib/supabaseClient";
 import { DndContext, closestCenter, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
 
@@ -2136,11 +2137,27 @@ export default function App() {
                                   + commit tick インクリメントで全画面のサイクル派生 memo を再評価
                 他 3 項目(名前/メール/電話)は依然 uncontrolled stub。 */}
             <button
-              onClick={() => {
+              onClick={async () => {
                 setManagementStartDay(managementStartDayDraft);
                 setManagementStartDayCommitTick(t => t + 1);
                 setAccountSavedFlash(true);
                 setTimeout(() => setAccountSavedFlash(false), 2000);
+                // B-1: profiles.management_start_day を Supabase にも upsert。
+                // localStorage の即時反映は維持しつつ、admin 側からも各顧客の msd を
+                // 読めるようにする (RLS profiles_self_update policy 経由)。
+                // ネットワーク失敗は console.error のみで UX 阻害しない (eventually consistent)。
+                if (authUserId) {
+                  try {
+                    const v = getManagementStartDay();  // 正規化済 (1-31 or null)
+                    const { error } = await supabase
+                      .from('profiles')
+                      .update({ management_start_day: v })
+                      .eq('id', authUserId);
+                    if (error) console.error('[msd-sync] profile update failed', error);
+                  } catch (e) {
+                    console.error('[msd-sync] profile update exception', e);
+                  }
+                }
               }}
               style={{width:"100%",padding:"14px",background:GOLD_GRAD,border:"none",borderRadius:12,fontSize:14,fontWeight:700,color:"#0A1628",cursor:"pointer"}}
             >{accountSavedFlash ? "保存しました" : "保存"}</button>

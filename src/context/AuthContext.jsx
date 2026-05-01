@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { getManagementStartDay, setManagementStartDay } from '../utils/cycle';
 
 const AuthContext = createContext(null);
 
@@ -42,7 +43,7 @@ export function AuthProvider({ children }) {
       try {
         const q = supabase
           .from('profiles')
-          .select('role, approved')
+          .select('role, approved, management_start_day')
           .eq('id', userId)
           .maybeSingle();
         const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles fetch');
@@ -57,6 +58,15 @@ export function AuthProvider({ children }) {
         }
         setRole(data?.role ?? null);
         setApproved(data?.approved ?? null);
+        // B-2: profile.msd が non-null かつ localStorage と異なるとき localStorage を上書き。
+        // NULL は no-op (既存 localStorage の値を破壊しない、B-1 未実施ユーザー保護)。
+        // Supabase = source of truth、ただし NULL は「未充填」として扱う。
+        if (data?.management_start_day != null) {
+          const local = getManagementStartDay();
+          if (local !== data.management_start_day) {
+            setManagementStartDay(data.management_start_day);
+          }
+        }
       } catch (e) {
         console.error('[auth] loadProfile exception', e);
         if (!mounted) return;
@@ -146,7 +156,7 @@ export function AuthProvider({ children }) {
     try {
       const q = supabase
         .from('profiles')
-        .select('role, approved')
+        .select('role, approved, management_start_day')
         .eq('id', session.user.id)
         .maybeSingle();
       const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles refresh');
@@ -156,6 +166,13 @@ export function AuthProvider({ children }) {
       }
       setRole(data?.role ?? null);
       setApproved(data?.approved ?? null);
+      // B-2: loadProfile と同じ msd sync (refresh 経路でも一貫性を保つ)
+      if (data?.management_start_day != null) {
+        const local = getManagementStartDay();
+        if (local !== data.management_start_day) {
+          setManagementStartDay(data.management_start_day);
+        }
+      }
     } catch (e) {
       console.error('[auth] refreshProfile exception', e);
     }
