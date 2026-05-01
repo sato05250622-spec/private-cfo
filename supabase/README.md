@@ -20,6 +20,7 @@
 | 003 | `003_profiles_app_gate_columns.sql` | アプリゲート 2 列追加 (`app_enabled`, `approved`) + 承認待ち顧客検索用 partial index `profiles_pending_idx` |
 | 004 | `004_profiles_management_start_date.sql` | `management_start_date` (date) 1 列追加 |
 | 005 | `005_profiles_updated_trigger.sql` | `handle_updated_at()` 関数 + `on_profiles_updated` トリガー (※ 既存の `trg_profiles_updated_at` と機能重複。詳細は下の「既知の課題」) |
+| 009 | `009_profiles_management_start_day.sql` | `management_start_day` (smallint, 1-31) 1 列追加。NULL 許可。customer 側 localStorage の `cfo_managementStartDay` を Supabase に昇格させ admin から各顧客のサイクル起点日を読めるようにする (B-2 sync で順次充填、未充填は NULL = カレンダー月 fallback) |
 
 ### 新規環境への適用方法
 
@@ -32,6 +33,7 @@ psql "$DATABASE_URL" -f supabase/migrations/002_profiles_admin_crm_initial.sql
 psql "$DATABASE_URL" -f supabase/migrations/003_profiles_app_gate_columns.sql
 psql "$DATABASE_URL" -f supabase/migrations/004_profiles_management_start_date.sql
 psql "$DATABASE_URL" -f supabase/migrations/005_profiles_updated_trigger.sql
+psql "$DATABASE_URL" -f supabase/migrations/009_profiles_management_start_day.sql
 ```
 
 または Supabase CLI 経由:
