@@ -222,6 +222,12 @@ export default function App() {
   const [reportMonth, setReportMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [reportYear, setReportYear] = useState(today.getFullYear());
   const [reportType, setReportType] = useState("monthly");
+  // ③ 稼働進捗タブ (renderMonthly 内、月ナビ直下のチップタブ切替):
+  // - progressTab: 'budget' (既存 UI = SummaryBar + PieChart + CatTwoBox 一覧) / 'operation' (新規 = 既使用額 + 週チップ + 予測合計)
+  // - selectedWeeks: 「稼働進捗」タブで multi-select される週番号 (1-4) の Set。
+  //   未来支出予定金額 = 既使用額 + Σ(選択週の予算)。default 空 Set (= 既使用額のみ表示)。
+  const [progressTab, setProgressTab] = useState("budget");
+  const [selectedWeeks, setSelectedWeeks] = useState(() => new Set());
   const [budgetMonth, setBudgetMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
 
   // === B-3a Step 4-3 phase 1: budgets / weekBudgets / weekCatBudgets を Supabase 経由に切替 ===
@@ -1269,6 +1275,15 @@ export default function App() {
               <span style={{fontWeight:600,fontSize:13,color:TEXT_PRIMARY,whiteSpace:"nowrap"}}>{cycleLabel(y,m,managementStartDay)}</span>
               <button style={S.navArrow} onClick={()=>setReportMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};})}>›</button>
             </div>
+            {/* ③ progressTab チップタブ (月ナビ↓ ここ ↓SummaryBar):
+                予算進捗 (既存 UI 完全維持) / 稼働進捗 (新規、既使用額+週チップ+予測合計) */}
+            <div style={{padding:"8px 14px",background:CARD_BG}}>
+              <div style={{display:"flex",background:NAVY3,borderRadius:24,padding:2,border:`1px solid ${BORDER}`,width:"100%"}}>
+                <button style={S.typeBtn(progressTab==="budget")} onClick={()=>setProgressTab("budget")}>予算進捗</button>
+                <button style={S.typeBtn(progressTab==="operation")} onClick={()=>setProgressTab("operation")}>稼働進捗</button>
+              </div>
+            </div>
+            {progressTab === "budget" ? (<>
             <SummaryBar spent={reportExpense} budget={rBudget} remain={rBudget-reportExpense} labelBudget="月の予算" labelSpent="月の支出" labelRemain="月の残予算"/>
 
             {/* ★ 円グラフはそのまま維持 */}
@@ -1368,6 +1383,67 @@ export default function App() {
                 })()}
               </div>
             </div>
+            </>) : (() => {
+              // 「稼働進捗」タブ: 既使用額 + 第1〜4週チップ (multi-select) + 未来支出予定金額。
+              // weekBudgets[N-1] = 第N週の全カテゴリ予算 sum (reportMonth ベースで weekCatBudgets を集計)。
+              // selectedWeeks (Set<number>) は週番号 1-4 を持つ。空 Set なら futureTotal = reportExpense のみ。
+              const weekBudgets = [1,2,3,4].map(N =>
+                expenseCats.reduce((s, cat) => s + (weekCatBudgets[`${y}-${m+1}-w${N}_${cat.id}`] || 0), 0)
+              );
+              const selectedSum = [...selectedWeeks].reduce((s, N) => s + (weekBudgets[N-1] || 0), 0);
+              const futureTotal = reportExpense + selectedSum;
+              const toggleWeek = (N) => {
+                setSelectedWeeks(prev => {
+                  const next = new Set(prev);
+                  if (next.has(N)) next.delete(N); else next.add(N);
+                  return next;
+                });
+              };
+              return (
+                <div style={{display:"flex",flexDirection:"column",gap:10,padding:"14px 18px",background:CARD_BG}}>
+                  {/* ブロック 1: 既使用額 (cycle 範囲の reportExpense そのまま) */}
+                  <div style={{background:NAVY2,borderRadius:14,padding:"14px 18px",border:`1px solid ${BORDER}`}}>
+                    <div style={{fontSize:11,color:TEXT_SECONDARY,marginBottom:4}}>既使用額</div>
+                    <div style={{fontSize:28,fontWeight:700,color:RED}}>
+                      ¥{reportExpense.toLocaleString()}
+                    </div>
+                  </div>
+                  {/* ブロック 2: 第1〜4週チップ (multi-select、選択時 GOLD 強調、週予算金額併記) */}
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                    {[1,2,3,4].map(N => {
+                      const sel = selectedWeeks.has(N);
+                      return (
+                        <button key={N} onClick={()=>toggleWeek(N)}
+                          style={{
+                            flex:"1 1 calc(50% - 4px)", minWidth:"calc(50% - 4px)",
+                            padding:"10px 12px", borderRadius:12,
+                            background: sel ? `${GOLD}33` : NAVY3,
+                            border: `1px solid ${sel ? GOLD : BORDER}`,
+                            color: sel ? GOLD : TEXT_SECONDARY,
+                            cursor:"pointer", textAlign:"left",
+                            display:"flex", flexDirection:"column", gap:2,
+                          }}>
+                          <span style={{fontSize:12,fontWeight:700}}>第{N}週</span>
+                          <span style={{fontSize:11,fontWeight:400}}>¥{weekBudgets[N-1].toLocaleString()}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {/* ブロック 3: 未来支出予定金額 (= 既使用額 + 選択週予算合計) */}
+                  <div style={{background:NAVY2,borderRadius:14,padding:"14px 18px",border:`1px solid ${BORDER}`}}>
+                    <div style={{fontSize:11,color:TEXT_SECONDARY,marginBottom:4}}>未来支出予定金額</div>
+                    <div style={{fontSize:28,fontWeight:700,color:GOLD}}>
+                      ¥{futureTotal.toLocaleString()}
+                    </div>
+                    {selectedWeeks.size > 0 && (
+                      <div style={{fontSize:10,color:TEXT_MUTED,marginTop:4}}>
+                        既使用額 ¥{reportExpense.toLocaleString()} + 選択週予算 ¥{selectedSum.toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </>
         ):(
           <>
