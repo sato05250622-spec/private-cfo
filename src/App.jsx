@@ -1832,6 +1832,44 @@ export default function App() {
                 </div>
                 );
               })}
+              {/* 週合計フッター行:各週の縦列合計 (= その週の全カテゴリ予算合計)。
+                  既存の月合計列 (右端) と対称な位置づけで、本部スタッフが
+                  「この週の予算枠は何円か」を一目で把握できるようにする。
+                  NAVY3 背景 + GOLD66 border + GOLD 文字で合計行であることを強調。
+                  右端セルは grand total (= 月予算総額)、左の月合計列の総和と同値。 */}
+              {(() => {
+                const weekTotals = weeks.map(w =>
+                  expenseCats.reduce((s, cat) => s + (weekCatBudgets[`${w.weekKey}_${cat.id}`] ?? 0), 0)
+                );
+                const grandTotal = weekTotals.reduce((s, v) => s + v, 0);
+                const anyWeekHasBudget = expenseCats.some(cat =>
+                  weeks.some(w => weekCatBudgets[`${w.weekKey}_${cat.id}`] != null)
+                );
+                return (
+                  <div style={{display:"grid",gridTemplateColumns:`90px repeat(${weeks.length},1fr) 56px`,gap:4,marginBottom:4}}>
+                    {/* 左端:"週合計" ラベル */}
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"8px 4px",background:NAVY3,border:`1px solid ${GOLD}66`,borderRadius:8}}>
+                      <span style={{fontSize:10,fontWeight:700,color:GOLD}}>週合計</span>
+                    </div>
+                    {/* 各週の縦合計 */}
+                    {weeks.map((w, i) => {
+                      const total = weekTotals[i];
+                      const hasAny = expenseCats.some(cat => weekCatBudgets[`${w.weekKey}_${cat.id}`] != null);
+                      return (
+                        <div key={w.weekKey} style={{padding:"8px 4px",textAlign:"center",background:NAVY3,border:`1px solid ${GOLD}66`,borderRadius:8}}>
+                          <div style={{fontSize:10,fontWeight:700,color:hasAny?GOLD:TEXT_MUTED}}>{hasAny?total.toLocaleString():"-"}</div>
+                          {hasAny&&<div style={{fontSize:8,color:TEXT_MUTED}}>円</div>}
+                        </div>
+                      );
+                    })}
+                    {/* 右端:grand total (月予算総額の参考表示、左の月合計列の総和と同値) */}
+                    <div style={{padding:"8px 4px",textAlign:"center",background:NAVY3,border:`1px solid ${GOLD}66`,borderRadius:8}}>
+                      <div style={{fontSize:10,fontWeight:700,color:anyWeekHasBudget?GOLD:TEXT_MUTED}}>{anyWeekHasBudget?grandTotal.toLocaleString():"-"}</div>
+                      {anyWeekHasBudget&&<div style={{fontSize:8,color:TEXT_MUTED}}>円</div>}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
           {allWeekTarget&&(
