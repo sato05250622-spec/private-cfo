@@ -302,9 +302,14 @@ export default function App() {
   // サイクル切替には影響しない(Phase 1 で managementStartDay へ完全分離済み)。
   // 永続化は localStorage('cfo_rewardDays')、UI 操作(チップ追加/削除)で即書き込み。
   const [rewardDaysList, setRewardDaysList] = useState(() => getRewardDays());
-  // iOS Safari のネイティブカレンダーピッカーを開くための hidden <input type="date">。
-  // 「+ 追加」ボタンエリアの上に opacity:0 で重ねてタップで picker を開く。
+  // iOS Safari / macOS Chrome / Safari でネイティブカレンダーピッカーを起動するための ref。
+  // 当初は <input type="date" opacity:0> を上に重ねるだけの方式 (iOS Safari の click→picker 自動起動を期待)
+  // で実装していたが、macOS Chrome/Safari では opacity:0 の input への click が showPicker を発火しない
+  // ことが判明 (2026-05-04)。そのため親 span 側の onClick から `inputRef.current?.showPicker?.()` を
+  // 明示呼び出しする方式に切替。これにより iOS / macOS の双方で確実に picker が開く。
+  // 旧 overlay <input> 自体も残置 (showPicker 未対応の古いブラウザ互換 + change ハンドラの届け先)。
   const rewardDayPickerRef = useRef(null);
+  const msdPickerRef = useRef(null);
   // 「保存しました」フラッシュ表示用(2 秒で自動的に消す)
   const [accountSavedFlash, setAccountSavedFlash] = useState(false);
   const [inputPayment, setInputPayment] = useState("cash");
@@ -2186,9 +2191,13 @@ export default function App() {
                         >✕</button>
                       </span>
                     ))}
-                    <span style={{position:"relative",display:"inline-block"}}>
+                    <span
+                      style={{position:"relative",display:"inline-block"}}
+                      onClick={() => rewardDayPickerRef.current?.showPicker?.()}
+                    >
                       <span style={{display:"inline-flex",alignItems:"center",padding:"4px 10px",background:"transparent",border:`1px dashed ${GOLD}88`,borderRadius:14,fontSize:12,fontWeight:600,color:GOLD,whiteSpace:"nowrap",cursor:"pointer"}}>＋ 追加</span>
-                      {/* 透明な date input を上に重ねてタップ領域にする(iOS Safari でネイティブピッカー起動)。 */}
+                      {/* 透明な date input。macOS Chrome/Safari では opacity:0 overlay への click が
+                          picker を発火しないため、親 span の onClick から showPicker() を明示呼出する。 */}
                       <input
                         ref={rewardDayPickerRef}
                         type="date"
@@ -2219,7 +2228,10 @@ export default function App() {
                         style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:18,height:18,padding:0,background:"transparent",border:"none",borderRadius:9,color:TEXT_MUTED,cursor:"pointer",fontSize:12,lineHeight:1}}
                       >✕</button>
                     )}
-                    <span style={{position:"relative",display:"inline-block"}}>
+                    <span
+                      style={{position:"relative",display:"inline-block"}}
+                      onClick={() => msdPickerRef.current?.showPicker?.()}
+                    >
                       <span style={{
                         display:"inline-flex",alignItems:"center",
                         padding:"4px 10px",
@@ -2227,10 +2239,12 @@ export default function App() {
                         border: `1px ${managementStartDayDraft ? "solid" : "dashed"} ${GOLD}${managementStartDayDraft ? "55" : "88"}`,
                         borderRadius:14,fontSize:12,fontWeight:600,color:GOLD,whiteSpace:"nowrap",cursor:"pointer",
                       }}>{managementStartDayDraft ? `${managementStartDayDraft}日` : "＋ 設定"}</span>
-                      {/* 透明な date input を上に重ねてタップ領域にする(iOS Safari でネイティブピッカー起動)。
+                      {/* 透明な date input。macOS Chrome/Safari では opacity:0 overlay への click が
+                          picker を発火しないため、親 span の onClick から showPicker() を明示呼出する。
                           選択 → date.getDate() を draft state にセット(年月は無視、「日」のみ意味あり)。
                           値クリア(e.target.value = "")で同じ日を再選択しても onChange を再発火させる。 */}
                       <input
+                        ref={msdPickerRef}
                         type="date"
                         onChange={(e) => {
                           const dateStr = e.target.value;
