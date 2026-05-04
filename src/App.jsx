@@ -218,8 +218,13 @@ export default function App() {
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-  const [calMonth, setCalMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
-  const [reportMonth, setReportMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
+  // calMonth / reportMonth / budgetMonth / weekBudgetMonth は「サイクル月」を表す state。
+  // today.getMonth() (calendar 月) ではなく、today が属するサイクルの month を初期値に使う。
+  // 例) msd=25, today=2026-05-06 → cycle は 4/25-5/24 → m=3 (4月サイクル) で初期化。
+  // msd=null (未設定) のときは findCycleOfDate が cycleStart=1日 を返すので calendar 月と等価。
+  const initialCycle = findCycleOfDate(today, getManagementStartDay());
+  const [calMonth, setCalMonth] = useState({ y: initialCycle.year, m: initialCycle.month });
+  const [reportMonth, setReportMonth] = useState({ y: initialCycle.year, m: initialCycle.month });
   const [reportYear, setReportYear] = useState(today.getFullYear());
   const [reportType, setReportType] = useState("monthly");
   // ③ 稼働進捗タブ (renderMonthly 内、月ナビ直下のチップタブ切替):
@@ -228,7 +233,7 @@ export default function App() {
   //   未来支出予定金額 = 既使用額 + Σ(選択週の予算)。default 空 Set (= 既使用額のみ表示)。
   const [progressTab, setProgressTab] = useState("budget");
   const [selectedWeeks, setSelectedWeeks] = useState(() => new Set());
-  const [budgetMonth, setBudgetMonth] = useState({ y: today.getFullYear(), m: today.getMonth() });
+  const [budgetMonth, setBudgetMonth] = useState({ y: initialCycle.year, m: initialCycle.month });
 
   // === B-3a Step 4-3 phase 1: budgets / weekBudgets / weekCatBudgets を Supabase 経由に切替 ===
   // 旧 localStorage 行は rollback 用にコメントアウトで残置 (Phase 3 で削除予定):
@@ -310,7 +315,7 @@ export default function App() {
   const [showTelop, setShowTelop] = useState(true);
   const [allWeekTarget, setAllWeekTarget] = useState(null);
   const [allWeekInput, setAllWeekInput] = useState("");
-  const [weekBudgetMonth, setWeekBudgetMonth] = useState({y:today.getFullYear(),m:today.getMonth()});
+  const [weekBudgetMonth, setWeekBudgetMonth] = useState({ y: initialCycle.year, m: initialCycle.month });
   const [showCopyConfirm, setShowCopyConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [contactType, setContactType] = useState("inquiry");
