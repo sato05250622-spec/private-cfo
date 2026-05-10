@@ -38,6 +38,11 @@ import { supabase } from "./lib/supabaseClient";
 import { DndContext, closestCenter, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
 
+// Phase E: 顧客自身による編集許可フラグ
+// 将来 Supabase clients.customer_edit_enabled へ置換予定 (⑦-2)
+// false = ロック中 (タップでトースト案内)、true = 編集解放
+const CUSTOMER_EDIT_ENABLED = false;
+
 // ---------------------------------------------------------------
 // One-shot migration: kakeibo_* → cfo_* (module top-level, runs once per browser)
 // ---------------------------------------------------------------
@@ -251,6 +256,20 @@ export default function App() {
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState({});
   const [menuScreen, setMenuScreen] = useState("main");
+  // Phase E: 顧客側編集ロック中のトースト表示制御。requestEdit() で発火、3.5s 自動消滅。
+  // 連打されたら setTimeout を都度張り直し、最後のタップから 3.5s 後に閉じる。
+  const [editLockedToast, setEditLockedToast] = useState(false);
+  const editLockedToastTimer = useRef(null);
+  const showEditLockedToast = () => {
+    setEditLockedToast(true);
+    if (editLockedToastTimer.current) clearTimeout(editLockedToastTimer.current);
+    editLockedToastTimer.current = setTimeout(() => setEditLockedToast(false), 3500);
+  };
+  // 編集導線の入口で呼ぶラッパ。フラグ ON なら action 実行、OFF ならトースト案内。
+  const requestEdit = (action) => {
+    if (CUSTOMER_EDIT_ENABLED) action();
+    else showEditLockedToast();
+  };
   const [selectedPdfYear, setSelectedPdfYear] = useState(null);
   const [newCatName, setNewCatName] = useState("");
   const [newCatIcon, setNewCatIcon] = useState("restaurant");
@@ -536,13 +555,13 @@ export default function App() {
   const totalBudget=getEffectiveMonthBudget(budgetMonth.y, budgetMonth.m);
   const totalSpending=transactions.filter(t=>t.date>=budgetCycleStartStr&&t.date<=budgetCycleEndStr).reduce((s,t)=>s+t.amount,0);
   const openBudgetModal=()=>{const draft={};expenseCats.forEach(c=>{const b=getBudget(c.id);if(b)draft[c.id]=String(b);});setBudgetDraft(draft);setShowBudgetModal(true);};
-  // NOTE: 現状 UI から到達不可 (showBudgetModal を開く path が意図的に無効化されてる)。
-  // shim 経由実装と完全等価に書かれているため、将来 UI 経路を再有効化した際に
-  // そのまま動作する想定。Phase 2b-1 で hook 直呼び化したが動作確認は未実施。
+  // Phase E: 顧客側編集導線は CUSTOMER_EDIT_ENABLED フラグでガード。
+  // ロック時は requestEdit() 経由で「本部管理中」トースト表示。
+  // 将来 Supabase clients.customer_edit_enabled で per-customer 制御へ。
   // 既知の別件 (本 commit のスコープ外): catBudget OK 押下で親モーダルの
-  // budgetDraft が更新されない sync 漏れがコード上存在するが、現状
-  // showBudgetModal が UI から開かれないため発火しない。UI 再有効化時に
-  // 併せて修正が必要。
+  // budgetDraft が更新されない sync 漏れがコード上存在するが、ロック時は
+  // showBudgetModal が requestEdit で開かれないため発火しない。
+  // フラグ true 化 (編集解放) 時に併せて修正が必要。
   const saveBudgets=()=>{
     expenseCats.forEach(c=>{
       const k=budgetKey(c.id);
@@ -1571,16 +1590,16 @@ export default function App() {
     const {y,m}=budgetMonth;
     return (
       <div>
-        <div style={{padding:"14px 18px 8px",background:CARD_BG,display:"flex",alignItems:"center",justifyContent:"space-between"}}><span style={{width:32}}></span><span style={{fontWeight:400,fontSize:15,color:TEXT_PRIMARY}}>予算</span><button onClick={openBudgetModal} style={{background:"none",border:"none",fontSize:20,color:ORANGE,cursor:"pointer"}}>⚙️</button></div>
+        <div style={{padding:"14px 18px 8px",background:CARD_BG,display:"flex",alignItems:"center",justifyContent:"space-between"}}><span style={{width:32}}></span><span style={{fontWeight:400,fontSize:15,color:TEXT_PRIMARY}}>予算</span><button onClick={()=>requestEdit(openBudgetModal)} style={{background:"none",border:"none",fontSize:20,color:ORANGE,cursor:"pointer"}}>⚙️</button></div>
         {budgetAlerts.length>0&&(<div style={{margin:"0 18px 12px",background:budgetAlerts.some(a=>a.level==="over")?`${RED}15`:`${GOLD}15`,borderRadius:12,padding:"12px 14px"}}><div style={{fontWeight:700,fontSize:13,marginBottom:8,color:budgetAlerts.some(a=>a.level==="over")?RED:GOLD}}>{budgetAlerts.some(a=>a.level==="over")?"🚨 予算オーバー":"⚠️ 予算80%超え"}</div>{budgetAlerts.map((a,i)=>(<div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><CatSvgIcon cat={a.cat} size={18}/><span style={{flex:1,fontSize:12,fontWeight:600}}>{a.cat.label}</span><span style={{fontSize:11,color:"#888"}}>{a.spent.toLocaleString()} / {a.budget.toLocaleString()}円</span><span style={{fontSize:11,fontWeight:700,color:a.level==="over"?RED:"#E65100",background:a.level==="over"?"#FFCDD2":"#FFE0B2",borderRadius:8,padding:"2px 6px"}}>{Math.round(a.pct)}%</span></div>))}</div>)}
         <div style={S.monthNav}><button style={S.navArrow} onClick={()=>setBudgetMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};})}>‹</button><span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{fmtMonth(y,m)}</span><button style={S.navArrow} onClick={()=>setBudgetMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};})}>›</button></div>
-        <SummaryBar spent={totalSpending} budget={totalBudget} remain={totalBudget-totalSpending} onBudgetTap={openBudgetModal}/>
+        <SummaryBar spent={totalSpending} budget={totalBudget} remain={totalBudget-totalSpending} onBudgetTap={()=>requestEdit(openBudgetModal)}/>
         {totalBudget>0&&<div style={{padding:"0 18px 12px",background:CARD_BG}}><div style={{height:6,background:"rgba(255,255,255,0.08)",borderRadius:4,overflow:"hidden",marginTop:8}}><div style={{height:"100%",width:`${Math.min(100,totalSpending/totalBudget*100)}%`,background:totalSpending>totalBudget?RED:GOLD,borderRadius:4}}/></div></div>}
         <div style={{background:CARD_BG}}>
           {expenseCats.map(cat=>{
             const budget=getBudget(cat.id);const spent=catSpending(cat.id);const pctRaw=budget?Math.round(spent/budget*100):0;const pct=Math.min(100,pctRaw);const isOver=budget&&spent>budget;const isWarn=budget&&pct>=80&&!isOver;
             return(
-              <div key={cat.id} onClick={()=>{setCatBudgetTarget({...cat,_isWeek:false});setCatBudgetInput(budget?String(budget):"");setShowCatBudgetModal(true);}} style={{borderBottom:`1px solid ${BORDER}`,background:isOver?`${RED}11`:isWarn?`${GOLD}11`:CARD_BG,cursor:"pointer"}}>
+              <div key={cat.id} onClick={()=>requestEdit(()=>{setCatBudgetTarget({...cat,_isWeek:false});setCatBudgetInput(budget?String(budget):"");setShowCatBudgetModal(true);})} style={{borderBottom:`1px solid ${BORDER}`,background:isOver?`${RED}11`:isWarn?`${GOLD}11`:CARD_BG,cursor:"pointer"}}>
                 <div style={{display:"flex",alignItems:"center",padding:"14px 18px 6px",gap:10}}>
                   <CatSvgIcon cat={cat} size={24}/>
                   <span style={{flex:1,fontWeight:400,fontSize:13,color:TEXT_PRIMARY}}>{cat.label}</span>
@@ -1634,7 +1653,7 @@ export default function App() {
         <div style={S.overlayHeader}><button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:400,fontSize:15,color:TEXT_PRIMARY}}>カテゴリ編集</span><span style={{width:40}}></span></div>
         <div style={{height:12,background:CREAM}}/>
         <div style={{background:CARD_BG}}>
-          <div onClick={()=>setMenuScreen("catNew")} style={{...S.listItem,color:ORANGE,fontWeight:600}}><span>＋</span><span style={{flex:1}}>新規カテゴリーの追加</span><span style={{color:"#bbb"}}>›</span></div>
+          <div onClick={()=>requestEdit(()=>setMenuScreen("catNew"))} style={{...S.listItem,color:ORANGE,fontWeight:600}}><span>＋</span><span style={{flex:1}}>新規カテゴリーの追加</span><span style={{color:"#bbb"}}>›</span></div>
           <DndContext
             sensors={dndSensors}
             collisionDetection={closestCenter}
@@ -1653,14 +1672,14 @@ export default function App() {
                   key={cat.id}
                   cat={cat}
                   icon={<CatSvgIcon cat={cat} size={32}/>}
-                  onEdit={(c) => {
+                  onEdit={(c) => requestEdit(() => {
                     setEditingCat(c);
                     setEditName(c.label);
                     setEditIcon(c.iconKey || c.icon || "restaurant");
                     setEditColor(c.color || "#FF6B35");
                     setMenuScreen("catEditDetail");
-                  }}
-                  onRemove={(id) => removeCategory(id).catch((e) => { console.error(e); alert("削除に失敗しました。"); })}
+                  })}
+                  onRemove={(id) => requestEdit(() => removeCategory(id).catch((e) => { console.error(e); alert("削除に失敗しました。"); }))}
                 />
               ))}
             </SortableContext>
@@ -1708,7 +1727,7 @@ export default function App() {
         <div style={S.overlayHeader}><button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:400,fontSize:15,color:TEXT_PRIMARY}}>支払い方法</span><span style={{width:40}}></span></div>
         <div style={{height:12,background:CREAM}}/>
         <div style={{background:CARD_BG}}>
-          <div onClick={()=>{setPaymentDraft({label:"",color:"#4CAF50",closingDay:"",withdrawalDay:""});setEditingPaymentId(null);setMenuScreen("paymentNew");}} style={{...S.listItem,color:ORANGE,fontWeight:600}}>
+          <div onClick={()=>requestEdit(()=>{setPaymentDraft({label:"",color:"#4CAF50",closingDay:"",withdrawalDay:""});setEditingPaymentId(null);setMenuScreen("paymentNew");})} style={{...S.listItem,color:ORANGE,fontWeight:600}}>
             <span>＋</span><span style={{flex:1}}>新しい支払い方法を追加</span><span style={{color:"#bbb"}}>›</span>
           </div>
           {/* カテゴリ編集と同じ iOS 長押しドラッグ機構。
@@ -1730,12 +1749,12 @@ export default function App() {
                 <SortablePaymentRow
                   key={pm.id}
                   pm={pm}
-                  onEdit={(p) => {
+                  onEdit={(p) => requestEdit(() => {
                     setPaymentDraft({ label: p.label, color: p.color, closingDay: p.closingDay || "", withdrawalDay: p.withdrawalDay || "", bank: p.bank || "" });
                     setEditingPaymentId(p.id);
                     setMenuScreen("paymentNew");
-                  }}
-                  onRemove={(id) => { deletePaymentMethod(id).catch(e => { console.error('[paymentMethods] delete failed', id, e); alert('決済手段の削除に失敗しました'); }); }}
+                  })}
+                  onRemove={(id) => requestEdit(() => { deletePaymentMethod(id).catch(e => { console.error('[paymentMethods] delete failed', id, e); alert('決済手段の削除に失敗しました'); }); })}
                 />
               ))}
             </SortableContext>
@@ -1861,8 +1880,8 @@ export default function App() {
             <button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
             <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>週予算設定</span>
             <div style={{display:"flex",gap:6}}>
-              <button onClick={()=>setShowCopyConfirm(true)} style={{background:"none",border:`1px solid ${GOLD}44`,color:GOLD,fontSize:11,fontWeight:600,cursor:"pointer",padding:"4px 8px",borderRadius:8}}>先月と同一</button>
-              <button onClick={()=>setShowClearConfirm(true)} style={{background:"none",border:`1px solid ${RED}44`,color:RED,fontSize:11,fontWeight:600,cursor:"pointer",padding:"4px 8px",borderRadius:8}}>全消去</button>
+              <button onClick={()=>requestEdit(()=>setShowCopyConfirm(true))} style={{background:"none",border:`1px solid ${GOLD}44`,color:GOLD,fontSize:11,fontWeight:600,cursor:"pointer",padding:"4px 8px",borderRadius:8}}>先月と同一</button>
+              <button onClick={()=>requestEdit(()=>setShowClearConfirm(true))} style={{background:"none",border:`1px solid ${RED}44`,color:RED,fontSize:11,fontWeight:600,cursor:"pointer",padding:"4px 8px",borderRadius:8}}>全消去</button>
             </div>
           </div>
           <div style={{padding:"8px 12px",fontSize:10,color:TEXT_MUTED}}>カテゴリ名 → 全週統一　／　金額タップ → その週のみ</div>
@@ -1888,7 +1907,7 @@ export default function App() {
                 const catTotal=weeks.reduce((s,w)=>s+(weekCatBudgets[`${w.weekKey}_${cat.id}`]??0),0);
                 return(
                 <div key={cat.id} style={{display:"grid",gridTemplateColumns:`90px repeat(${weeks.length},1fr) 56px`,gap:4,marginBottom:4}}>
-                  <button onClick={()=>{setAllWeekTarget(cat);setAllWeekInput("");}} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 8px",background:CARD_BG,border:`1px solid ${BORDER}`,borderRadius:8,cursor:"pointer",textAlign:"left"}}>
+                  <button onClick={()=>requestEdit(()=>{setAllWeekTarget(cat);setAllWeekInput("");})} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 8px",background:CARD_BG,border:`1px solid ${BORDER}`,borderRadius:8,cursor:"pointer",textAlign:"left"}}>
                     <CatSvgIcon cat={cat} size={16}/><span style={{fontSize:10,color:TEXT_PRIMARY,fontWeight:500,lineHeight:1.2}}>{cat.label}</span>
                   </button>
                   {weeks.map(w=>{
@@ -1899,9 +1918,9 @@ export default function App() {
                     const hasVal=val!=null;
                     return(
                     <button key={w.weekKey}
-                      onClick={()=>{setCatBudgetTarget({...cat,_weekKey:w.weekKey,_isWeek:true});setCatBudgetInput(hasVal?String(val):"");setShowCatBudgetModal(true);}}
-                      onContextMenu={e=>{e.preventDefault();if(hasVal){deleteWeekCatBudget(key).catch(err=>{console.error('[weekCatBudgets] delete failed',key,err);alert('週予算の削除に失敗しました');});}}}
-                      onTouchStart={()=>{if(hasVal){longPressTimer.current=setTimeout(()=>{deleteWeekCatBudget(key).catch(err=>{console.error('[weekCatBudgets] delete failed',key,err);alert('週予算の削除に失敗しました');});},700);}}}
+                      onClick={()=>requestEdit(()=>{setCatBudgetTarget({...cat,_weekKey:w.weekKey,_isWeek:true});setCatBudgetInput(hasVal?String(val):"");setShowCatBudgetModal(true);})}
+                      onContextMenu={e=>{e.preventDefault();if(hasVal)requestEdit(()=>{deleteWeekCatBudget(key).catch(err=>{console.error('[weekCatBudgets] delete failed',key,err);alert('週予算の削除に失敗しました');});});}}
+                      onTouchStart={()=>{if(hasVal){longPressTimer.current=setTimeout(()=>requestEdit(()=>{deleteWeekCatBudget(key).catch(err=>{console.error('[weekCatBudgets] delete failed',key,err);alert('週予算の削除に失敗しました');});}),700);}}}
                       onTouchEnd={()=>{clearTimeout(longPressTimer.current);}}
                       onTouchMove={()=>{clearTimeout(longPressTimer.current);}}
                       style={{padding:"8px 4px",textAlign:"center",background:hasVal?`${GOLD}15`:NAVY2,border:`1px solid ${hasVal?`${GOLD}44`:BORDER}`,borderRadius:8,cursor:"pointer"}}>
@@ -2400,6 +2419,31 @@ export default function App() {
 
   return (
     <div style={S.app}>
+      {/* Phase E: 顧客側編集ロック中トースト。requestEdit() ロック分岐で発火、3.5s 自動消滅。
+          telop / その他 fixed 要素より大きい z-index (10000) で前面に表示。 */}
+      {editLockedToast && (
+        <div style={{
+          position: "fixed",
+          top: 20,
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "rgba(13,30,54,0.96)",
+          color: "#D4A843",
+          padding: "14px 22px",
+          borderRadius: 12,
+          border: "1px solid rgba(212,168,67,0.4)",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+          zIndex: 10000,
+          fontSize: 13,
+          lineHeight: 1.6,
+          maxWidth: "90%",
+          textAlign: "center",
+          pointerEvents: "none",
+        }}>
+          💼 予算・カテゴリ・お支払い方法の<br/>
+          管理は本部で承っております
+        </div>
+      )}
       <div style={{position:"fixed",top:0,left:"50%",transform:`translateX(-50%) translateY(${showTelop?0:"-100%"})`,width:"100%",maxWidth:430,zIndex:200,background:`linear-gradient(90deg,${NAVY},#0D1E36,${NAVY})`,borderBottom:`1px solid ${GOLD}44`,height:24,paddingTop:"env(safe-area-inset-top)",boxSizing:"content-box",overflow:"hidden",display:"flex",alignItems:"center",transition:"transform 0.3s ease",cursor:"pointer"}} onTouchStart={e=>{e._startY=e.touches[0].clientY;}} onTouchEnd={e=>{if(e._startY-e.changedTouches[0].clientY>20)setShowTelop(false);}}>
         <style>{`@keyframes telop{0%{transform:translateX(100%);}100%{transform:translateX(-100%);}} .telop-text{animation:telop 28s linear infinite;white-space:nowrap;display:inline-block;}`}</style>
         <span className="telop-text" style={{fontSize:10,fontWeight:500,color:GOLD,letterSpacing:"0.05em",paddingLeft:"100%"}}>{telopText}</span>
