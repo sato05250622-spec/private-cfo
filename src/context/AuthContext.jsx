@@ -31,6 +31,10 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState(null);
   const [approved, setApproved] = useState(null);
+  // Phase E ⑦-2: 顧客自身の編集許可フラグ (profiles.customer_edit_enabled)。
+  // 未取得 / 取得失敗 / サインアウト時は false (= ロック) を default とする。
+  // App.jsx の requestEdit() がこの値を見て編集導線を許可 / トースト案内に分岐。
+  const [customerEditEnabled, setCustomerEditEnabled] = useState(false);
 
   useEffect(() => {
     // eslint-disable-next-line no-console
@@ -43,7 +47,7 @@ export function AuthProvider({ children }) {
       try {
         const q = supabase
           .from('profiles')
-          .select('role, approved, management_start_day')
+          .select('role, approved, management_start_day, customer_edit_enabled')
           .eq('id', userId)
           .maybeSingle();
         const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles fetch');
@@ -54,10 +58,12 @@ export function AuthProvider({ children }) {
           console.error('[auth] loadProfile error', error);
           setRole(null);
           setApproved(null);
+          setCustomerEditEnabled(false);
           return;
         }
         setRole(data?.role ?? null);
         setApproved(data?.approved ?? null);
+        setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
         // B-2: profile.msd が non-null かつ localStorage と異なるとき localStorage を上書き。
         // NULL は no-op (既存 localStorage の値を破壊しない、B-1 未実施ユーザー保護)。
         // Supabase = source of truth、ただし NULL は「未充填」として扱う。
@@ -72,6 +78,7 @@ export function AuthProvider({ children }) {
         if (!mounted) return;
         setRole(null);
         setApproved(null);
+        setCustomerEditEnabled(false);
       }
     }
 
@@ -117,6 +124,7 @@ export function AuthProvider({ children }) {
         } else {
           setRole(null);
           setApproved(null);
+          setCustomerEditEnabled(false);
         }
       } catch (e) {
         console.error('[auth] onAuthStateChange loadProfile exception', e);
@@ -156,7 +164,7 @@ export function AuthProvider({ children }) {
     try {
       const q = supabase
         .from('profiles')
-        .select('role, approved, management_start_day')
+        .select('role, approved, management_start_day, customer_edit_enabled')
         .eq('id', session.user.id)
         .maybeSingle();
       const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles refresh');
@@ -166,6 +174,7 @@ export function AuthProvider({ children }) {
       }
       setRole(data?.role ?? null);
       setApproved(data?.approved ?? null);
+      setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
       // B-2: loadProfile と同じ msd sync (refresh 経路でも一貫性を保つ)
       if (data?.management_start_day != null) {
         const local = getManagementStartDay();
@@ -184,6 +193,7 @@ export function AuthProvider({ children }) {
     loading,
     role,
     approved,
+    customerEditEnabled,
     isAdmin: role === 'admin',
     isApproved: approved === true,
     signIn,
