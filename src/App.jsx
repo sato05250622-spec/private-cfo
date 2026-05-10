@@ -38,10 +38,11 @@ import { supabase } from "./lib/supabaseClient";
 import { DndContext, closestCenter, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
 
-// Phase E: 顧客自身による編集許可フラグ
-// 将来 Supabase clients.customer_edit_enabled へ置換予定 (⑦-2)
-// false = ロック中 (タップでトースト案内)、true = 編集解放
-const CUSTOMER_EDIT_ENABLED = false;
+// Phase E ⑦-2: 顧客自身による編集許可フラグは Supabase
+// profiles.customer_edit_enabled へ移行済 (migration 010)。
+// AuthContext.customerEditEnabled として App 内 useAuth() で取得し、
+// requestEdit() が true なら action 実行 / false ならトースト案内。
+// 本部側 (private-cfo-admin) からの UPDATE で per-customer 切替が可能。
 
 // ---------------------------------------------------------------
 // One-shot migration: kakeibo_* → cfo_* (module top-level, runs once per browser)
@@ -266,8 +267,9 @@ export default function App() {
     editLockedToastTimer.current = setTimeout(() => setEditLockedToast(false), 3500);
   };
   // 編集導線の入口で呼ぶラッパ。フラグ ON なら action 実行、OFF ならトースト案内。
+  // フラグは AuthContext.customerEditEnabled = profiles.customer_edit_enabled。
   const requestEdit = (action) => {
-    if (CUSTOMER_EDIT_ENABLED) action();
+    if (customerEditEnabled) action();
     else showEditLockedToast();
   };
   const [selectedPdfYear, setSelectedPdfYear] = useState(null);
@@ -360,7 +362,7 @@ export default function App() {
   // ログイン直後に 1 回だけ実行。冪等 (cfo_paymentsLoansMigrated フラグ + idempotent upsert)。
   // ref ガードで StrictMode 二重起動を抑止。失敗は console.warn のみで UI 阻害しない。
   // 完了後に refetchPaymentMethods / refetchLoans で UI を最新 DB 状態へ同期。
-  const { user: authUser } = useAuth();
+  const { user: authUser, customerEditEnabled } = useAuth();
   const authUserId = authUser?.id ?? null;
   const paymentsLoansMigrationStartedRef = useRef(false);
   useEffect(() => {
@@ -555,9 +557,10 @@ export default function App() {
   const totalBudget=getEffectiveMonthBudget(budgetMonth.y, budgetMonth.m);
   const totalSpending=transactions.filter(t=>t.date>=budgetCycleStartStr&&t.date<=budgetCycleEndStr).reduce((s,t)=>s+t.amount,0);
   const openBudgetModal=()=>{const draft={};expenseCats.forEach(c=>{const b=getBudget(c.id);if(b)draft[c.id]=String(b);});setBudgetDraft(draft);setShowBudgetModal(true);};
-  // Phase E: 顧客側編集導線は CUSTOMER_EDIT_ENABLED フラグでガード。
+  // Phase E ⑦-2: 顧客側編集導線は AuthContext.customerEditEnabled
+  // (= profiles.customer_edit_enabled, migration 010) でガード。
   // ロック時は requestEdit() 経由で「本部管理中」トースト表示。
-  // 将来 Supabase clients.customer_edit_enabled で per-customer 制御へ。
+  // 本部側 (private-cfo-admin) からの UPDATE で per-customer 切替済。
   // 既知の別件 (本 commit のスコープ外): catBudget OK 押下で親モーダルの
   // budgetDraft が更新されない sync 漏れがコード上存在するが、ロック時は
   // showBudgetModal が requestEdit で開かれないため発火しない。
