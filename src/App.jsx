@@ -29,6 +29,8 @@ import LogoutButton from "./components/LogoutButton";
 import AppointmentCard from "./components/AppointmentCard";
 import SortableCategoryRow from "./components/SortableCategoryRow";
 import SortablePaymentRow from "./components/SortablePaymentRow";
+import AnnualBudgetViewer from "./components/AnnualBudgetViewer";
+import MonthlyReviewViewer from "./components/MonthlyReviewViewer";
 import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
 import { useAuth } from "./context/AuthContext";
@@ -2136,6 +2138,8 @@ export default function App() {
     if(menuScreen==="currentMonthReport"){
       // 今日が属するサイクルの y / 1-indexed month を表示用に取得。
       const y=todayCycle.year, m=todayCycle.month+1;
+      // 月次レビューは暦年月で照合する (monthly_reviews は admin が暦年月で作成)。
+      const now=new Date();
       return(
         <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}>
@@ -2144,32 +2148,8 @@ export default function App() {
             <span style={{width:40}}/>
           </div>
           <div style={{margin:"16px 16px 0",display:"flex",flexDirection:"column",gap:12}}>
-            <div style={{background:CARD_BG,borderRadius:16,border:`1px solid ${BORDER}`,overflow:"hidden"}}>
-              <div style={{padding:"16px 18px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",gap:12}}>
-                <div style={{width:44,height:44,borderRadius:12,background:`${GOLD}22`,border:`1px solid ${GOLD}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>📄</div>
-                <div>
-                  <div style={{fontSize:14,fontWeight:700,color:TEXT_PRIMARY}}>管理繰越票</div>
-                  <div style={{fontSize:10,color:TEXT_MUTED,marginTop:2}}>{y}年{m}月分</div>
-                </div>
-              </div>
-              <div style={{padding:"14px 18px",background:NAVY2,textAlign:"center"}}>
-                <div style={{fontSize:11,color:TEXT_MUTED,marginBottom:6}}>Supabase連携後に本部から送付されます</div>
-                <div style={{fontSize:10,color:`${GOLD}88`,background:`${GOLD}11`,borderRadius:8,padding:"6px 12px",display:"inline-block"}}>準備中</div>
-              </div>
-            </div>
-            <div style={{background:CARD_BG,borderRadius:16,border:`1px solid ${BORDER}`,overflow:"hidden"}}>
-              <div style={{padding:"16px 18px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",gap:12}}>
-                <div style={{width:44,height:44,borderRadius:12,background:`${TEAL}22`,border:`1px solid ${TEAL}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>📝</div>
-                <div>
-                  <div style={{fontSize:14,fontWeight:700,color:TEXT_PRIMARY}}>月次レビューシート</div>
-                  <div style={{fontSize:10,color:TEXT_MUTED,marginTop:2}}>{y}年{m}月分</div>
-                </div>
-              </div>
-              <div style={{padding:"14px 18px",background:NAVY2,textAlign:"center"}}>
-                <div style={{fontSize:11,color:TEXT_MUTED,marginBottom:6}}>Supabase連携後に本部から送付されます</div>
-                <div style={{fontSize:10,color:`${TEAL}88`,background:`${TEAL}11`,borderRadius:8,padding:"6px 12px",display:"inline-block"}}>準備中</div>
-              </div>
-            </div>
+            <AnnualBudgetViewer clientId={authUserId} />
+            <MonthlyReviewViewer clientId={authUserId} year={now.getFullYear()} month={now.getMonth()+1} />
           </div>
           <div style={{height:20}}/>
         </div>
@@ -2363,8 +2343,8 @@ export default function App() {
         <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}><button onClick={()=>setMenuScreen("monthlyReport")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{ry}年{rm}月　レポート</span><span style={{width:40}}/></div>
           <div style={{margin:"16px 16px 0",display:"flex",flexDirection:"column",gap:12}}>
-            <div style={{background:CARD_BG,borderRadius:16,border:`1px solid ${BORDER}`,overflow:"hidden"}}><div style={{padding:"16px 18px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",gap:12}}><div style={{width:44,height:44,borderRadius:12,background:`${GOLD}22`,border:`1px solid ${GOLD}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>📄</div><div><div style={{fontSize:14,fontWeight:700,color:TEXT_PRIMARY}}>管理繰越票</div><div style={{fontSize:10,color:TEXT_MUTED,marginTop:2}}>{ry}年{rm}月分</div></div></div><div style={{padding:"14px 18px",background:NAVY2,textAlign:"center"}}><div style={{fontSize:11,color:TEXT_MUTED,marginBottom:6}}>Supabase連携後に本部から送付されます</div><div style={{fontSize:10,color:`${GOLD}88`,background:`${GOLD}11`,borderRadius:8,padding:"6px 12px",display:"inline-block"}}>準備中</div></div></div>
-            <div style={{background:CARD_BG,borderRadius:16,border:`1px solid ${BORDER}`,overflow:"hidden"}}><div style={{padding:"16px 18px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",gap:12}}><div style={{width:44,height:44,borderRadius:12,background:`${TEAL}22`,border:`1px solid ${TEAL}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>📝</div><div><div style={{fontSize:14,fontWeight:700,color:TEXT_PRIMARY}}>月次レビューシート</div><div style={{fontSize:10,color:TEXT_MUTED,marginTop:2}}>{ry}年{rm}月分</div></div></div><div style={{padding:"14px 18px",background:NAVY2,textAlign:"center"}}><div style={{fontSize:11,color:TEXT_MUTED,marginBottom:6}}>Supabase連携後に本部から送付されます</div><div style={{fontSize:10,color:`${TEAL}88`,background:`${TEAL}11`,borderRadius:8,padding:"6px 12px",display:"inline-block"}}>準備中</div></div></div>
+            <AnnualBudgetViewer clientId={authUserId} />
+            <MonthlyReviewViewer clientId={authUserId} year={ry} month={rm} />
           </div>
           <div style={{height:20}}/>
         </div>
