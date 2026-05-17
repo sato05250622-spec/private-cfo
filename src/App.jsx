@@ -174,6 +174,37 @@ const CatSvgIcon = ({ cat, size = 28 }) => {
   );
 };
 
+// Step A ②: 予算超過/警告の集約サマリー。renderDaily 上部に配置 (alerts === budgetAlerts)。
+// over>0 と warn>0 の両方を扱い、件数だけのコンパクト表示。アラート 0 件なら null を返す。
+function BudgetAlertSummary({ alerts }) {
+  const overCount = alerts.filter(a => a.level === "over").length;
+  const warnCount = alerts.filter(a => a.level === "warn").length;
+  if (overCount === 0 && warnCount === 0) return null;
+  const hasOver = overCount > 0;
+  const accent = hasOver ? RED : GOLD;
+  return (
+    <div style={{
+      flexShrink: 0,
+      margin: "8px 14px 0",
+      padding: "10px 14px",
+      borderRadius: 10,
+      border: `1.5px solid ${accent}`,
+      background: hasOver ? `${RED}14` : `${GOLD}14`,
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      fontSize: 13,
+      fontWeight: 600,
+      color: accent,
+    }}>
+      <span style={{fontSize: 14}}>{hasOver ? "🚨" : "⚠️"}</span>
+      {hasOver && <span>予算超過 {overCount} 件</span>}
+      {hasOver && warnCount > 0 && <span style={{color: TEXT_MUTED, fontWeight: 400}}>・</span>}
+      {warnCount > 0 && <span style={{color: hasOver ? GOLD : accent}}>警告 {warnCount} 件</span>}
+    </div>
+  );
+}
+
 const today = new Date();
 
 function useLocalStorage(key, initialValue) {
@@ -440,18 +471,27 @@ export default function App() {
     return bv - spent;
   };
 
+  // budgets[] (旧テーブル, 空) のみ参照する旧実装ではアラートが常に空。
+  // 真ソースは week_cat_budgets。L1568 の月別グラフと同じ per-cat フォールバックを採用:
+  //   directBudget (直接月予算) > 0 ならそれを採用、なければ週カテ予算 ×4週 合算。
   const budgetAlerts = useMemo(() => {
     const result = [];
+    const m1 = todayCycle.month + 1;
     expenseCats.forEach(cat => {
-      const budget = budgets[monthBudgetKey(cat.id)];
-      if (!budget) return;
+      const directBudget = budgets[`${todayCycle.year}-${m1}-${cat.id}`] || 0;
+      const weeklyBudgetSum = [1,2,3,4].reduce(
+        (s, wn) => s + (weekCatBudgets[`${todayCycle.year}-${m1}-w${wn}_${cat.id}`] || 0),
+        0
+      );
+      const budget = directBudget > 0 ? directBudget : weeklyBudgetSum;
+      if (budget <= 0) return;
       const spent = transactions.filter(t=>t.category===cat.id&&t.date>=tmCycleStart&&t.date<=tmCycleEnd).reduce((s,t)=>s+t.amount,0);
       const pct = spent / budget * 100;
       if (pct >= 100) result.push({ cat, pct, spent, budget, level:"over" });
       else if (pct >= 80) result.push({ cat, pct, spent, budget, level:"warn" });
     });
     return result;
-  }, [transactions, budgets, expenseCats, tmCycleStart, tmCycleEnd, todayCycle]);
+  }, [transactions, budgets, weekCatBudgets, expenseCats, tmCycleStart, tmCycleEnd, todayCycle]);
 
   const tmSummary = useMemo(() => {
     const spent = transactions.filter(t=>t.date>=tmCycleStart&&t.date<=tmCycleEnd).reduce((s,t)=>s+t.amount,0);
@@ -1039,6 +1079,8 @@ export default function App() {
             </div>
           </div>
         </div>
+        {/* Step A ②: 予算オーバーアラート集約サマリー (アラート 0 件なら自動で非表示) */}
+        <BudgetAlertSummary alerts={budgetAlerts} />
         {/* 上部ブロック(flex-shrink:0):金額 / メモ / 支払い方法 — 常に最上段固定でスクロール非対象 */}
         <div style={{flexShrink:0,display:"flex",flexDirection:"column"}}>
         <div onClick={()=>setShowCalc(true)} style={{background:CARD_BG,borderBottom:`1px solid ${BORDER}`,padding:"5px 16px 8px",display:"flex",alignItems:"flex-end",justifyContent:"space-between",cursor:"pointer"}}>
@@ -2446,7 +2488,8 @@ export default function App() {
         {tab==="menu"&&renderMenu()}
       </div>
 
-      <div style={S.bottomNav}>{tabs.map(t=>(<button key={t.id} style={S.navBtn(tab===t.id)} onClick={()=>{setTab(t.id);if(t.id!=="menu")setMenuScreen("main");}}><span style={{fontSize:18}}>{t.icon}</span><span>{t.label}</span></button>))}</div>
+      {/* Step A ③: メニュータブの icon 右上に over 連動の赤dot。over なしなら表示なし。 */}
+      <div style={S.bottomNav}>{tabs.map(t=>{const showOverDot=t.id==="menu"&&budgetAlerts.some(a=>a.level==="over");return(<button key={t.id} style={S.navBtn(tab===t.id)} onClick={()=>{setTab(t.id);if(t.id!=="menu")setMenuScreen("main");}}><span style={{fontSize:18,position:"relative",display:"inline-block",lineHeight:1}}>{t.icon}{showOverDot&&<span style={{position:"absolute",top:-2,right:-4,width:8,height:8,borderRadius:"50%",background:RED,boxShadow:`0 0 0 1.5px ${NAVY2}`}}/>}</span><span>{t.label}</span></button>);})}</div>
 
       {/* 今月サマリーモーダル */}
       {showMonthSummary&&(()=>{
