@@ -299,6 +299,11 @@ export default function App() {
     if (editLockedToastTimer.current) clearTimeout(editLockedToastTimer.current);
     editLockedToastTimer.current = setTimeout(() => setEditLockedToast(false), 3500);
   };
+  // Step B ④: 予算オーバートースト。addTransaction 成功後、当該カテゴリが
+  // 「ちょうど over に乗った」瞬間 (spentOld < budget && spentNew >= budget) だけ発火。
+  // null=非表示 / string=表示メッセージ。3.5s 自動消滅 (editLockedToast と同方針)。
+  const [budgetOverToast, setBudgetOverToast] = useState(null);
+  const budgetOverToastTimer = useRef(null);
   // 編集導線の入口で呼ぶラッパ。フラグ ON なら action 実行、OFF ならトースト案内。
   // フラグは AuthContext.customerEditEnabled = profiles.customer_edit_enabled。
   const requestEdit = (action) => {
@@ -471,19 +476,24 @@ export default function App() {
     return bv - spent;
   };
 
-  // budgets[] (旧テーブル, 空) のみ参照する旧実装ではアラートが常に空。
-  // 真ソースは week_cat_budgets。L1568 の月別グラフと同じ per-cat フォールバックを採用:
-  //   directBudget (直接月予算) > 0 ならそれを採用、なければ週カテ予算 ×4週 合算。
+  // Step A/B 共通: 真ソース (week_cat_budgets) を参照する月予算取得ヘルパー。
+  // directBudget (旧 budgets テーブル, 直接月予算) > 0 ならそれを採用、
+  // なければ週カテ予算 ×4週 合算で月予算を算出 (L1568 月別グラフと同方針)。
+  // budgetAlerts (集約) と addTransaction (入力直後トースト判定) の両方から利用。
+  const getCatBudget = (catId) => {
+    const m1 = todayCycle.month + 1;
+    const directBudget = budgets[`${todayCycle.year}-${m1}-${catId}`] || 0;
+    const weeklyBudgetSum = [1,2,3,4].reduce(
+      (s, wn) => s + (weekCatBudgets[`${todayCycle.year}-${m1}-w${wn}_${catId}`] || 0),
+      0
+    );
+    return directBudget > 0 ? directBudget : weeklyBudgetSum;
+  };
+
   const budgetAlerts = useMemo(() => {
     const result = [];
-    const m1 = todayCycle.month + 1;
     expenseCats.forEach(cat => {
-      const directBudget = budgets[`${todayCycle.year}-${m1}-${cat.id}`] || 0;
-      const weeklyBudgetSum = [1,2,3,4].reduce(
-        (s, wn) => s + (weekCatBudgets[`${todayCycle.year}-${m1}-w${wn}_${cat.id}`] || 0),
-        0
-      );
-      const budget = directBudget > 0 ? directBudget : weeklyBudgetSum;
+      const budget = getCatBudget(cat.id);
       if (budget <= 0) return;
       const spent = transactions.filter(t=>t.category===cat.id&&t.date>=tmCycleStart&&t.date<=tmCycleEnd).reduce((s,t)=>s+t.amount,0);
       const pct = spent / budget * 100;
@@ -637,14 +647,41 @@ export default function App() {
   const changeDate = (delta) => { const d=new Date(inputDate); d.setDate(d.getDate()+delta); setInputDate(d); };
   const addTransaction = () => {
     if (!inputAmount || isNaN(Number(inputAmount)) || Number(inputAmount) <= 0) return;
+    // Step B ④: 予算オーバー判定に使うため、書き込み payload を変数に固定。
+    // .then 内では setInputAmount("") で state が空になるが、ここでキャプチャしておけば
+    // クロージャ経由で確定値として参照できる。transactions も closure 経由で「追加前の値」を使う。
+    const txAmount = Number(inputAmount);
+    const txDateStr = toDateStr(inputDate);
+    const txCatId = inputCategory;
     addExpense({
-      date: toDateStr(inputDate),
-      amount: Number(inputAmount),
+      date: txDateStr,
+      amount: txAmount,
       memo: inputMemo,
-      category: inputCategory,
+      category: txCatId,
       payment: inputPayment,
     })
-      .then(() => { setInputAmount(""); setInputMemo(""); })
+      .then(() => {
+        setInputAmount("");
+        setInputMemo("");
+        // 予算オーバートースト判定: 現サイクル内・該当カテゴリに月予算あり・
+        // 「ちょうど over に乗る」瞬間 (spentOld < budget && spentNew >= budget) だけ発火。
+        // 過去サイクルや無予算カテへの入力ではトースト出さない。
+        if (txDateStr < tmCycleStart || txDateStr > tmCycleEnd) return;
+        const cat = expenseCats.find(c => c.id === txCatId);
+        if (!cat) return;
+        const budget = getCatBudget(txCatId);
+        if (budget <= 0) return;
+        const spentOld = transactions
+          .filter(t => t.category === txCatId && t.date >= tmCycleStart && t.date <= tmCycleEnd)
+          .reduce((s, t) => s + t.amount, 0);
+        const spentNew = spentOld + txAmount;
+        if (spentOld < budget && spentNew >= budget) {
+          const overAmount = spentNew - budget;
+          setBudgetOverToast(`⚠️ ${cat.label} が予算超過\n(¥${overAmount.toLocaleString()} オーバー)`);
+          if (budgetOverToastTimer.current) clearTimeout(budgetOverToastTimer.current);
+          budgetOverToastTimer.current = setTimeout(() => setBudgetOverToast(null), 3500);
+        }
+      })
       .catch((e) => { console.error(e); alert("支出の保存に失敗しました。"); });
   };
   // 固定ゴールドボタンの onClick を参照固定化する(jitter 対策)。
@@ -2467,6 +2504,33 @@ export default function App() {
         }}>
           💼 予算・カテゴリ・お支払い方法の<br/>
           管理は本部で承っております
+        </div>
+      )}
+      {/* Step B ④: 予算オーバートースト。addTransaction 成功時、当該カテゴリが
+          ちょうど予算超過に乗った瞬間だけ発火。editLockedToast と同じ中央 fixed・
+          z-index 10000・pointer-events:none・3.5s 自動消滅。配色のみ RED 系。 */}
+      {budgetOverToast && (
+        <div style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          background: "rgba(13,30,54,0.96)",
+          color: RED,
+          padding: "20px 28px",
+          borderRadius: 14,
+          border: `1px solid ${RED}66`,
+          boxShadow: "0 12px 40px rgba(0,0,0,0.6)",
+          zIndex: 10000,
+          fontSize: 14,
+          fontWeight: 600,
+          lineHeight: 1.7,
+          maxWidth: "min(360px, 86vw)",
+          textAlign: "center",
+          pointerEvents: "none",
+          whiteSpace: "pre-line",
+        }}>
+          {budgetOverToast}
         </div>
       )}
       <div style={{position:"fixed",top:0,left:"50%",transform:`translateX(-50%) translateY(${showTelop?0:"-100%"})`,width:"100%",maxWidth:430,zIndex:200,background:`linear-gradient(90deg,${NAVY},#0D1E36,${NAVY})`,borderBottom:`1px solid ${GOLD}44`,height:24,paddingTop:"env(safe-area-inset-top)",boxSizing:"content-box",overflow:"hidden",display:"flex",alignItems:"center",transition:"transform 0.3s ease",cursor:"pointer"}} onTouchStart={e=>{e._startY=e.touches[0].clientY;}} onTouchEnd={e=>{if(e._startY-e.changedTouches[0].clientY>20)setShowTelop(false);}}>
