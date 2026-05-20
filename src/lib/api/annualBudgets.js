@@ -24,7 +24,7 @@ export async function getCommittedByClient(clientId) {
   if (!clientId) return null;
   const { data, error } = await supabase
     .from(TABLE)
-    .select('fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, last_committed_at')
+    .select('fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, last_committed_at')
     .eq('client_id', clientId)
     .order('fiscal_year', { ascending: false })
     .limit(1)

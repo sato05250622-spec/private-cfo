@@ -1,6 +1,6 @@
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import {
-  GOLD, NAVY2, NAVY3, CARD_BG, BORDER,
+  GOLD, NAVY2, NAVY3, CARD_BG, BORDER, RED,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 } from "@shared/theme";
 
@@ -85,6 +85,13 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   const totalsMonthly = data.committed_totals?.monthly || {};
   const grandTotal = data.committed_totals?.grandTotal ?? null;
 
+  // Phase 1: 本部が確定した月 (committed_settled_months)。該当月セルを赤塗りする。
+  const committedSettledMonths = Array.isArray(data?.committedSettledMonths)
+    ? data.committedSettledMonths : [];
+  const isMonthSettled = (m) =>
+    committedSettledMonths.includes(m) || committedSettledMonths.includes(String(m));
+  const hasSettled = committedSettledMonths.length > 0;
+
   const cellStyle = {
     padding: "6px 8px", textAlign: "right", fontSize: 11,
     color: TEXT_PRIMARY, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
@@ -113,7 +120,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             <tr>
               <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3 }}>カテゴリ</th>
               {monthOrder.map((m) => (
-                <th key={m} style={headCellStyle}>{m}月</th>
+                <th key={m} style={isMonthSettled(m)
+                  ? { ...headCellStyle, border: `1px solid ${RED}`, color: RED }
+                  : headCellStyle}
+                  title={isMonthSettled(m) ? "この月は確定済 (凍結実測)" : undefined}
+                >{m}月</th>
               ))}
             </tr>
           </thead>
@@ -127,7 +138,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   {line?.category_name || "(無題)"}
                 </td>
                 {monthOrder.map((m) => (
-                  <td key={m} style={cellStyle}>{fmtCell(resolveCell(line, m))}</td>
+                  <td key={m}
+                    style={isMonthSettled(m)
+                      ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}` }
+                      : cellStyle}
+                    title={isMonthSettled(m) ? "この月は確定済 (凍結実測)" : undefined}
+                  >{fmtCell(resolveCell(line, m))}</td>
                 ))}
               </tr>
             ))}
@@ -139,7 +155,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 月合計
               </td>
               {monthOrder.map((m) => (
-                <td key={m} style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: GOLD }}>
+                <td key={m} style={isMonthSettled(m)
+                  ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}`, fontWeight: 700, color: GOLD }
+                  : { ...cellStyle, background: NAVY2, fontWeight: 700, color: GOLD }}>
                   {fmtCell(pickMonth(totalsMonthly, m))}
                 </td>
               ))}
@@ -156,6 +174,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           <span style={{ fontSize: 14, fontWeight: 700, color: GOLD }}>
             {Number(grandTotal).toLocaleString()}円
           </span>
+        </div>
+      )}
+      {hasSettled && (
+        <div style={{ padding: "8px 16px", borderTop: `1px solid ${BORDER}`, fontSize: 10, color: TEXT_MUTED }}>
+          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: `${RED}1A`, border: `1px solid ${RED}`, marginRight: 6, verticalAlign: "middle" }} />
+          赤背景 = 確定月 (凍結実測)
         </div>
       )}
     </div>

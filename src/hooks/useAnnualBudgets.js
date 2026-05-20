@@ -27,7 +27,13 @@ export function useAnnualBudgets(clientId) {
     setLoading(true);
     try {
       const row = await api.getCommittedByClient(clientId);
-      setData(row);
+      // Phase 1: committed_settled_months を camelCase でも露出 (UI 側 isSettled 判定用)。
+      // 既存の snake_case フィールドはそのまま温存し、camelCase を追加するのみ。
+      setData(
+        row
+          ? { ...row, committedSettledMonths: row.committed_settled_months ?? [] }
+          : null,
+      );
       setError(null);
     } catch (e) {
       console.error('[useAnnualBudgets]', e);
