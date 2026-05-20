@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import { sumLineYear } from "../utils/annualBudgetSheet";
 import {
@@ -71,6 +72,23 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   void fiscalYear;
   const { data, loading, error } = useAnnualBudgets(clientId);
 
+  // 横画面検出 (Rules of Hooks: 早期 return より前で呼ぶ)。
+  // landscape のときだけ繰越票テーブルを全画面パネル化し、12ヶ月を横スクロール無しで表示する。
+  // (アプリ全体は S.app maxWidth:430 + overflowX:hidden で囲われているため、
+  //  position:fixed でビューポート全幅へ breakout する。S.app に transform は無いので
+  //  fixed はビューポート基準で解決し 430px 枠とクリップの両方を逃れる。)
+  const [isLandscape, setIsLandscape] = useState(
+    typeof window !== "undefined"
+      && window.matchMedia("(orientation: landscape)").matches,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const mq = window.matchMedia("(orientation: landscape)");
+    const handler = (e) => setIsLandscape(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
   // ロード中・未反映・取得失敗・data 無しは「準備中」カードを表示。
   if (loading) return <StatusCard message="読み込み中..." />;
   const lines = Array.isArray(data?.committed_lines) ? data.committed_lines : [];
@@ -93,19 +111,23 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     committedSettledMonths.includes(m) || committedSettledMonths.includes(String(m));
   const hasSettled = committedSettledMonths.length > 0;
 
+  // 横画面では横方向 padding と table 最小幅を詰めて、狭い landscape (iPhone SE 667px 等)
+  // でも 12ヶ月 + カテゴリ列が横スクロール無しで収まるようにする。fontSize は可読下限 11px 維持。
+  const cellPadX = isLandscape ? 5 : 8;
+  const tableMinW = isLandscape ? 560 : 640;
   const cellStyle = {
-    padding: "6px 8px", textAlign: "right", fontSize: 11,
+    padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: 11,
     color: TEXT_PRIMARY, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
   };
   const headCellStyle = {
-    padding: "6px 8px", textAlign: "right", fontSize: 11, fontWeight: 700,
+    padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: 11, fontWeight: 700,
     color: GOLD, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
     background: NAVY3,
   };
   // 行頭 (カテゴリ名) 列は横スクロール時も固定。
   const stickyBase = { position: "sticky", left: 0, zIndex: 1, textAlign: "left" };
 
-  return (
+  const card = (
     <div style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
       <div style={{ padding: "12px 16px", borderBottom: `1px solid ${BORDER}` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: TEXT_PRIMARY }}>
@@ -116,7 +138,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         </div>
       </div>
       <div style={{ overflowX: "auto" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 640 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: tableMinW }}>
           <thead>
             <tr>
               <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3 }}>カテゴリ</th>
@@ -252,4 +274,20 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       )}
     </div>
   );
+
+  // 横画面: 繰越票テーブルを全画面パネル化 (S.app の 430px 枠 / overflowX:hidden を
+  // position:fixed で breakout)。縦画面に戻すと matchMedia リスナで自動的に通常表示へ。
+  if (isLandscape) {
+    return (
+      <div style={{
+        position: "fixed", inset: 0, zIndex: 400, background: NAVY2,
+        overflow: "auto", padding: 12, boxSizing: "border-box",
+        paddingTop: "calc(12px + env(safe-area-inset-top))",
+        paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
+      }}>
+        {card}
+      </div>
+    );
+  }
+  return card;
 }
