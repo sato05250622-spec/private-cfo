@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import { sumLineYear } from "../utils/annualBudgetSheet";
 import {
-  GOLD, NAVY2, NAVY3, CARD_BG, BORDER, RED, TEAL,
+  GOLD, NAVY, NAVY2, NAVY3, CARD_BG, BORDER, RED, TEAL,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 } from "@shared/theme";
 
@@ -89,6 +89,19 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     return () => mq.removeEventListener("change", handler);
   }, []);
 
+  // PDF 出力: 印刷ダイアログのデフォルトファイル名は document.title 由来のため、
+  // 印刷中だけ「支出管理繰越票_<年度>」に差し替え、afterprint で元へ復帰する。
+  const handlePrint = () => {
+    const originalTitle = document.title;
+    document.title = `支出管理繰越票_${data?.fiscal_year ?? ""}年度`;
+    const restore = () => {
+      document.title = originalTitle;
+      window.removeEventListener("afterprint", restore);
+    };
+    window.addEventListener("afterprint", restore);
+    window.print();
+  };
+
   // ロード中・未反映・取得失敗・data 無しは「準備中」カードを表示。
   if (loading) return <StatusCard message="読み込み中..." />;
   const lines = Array.isArray(data?.committed_lines) ? data.committed_lines : [];
@@ -144,14 +157,30 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     : {};
 
   const card = (
-    <div style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
-      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${BORDER}` }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: TEXT_PRIMARY }}>
-          支出管理繰越票 <span style={{ color: TEXT_MUTED, fontSize: 11 }}>{data.fiscal_year}年度</span>
+    <div className="annual-pdf-root" style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
+      <div style={{
+        padding: "12px 16px", borderBottom: `1px solid ${BORDER}`,
+        display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12,
+      }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: TEXT_PRIMARY }}>
+            支出管理繰越票 <span style={{ color: TEXT_MUTED, fontSize: 11 }}>{data.fiscal_year}年度</span>
+          </div>
+          <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 3 }}>
+            本部反映: {fmtDateTime(data.last_committed_at)}
+          </div>
         </div>
-        <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 3 }}>
-          本部反映: {fmtDateTime(data.last_committed_at)}
-        </div>
+        <button
+          className="no-print"
+          onClick={handlePrint}
+          style={{
+            background: GOLD, color: NAVY, border: "none", borderRadius: 8,
+            padding: "6px 12px", fontSize: 12, fontWeight: 700,
+            cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+          }}
+        >
+          📄 PDF
+        </button>
       </div>
       <div style={{ overflowX: "auto" }}>
         <table style={tableStyle}>
