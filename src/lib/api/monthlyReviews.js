@@ -44,6 +44,10 @@ export async function getPublishedByMonth(clientId, year, month) {
     .eq('is_published', true)
     .eq('year', year)
     .eq('month', month)
+    // 同一 year/month に公開行が複数あっても (旧仕様の二重公開) published_at 最新の
+    // 1 件に収束させ、.maybeSingle() の PGRST116 (multiple rows) を根絶する。
+    .order('published_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (error) throw error;
   return data ?? null;
