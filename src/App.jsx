@@ -491,6 +491,11 @@ export default function App() {
   };
 
   const budgetAlerts = useMemo(() => {
+    // ★予算オーバーアラート機能 一時非表示中 (2026-05-18)
+    // 通知過多で精神的負荷が大きいため全機能停止。
+    // 復活時:下の return []; 行を削除 + 続く /* */ を解除
+    return [];
+    /*
     const result = [];
     expenseCats.forEach(cat => {
       const budget = getCatBudget(cat.id);
@@ -501,6 +506,7 @@ export default function App() {
       else if (pct >= 80) result.push({ cat, pct, spent, budget, level:"warn" });
     });
     return result;
+    */
   }, [transactions, budgets, weekCatBudgets, expenseCats, tmCycleStart, tmCycleEnd, todayCycle]);
 
   const tmSummary = useMemo(() => {
@@ -663,6 +669,8 @@ export default function App() {
       .then(() => {
         setInputAmount("");
         setInputMemo("");
+        // ★予算オーバートースト 一時非表示中 (2026-05-18) — 復活時は /* */ 解除
+        /*
         // 予算オーバートースト判定: 現サイクル内・該当カテゴリに月予算あり・
         // 「ちょうど over に乗る」瞬間 (spentOld < budget && spentNew >= budget) だけ発火。
         // 過去サイクルや無予算カテへの入力ではトースト出さない。
@@ -681,6 +689,7 @@ export default function App() {
           if (budgetOverToastTimer.current) clearTimeout(budgetOverToastTimer.current);
           budgetOverToastTimer.current = setTimeout(() => setBudgetOverToast(null), 3500);
         }
+        */
       })
       .catch((e) => { console.error(e); alert("支出の保存に失敗しました。"); });
   };
