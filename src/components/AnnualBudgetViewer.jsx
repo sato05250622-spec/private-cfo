@@ -111,10 +111,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     committedSettledMonths.includes(m) || committedSettledMonths.includes(String(m));
   const hasSettled = committedSettledMonths.length > 0;
 
-  // 横画面では横方向 padding と table 最小幅を詰めて、狭い landscape (iPhone SE 667px 等)
-  // でも 12ヶ月 + カテゴリ列が横スクロール無しで収まるようにする。fontSize は可読下限 11px 維持。
+  // 横画面では横方向 padding を詰めて 12ヶ月 + カテゴリ列が横スクロール無しで収まるようにする。
+  // fontSize は可読下限 11px 維持。
   const cellPadX = isLandscape ? 5 : 8;
-  const tableMinW = isLandscape ? 560 : 640;
   const cellStyle = {
     padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: 11,
     color: TEXT_PRIMARY, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
@@ -126,6 +125,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   };
   // 行頭 (カテゴリ名) 列は横スクロール時も固定。
   const stickyBase = { position: "sticky", left: 0, zIndex: 1, textAlign: "left" };
+  // 横画面: テーブルは tableLayout:fixed + width:100% で viewport 幅にちょうど収め、
+  // カテゴリ列を 90px に固定 (長名は ellipsis)。残り幅を 12ヶ月で等分 → 12月の見切れを解消。
+  // 縦画面は従来通り minWidth:640 の auto layout + 横スクロール。
+  const tableStyle = isLandscape
+    ? { borderCollapse: "collapse", width: "100%", tableLayout: "fixed" }
+    : { borderCollapse: "collapse", width: "100%", minWidth: 640 };
+  const catColStyle = isLandscape
+    ? { width: 90, minWidth: 90, maxWidth: 90, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }
+    : {};
 
   const card = (
     <div style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
@@ -138,10 +146,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         </div>
       </div>
       <div style={{ overflowX: "auto" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: tableMinW }}>
+        <table style={tableStyle}>
           <thead>
             <tr>
-              <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3 }}>カテゴリ</th>
+              <th style={{ ...headCellStyle, ...stickyBase, ...catColStyle, background: NAVY3 }}>カテゴリ</th>
               {monthOrder.map((m) => (
                 <th key={m} style={isMonthSettled(m)
                   ? { ...headCellStyle, border: `1px solid ${RED}`, color: RED }
@@ -155,9 +163,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             {sortedLines.map((line, i) => (
               <tr key={line?.category_id || line?.row_type || i}>
                 <td style={{
-                  ...cellStyle, ...stickyBase, background: CARD_BG,
+                  ...cellStyle, ...stickyBase, ...catColStyle, background: CARD_BG,
                   fontWeight: 600, color: line?.archived ? TEXT_MUTED : TEXT_SECONDARY,
-                }}>
+                }}
+                  title={line?.category_name || undefined}
+                >
                   {line?.category_name || "(無題)"}
                 </td>
                 {monthOrder.map((m) => (
@@ -172,7 +182,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             ))}
             <tr>
               <td style={{
-                ...cellStyle, ...stickyBase, background: NAVY2,
+                ...cellStyle, ...stickyBase, ...catColStyle, background: NAVY2,
                 fontWeight: 700, color: GOLD,
               }}>
                 月合計
@@ -281,9 +291,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     return (
       <div style={{
         position: "fixed", inset: 0, zIndex: 400, background: NAVY2,
-        overflow: "auto", padding: 12, boxSizing: "border-box",
-        paddingTop: "calc(12px + env(safe-area-inset-top))",
-        paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
+        overflow: "auto", padding: 8, boxSizing: "border-box",
+        paddingTop: "calc(8px + env(safe-area-inset-top))",
+        paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
       }}>
         {card}
       </div>
