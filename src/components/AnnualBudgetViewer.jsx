@@ -227,7 +227,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
 
           {(() => {
             const cats = sortedLines.filter((l) => l.row_type === "category" && !l.archived);
-            const totalBudget = cats.reduce((s, l) => s + (Number(l.target_value) || 0), 0);
+            // Phase 1c: 本部が年間総予算を設定済ならそれを全体予算に、未設定ならカテゴリ別合計へフォールバック。
+            const annualSet = Number(data.committedAnnualTotalTarget) > 0;
+            const totalBudget = annualSet
+              ? Number(data.committedAnnualTotalTarget)
+              : cats.reduce((s, l) => s + (Number(l.target_value) || 0), 0);
             const totalActual = cats.reduce((s, l) => s + sumLineYear(l, resolveCell), 0);
             const tPct = totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0;
             const tColor = tPct >= 100 ? RED : tPct >= 80 ? GOLD : TEAL;
@@ -248,7 +252,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 {/* 全体 */}
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-                    <span style={{ fontWeight: 600, color: TEXT_PRIMARY }}>年間予算 合計</span>
+                    <span style={{ fontWeight: 600, color: TEXT_PRIMARY }}>
+                      年間予算 合計 <span style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 400 }}>{annualSet ? "(年間総予算)" : "(カテゴリ合計)"}</span>
+                    </span>
                     <span style={{ color: tColor, fontWeight: 700 }}>
                       {totalBudget > 0 ? `${tPct}% 消化` : "予算未設定"}
                     </span>
