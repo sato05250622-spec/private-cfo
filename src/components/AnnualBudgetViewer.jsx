@@ -131,8 +131,16 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   const tableStyle = isLandscape
     ? { borderCollapse: "collapse", width: "100%", tableLayout: "fixed" }
     : { borderCollapse: "collapse", width: "100%", minWidth: 640 };
+  // 横画面では table 全体が viewport 内に収まり横スクロール不要なので sticky を無効化する。
+  // (iOS Safari は position:sticky + tableLayout:fixed が干渉し、カテゴリ名が他月セル位置に
+  //  ゴースト描画されるバグがある。position:static + left:auto で stickyBase を打ち消す。)
+  // catColStyle は 3 セルとも ...stickyBase の後に merge されるため確実に上書きされる。
   const catColStyle = isLandscape
-    ? { width: 90, minWidth: 90, maxWidth: 90, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }
+    ? {
+        width: 90, minWidth: 90, maxWidth: 90,
+        whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden",
+        position: "static", left: "auto",
+      }
     : {};
 
   const card = (
