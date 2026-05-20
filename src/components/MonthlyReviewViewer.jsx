@@ -1,9 +1,16 @@
 import { useEffect, useState } from "react";
 import { getPublishedByMonth } from "../lib/api/monthlyReviews";
 import {
-  GOLD, TEAL, NAVY2, NAVY3, CARD_BG, BORDER,
+  GOLD, TEAL, RED, NAVY2, NAVY3, CARD_BG, BORDER, SHADOW,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 } from "@shared/theme";
+
+// 診断種別ごとのアクセント色 (バッジの本部水準カラーリング用)。
+const DIAGNOSIS_COLORS = {
+  on_budget: GOLD,
+  over_budget: RED,
+  under_budget: TEAL,
+};
 
 // 既存 App.jsx「準備中」カードと見た目完全一致のステータスカード。
 // loading / 未公開 / 該当無し / 取得失敗 のいずれでも親に null を返さず
@@ -60,11 +67,12 @@ const fmtNum = (n) => Number(n || 0).toLocaleString();
 function Section({ label, value }) {
   if (!value || !String(value).trim()) return null;
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 700, marginBottom: 4 }}>{label}</div>
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: GOLD, fontWeight: 700, marginBottom: 6 }}>{label}</div>
       <div style={{
         fontSize: 12, color: TEXT_SECONDARY, lineHeight: 1.7,
-        background: NAVY2, borderRadius: 8, padding: "10px 12px", whiteSpace: "pre-wrap",
+        background: NAVY2, borderRadius: 12, padding: 14, whiteSpace: "pre-wrap",
+        border: "1px solid rgba(212,168,67,0.12)",
       }}>
         {value}
       </div>
@@ -98,6 +106,7 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
   const diagnosisLabel = data.diagnosis
     ? (DIAGNOSIS_LABELS[data.diagnosis] || data.diagnosis)
     : null;
+  const diagColor = DIAGNOSIS_COLORS[data.diagnosis] || GOLD;
 
   const cellStyle = {
     padding: "5px 8px", fontSize: 11, color: TEXT_PRIMARY,
@@ -105,15 +114,18 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
   };
 
   return (
-    <div style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
-      {/* ヘッダ */}
-      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${BORDER}` }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: TEXT_PRIMARY }}>
-          {year}年{month}月 月次レビュー
-        </div>
-        <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 3, display: "flex", gap: 10 }}>
-          {data.staff_name && <span>担当: {data.staff_name}</span>}
-          {data.published_at && <span>公開: {fmtDateTime(data.published_at)}</span>}
+    <div style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden", boxShadow: SHADOW }}>
+      {/* ヘッダ (繰越票・StatusCard と統一感: 44px TEAL アイコンボックス + GOLD タイトル) */}
+      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${BORDER}`, display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 44, height: 44, borderRadius: 12, background: `${TEAL}22`, border: `1px solid ${TEAL}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>📝</div>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>
+            {year}年{month}月 月次レビュー
+          </div>
+          <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {data.staff_name && <span>担当: {data.staff_name}</span>}
+            {data.published_at && <span>公開: {fmtDateTime(data.published_at)}</span>}
+          </div>
         </div>
       </div>
 
@@ -121,8 +133,8 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
         {/* 診断バッジ */}
         {diagnosisLabel && (
           <div style={{
-            display: "inline-block", fontSize: 11, fontWeight: 700, color: GOLD,
-            background: `${GOLD}1A`, border: `1px solid ${BORDER}`,
+            display: "inline-block", fontSize: 11, fontWeight: 700, color: diagColor,
+            background: `${diagColor}22`, border: `1px solid ${diagColor}44`,
             borderRadius: 8, padding: "4px 10px", marginBottom: 12,
           }}>
             {diagnosisLabel}
@@ -169,8 +181,9 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
         {/* 合計サマリー */}
         {(totals.total_budget != null || totals.total_actual != null || totals.achievement_ratio != null) && (
           <div style={{
-            marginTop: 12, padding: "10px 12px", background: NAVY2,
-            borderRadius: 8, display: "flex", flexDirection: "column", gap: 6,
+            marginTop: 12, padding: 14, background: NAVY2,
+            borderRadius: 12, borderTop: `2px solid ${GOLD}55`,
+            display: "flex", flexDirection: "column", gap: 8,
           }}>
             {totals.total_budget != null && (
               <Row label="予算合計" value={`${fmtNum(totals.total_budget)}円`} />
@@ -178,9 +191,21 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
             {totals.total_actual != null && (
               <Row label="当月合計" value={`${fmtNum(totals.total_actual)}円`} />
             )}
-            {totals.achievement_ratio != null && (
-              <Row label="達成率" value={`${Number(totals.achievement_ratio).toFixed(1)}%`} />
-            )}
+            {totals.achievement_ratio != null && (() => {
+              const ratio = Number(totals.achievement_ratio);
+              const barColor = ratio >= 100 ? RED : ratio >= 80 ? GOLD : TEAL;
+              return (
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
+                    <span style={{ color: TEXT_MUTED }}>達成率</span>
+                    <span style={{ color: barColor, fontWeight: 700 }}>{ratio.toFixed(1)}%</span>
+                  </div>
+                  <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${Math.min(Math.max(ratio, 0), 100)}%`, background: barColor, borderRadius: 3, transition: "width 0.3s" }} />
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>

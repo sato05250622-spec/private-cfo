@@ -31,6 +31,7 @@ import SortableCategoryRow from "./components/SortableCategoryRow";
 import SortablePaymentRow from "./components/SortablePaymentRow";
 import AnnualBudgetViewer from "./components/AnnualBudgetViewer";
 import MonthlyReviewViewer from "./components/MonthlyReviewViewer";
+import ReportTabs from "./components/ReportTabs";
 import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
 import { useAuth } from "./context/AuthContext";
@@ -2235,9 +2236,11 @@ export default function App() {
             <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{y}年{m}月　レポート</span>
             <span style={{width:40}}/>
           </div>
-          <div style={{margin:"16px 16px 0",display:"flex",flexDirection:"column",gap:12}}>
-            <AnnualBudgetViewer clientId={authUserId} />
-            <MonthlyReviewViewer clientId={authUserId} year={now.getFullYear()} month={now.getMonth()+1} />
+          <div style={{margin:"16px 16px 0"}}>
+            <ReportTabs
+              viewer={<AnnualBudgetViewer clientId={authUserId} />}
+              review={<MonthlyReviewViewer clientId={authUserId} year={now.getFullYear()} month={now.getMonth()+1} />}
+            />
           </div>
           <div style={{height:20}}/>
         </div>
@@ -2430,9 +2433,11 @@ export default function App() {
       return(
         <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}><button onClick={()=>setMenuScreen("monthlyReport")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{ry}年{rm}月　レポート</span><span style={{width:40}}/></div>
-          <div style={{margin:"16px 16px 0",display:"flex",flexDirection:"column",gap:12}}>
-            <AnnualBudgetViewer clientId={authUserId} />
-            <MonthlyReviewViewer clientId={authUserId} year={ry} month={rm} />
+          <div style={{margin:"16px 16px 0"}}>
+            <ReportTabs
+              viewer={<AnnualBudgetViewer clientId={authUserId} />}
+              review={<MonthlyReviewViewer clientId={authUserId} year={ry} month={rm} />}
+            />
           </div>
           <div style={{height:20}}/>
         </div>
