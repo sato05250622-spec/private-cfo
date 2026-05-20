@@ -1,6 +1,7 @@
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
+import { sumLineYear } from "../utils/annualBudgetSheet";
 import {
-  GOLD, NAVY2, NAVY3, CARD_BG, BORDER, RED,
+  GOLD, NAVY2, NAVY3, CARD_BG, BORDER, RED, TEAL,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 } from "@shared/theme";
 
@@ -176,6 +177,73 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           </span>
         </div>
       )}
+
+      {/* Phase 2: カテゴリ別 目標消化率 (進捗バー) */}
+      {sortedLines.filter((l) => l.row_type === "category" && !l.archived).length > 0 && (
+        <div style={{ margin: "0 16px", paddingTop: 16, paddingBottom: 16, borderTop: `1px solid ${BORDER}` }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: GOLD, marginBottom: 10 }}>
+            📊 年間予算 消化サマリー
+          </div>
+
+          {(() => {
+            const cats = sortedLines.filter((l) => l.row_type === "category" && !l.archived);
+            const totalBudget = cats.reduce((s, l) => s + (Number(l.target_value) || 0), 0);
+            const totalActual = cats.reduce((s, l) => s + sumLineYear(l, resolveCell), 0);
+            const tPct = totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0;
+            const tColor = tPct >= 100 ? RED : tPct >= 80 ? GOLD : TEAL;
+
+            const Bar = ({ budget, pct, color, height = 4 }) => (
+              <div style={{ height, background: "rgba(255,255,255,0.08)", borderRadius: height / 2, overflow: "hidden" }}>
+                {budget > 0 && (
+                  <div style={{
+                    height: "100%", width: `${Math.min(pct, 100)}%`,
+                    background: color, borderRadius: height / 2, transition: "width 0.3s",
+                  }} />
+                )}
+              </div>
+            );
+
+            return (
+              <>
+                {/* 全体 */}
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                    <span style={{ fontWeight: 600, color: TEXT_PRIMARY }}>年間予算 合計</span>
+                    <span style={{ color: tColor, fontWeight: 700 }}>
+                      {totalBudget > 0 ? `${tPct}% 消化` : "予算未設定"}
+                    </span>
+                  </div>
+                  <Bar budget={totalBudget} pct={tPct} color={tColor} height={6} />
+                </div>
+
+                {/* カテゴリ別 */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {cats.map((line) => {
+                    const b = Number(line.target_value) || 0;
+                    const a = sumLineYear(line, resolveCell);
+                    const p = b > 0 ? Math.round((a / b) * 100) : 0;
+                    const c = p >= 100 ? RED : p >= 80 ? GOLD : TEAL;
+                    return (
+                      <div key={line.category_id}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}>
+                          <span style={{ color: TEXT_SECONDARY }}>{line.category_name}</span>
+                          <span style={{ color: c }}>{b > 0 ? `${p}%` : "予算未設定"}</span>
+                        </div>
+                        <Bar budget={b} pct={p} color={c} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            );
+          })()}
+
+          <div style={{ marginTop: 10, fontSize: 10, color: "rgba(255,255,255,0.5)" }}>
+            色:〜79% TEAL / 80〜99% GOLD / 100%+ RED
+          </div>
+        </div>
+      )}
+
       {hasSettled && (
         <div style={{ padding: "8px 16px", borderTop: `1px solid ${BORDER}`, fontSize: 10, color: TEXT_MUTED }}>
           <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: `${RED}1A`, border: `1px solid ${RED}`, marginRight: 6, verticalAlign: "middle" }} />
