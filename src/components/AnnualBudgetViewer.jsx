@@ -116,6 +116,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   );
   const totalsMonthly = data.committed_totals?.monthly || {};
   const grandTotal = data.committed_totals?.grandTotal ?? null;
+  // 月合計行の目標列 = 全 line の target_value 合計 (= 年間目標合計)。
+  const targetGrandTotal = sortedLines.reduce((s, l) => s + (Number(l?.target_value) || 0), 0);
 
   // Phase 1: 本部が確定した月 (committed_settled_months)。該当月セルを赤塗りする。
   const committedSettledMonths = Array.isArray(data?.committedSettledMonths)
@@ -136,25 +138,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     color: GOLD, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
     background: NAVY3,
   };
-  // 行頭 (カテゴリ名) 列は横スクロール時も固定。
+  // 行頭 (カテゴリ名) 列は縦・横ともスクロール時に固定 (sticky)。
   const stickyBase = { position: "sticky", left: 0, zIndex: 1, textAlign: "left" };
-  // 横画面: テーブルは tableLayout:fixed + width:100% で viewport 幅にちょうど収め、
-  // カテゴリ列を 90px に固定 (長名は ellipsis)。残り幅を 12ヶ月で等分 → 12月の見切れを解消。
-  // 縦画面は従来通り minWidth:640 の auto layout + 横スクロール。
-  const tableStyle = isLandscape
-    ? { borderCollapse: "collapse", width: "100%", tableLayout: "fixed" }
-    : { borderCollapse: "collapse", width: "100%", minWidth: 640 };
-  // 横画面では table 全体が viewport 内に収まり横スクロール不要なので sticky を無効化する。
-  // (iOS Safari は position:sticky + tableLayout:fixed が干渉し、カテゴリ名が他月セル位置に
-  //  ゴースト描画されるバグがある。position:static + left:auto で stickyBase を打ち消す。)
-  // catColStyle は 3 セルとも ...stickyBase の後に merge されるため確実に上書きされる。
-  const catColStyle = isLandscape
-    ? {
-        width: 90, minWidth: 90, maxWidth: 90,
-        whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden",
-        position: "static", left: "auto",
-      }
-    : {};
+  // 縦・横とも auto layout + 親 div overflowX:auto による横スクロールに統一。
+  // 目標列(+1)を見込み minWidth を 640→720 に拡張 (各列が読める幅を保つ)。
+  // 横画面で tableLayout:fixed をやめたため iOS Safari の sticky×fixed ゴーストバグは発生しない。
+  const tableStyle = { borderCollapse: "collapse", width: "100%", minWidth: 720 };
+  // isLandscape は PDF 全画面化 (横画面 breakout) で引き続き使用するため残置。
+  void isLandscape;
 
   const card = (
     <div className="annual-pdf-root" style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
@@ -186,7 +177,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         <table style={tableStyle}>
           <thead>
             <tr>
-              <th style={{ ...headCellStyle, ...stickyBase, ...catColStyle, background: NAVY3 }}>カテゴリ</th>
+              <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3 }}>カテゴリ</th>
               {monthOrder.map((m) => (
                 <th key={m} style={isMonthSettled(m)
                   ? { ...headCellStyle, border: `1px solid ${RED}`, color: RED }
@@ -194,13 +185,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   title={isMonthSettled(m) ? "この月は確定済 (凍結実測)" : undefined}
                 >{m}月</th>
               ))}
+              <th style={{ ...headCellStyle }}>目標</th>
             </tr>
           </thead>
           <tbody>
             {sortedLines.map((line, i) => (
               <tr key={line?.category_id || line?.row_type || i}>
                 <td style={{
-                  ...cellStyle, ...stickyBase, ...catColStyle, background: CARD_BG,
+                  ...cellStyle, ...stickyBase, background: CARD_BG,
                   fontWeight: 600, color: line?.archived ? TEXT_MUTED : TEXT_SECONDARY,
                 }}
                   title={line?.category_name || undefined}
@@ -215,11 +207,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                     title={isMonthSettled(m) ? "この月は確定済 (凍結実測)" : undefined}
                   >{fmtCell(resolveCell(line, m))}</td>
                 ))}
+                <td style={{ ...cellStyle, fontWeight: 700, color: line?.target_value == null ? TEXT_MUTED : GOLD }}>
+                  {fmtCell(line?.target_value)}
+                </td>
               </tr>
             ))}
             <tr>
               <td style={{
-                ...cellStyle, ...stickyBase, ...catColStyle, background: NAVY2,
+                ...cellStyle, ...stickyBase, background: NAVY2,
                 fontWeight: 700, color: GOLD,
               }}>
                 月合計
@@ -231,6 +226,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   {fmtCell(pickMonth(totalsMonthly, m))}
                 </td>
               ))}
+              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: GOLD }}>
+                {fmtCell(targetGrandTotal || null)}
+              </td>
             </tr>
           </tbody>
         </table>
