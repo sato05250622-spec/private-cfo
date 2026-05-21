@@ -90,6 +90,12 @@ body {
     max-width: none !important;
     border-radius: 0 !important;
     border: none !important;
+    overflow: visible !important;   /* A: card の overflow:hidden を解除し右端クリップを防ぐ */
+  }
+
+  /* A: 横スクロールラッパーのクリップ解除 (画面では overflowX:auto、印刷では全列展開) */
+  .annual-pdf-scroll {
+    overflow: visible !important;
   }
 
   /* 明色反転: 白背景・濃紺文字 */
@@ -105,12 +111,18 @@ body {
   .annual-pdf-root table {
     table-layout: fixed !important;
     width: 100% !important;
+    min-width: 0 !important;        /* A: inline minWidth:720 を打ち消し、14列をページ幅に均等収縮 */
     border-collapse: collapse !important;
   }
+  /* B: 縦向きが無視される環境 (iOS/iPadOS Safari 等) でも 14列が縦A4に収まるよう圧縮 */
   .annual-pdf-root th,
   .annual-pdf-root td {
     border: 1px solid #888 !important;
-    padding: 4px 6px !important;
+    padding: 2px 3px !important;    /* B: 4px 6px → 2px 3px */
+    font-size: 9px !important;      /* B: 金額6〜7桁が潰れない範囲 */
+    line-height: 1.2 !important;
+    word-break: break-all !important;       /* 長いカテゴリ名でも列幅を割らない */
+    overflow-wrap: anywhere !important;
   }
 
   /* PDFボタン・no-print 要素は非表示 */

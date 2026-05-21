@@ -1,4 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import {
   GOLD, NAVY, NAVY2, NAVY3, CARD_BG, BORDER, RED, TEAL,
@@ -88,17 +90,81 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     return () => mq.removeEventListener("change", handler);
   }, []);
 
-  // PDF 出力: 印刷ダイアログのデフォルトファイル名は document.title 由来のため、
-  // 印刷中だけ「支出管理繰越票_<年度>」に差し替え、afterprint で元へ復帰する。
-  const handlePrint = () => {
-    const originalTitle = document.title;
-    document.title = `支出管理繰越票_${data?.fiscal_year ?? ""}年度`;
-    const restore = () => {
-      document.title = originalTitle;
-      window.removeEventListener("afterprint", restore);
-    };
-    window.addEventListener("afterprint", restore);
-    window.print();
+  // PDF 出力 (C 案): window.print() は iOS/iPadOS Safari が @page landscape を無視し
+  // 縦向き＋途中列クリップになるため廃止。繰越票カード全体 (テーブル＋消化サマリー) を
+  // html2canvas でキャプチャ → jsPDF で A4 横に貼り付ける。
+  // ・ページ幅にフィット (アスペクト比維持) させるため全14列が必ず1枚の横幅に収まる。
+  // ・縦に長く1枚に収まらない場合は画像を上方向にずらしながら複数ページへ分割。
+  const pdfRef = useRef(null);
+  const pdfBusy = useRef(false);
+  const handlePrint = async () => {
+    const el = pdfRef.current;
+    if (!el || pdfBusy.current) return;
+    pdfBusy.current = true;
+    try {
+      // 全14列 (カテゴリ＋1〜12月＋目標) の実幅をライブ DOM から測る。
+      // table は overflowX:auto ラッパー内でクリップ表示されているが、
+      // scrollWidth/offsetWidth は目標列まで含む“はみ出し込みの実幅”を返す。
+      const tableEl = el.querySelector("table");
+      const tableW = Math.ceil(Math.max(tableEl?.scrollWidth || 0, tableEl?.offsetWidth || 0));
+      // キャプチャ幅 = テーブル実幅 + 左右ボーダー/余白の保険。最低 800px は確保。
+      const captureW = Math.max(tableW + 4, 800);
+
+      const canvas = await html2canvas(el, {
+        scale: 2,                   // 文字をシャープに
+        backgroundColor: CARD_BG,   // 透明部分をカード地色で埋める (暗テーマのまま)
+        useCORS: true,
+        width: captureW,            // キャプチャ範囲を全14列の実幅まで広げる (目標列の切れ対策)
+        windowWidth: captureW + 40, // レイアウト計算幅もそれ以上に
+        // PDF ボタン等 (.no-print) はキャプチャから除外。
+        ignoreElements: (node) => node.classList?.contains?.("no-print"),
+        // 画面 (maxWidth 430px) では横スクロールラッパーが table(minWidth:720) をクリップし、
+        // さらに .annual-pdf-root の inline overflow:hidden が右端 (目標列) を切り落とす。
+        // クローン DOM だけを操作してクリップを全解除し、root を全14列の実幅まで広げる。
+        // (live UI には一切影響しない)
+        onclone: (clonedDoc) => {
+          const root = clonedDoc.querySelector(".annual-pdf-root");
+          if (root) {
+            root.style.width = `${captureW}px`;
+            root.style.maxWidth = "none";
+            root.style.overflow = "visible"; // ← inline overflow:hidden を解除 (目標列クリップの元凶)
+          }
+          clonedDoc.querySelectorAll(".annual-pdf-scroll").forEach((n) => {
+            n.style.overflow = "visible";
+            n.style.width = "auto";
+          });
+          clonedDoc.querySelectorAll(".annual-pdf-root table").forEach((t) => {
+            t.style.minWidth = "0";
+            t.style.width = "100%"; // root が全幅になったので 100% で全14列が収まる
+          });
+        },
+      });
+      const imgData = canvas.toDataURL("image/png");
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();   // 297mm
+      const pageH = doc.internal.pageSize.getHeight();  // 210mm
+      // 画像をページ幅いっぱいに合わせ、高さはアスペクト比から算出。
+      const imgW = pageW;
+      const imgH = (canvas.height * imgW) / canvas.width;
+      if (imgH <= pageH) {
+        doc.addImage(imgData, "PNG", 0, 0, imgW, imgH);
+      } else {
+        // 1枚に収まらない: 同じ画像を上にずらして貼り、addPage で各ページ分のスライスを表示。
+        let remaining = imgH;
+        let position = 0;
+        while (remaining > 0) {
+          doc.addImage(imgData, "PNG", 0, position, imgW, imgH);
+          remaining -= pageH;
+          if (remaining > 0) {
+            doc.addPage();
+            position -= pageH;
+          }
+        }
+      }
+      doc.save(`支出管理繰越票_${data?.fiscal_year ?? ""}年度.pdf`);
+    } finally {
+      pdfBusy.current = false;
+    }
   };
 
   // ロード中・未反映・取得失敗・data 無しは「準備中」カードを表示。
@@ -147,7 +213,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   void isLandscape;
 
   const card = (
-    <div className="annual-pdf-root" style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
+    <div ref={pdfRef} className="annual-pdf-root" style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
       <div style={{
         padding: "12px 16px", borderBottom: `1px solid ${BORDER}`,
         display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12,
@@ -172,7 +238,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           📄 PDF
         </button>
       </div>
-      <div style={{ overflowX: "auto" }}>
+      <div className="annual-pdf-scroll" style={{ overflowX: "auto" }}>
         <table style={tableStyle}>
           <thead>
             <tr>
