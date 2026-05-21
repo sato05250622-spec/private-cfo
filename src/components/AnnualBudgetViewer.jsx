@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
-import { sumLineYear } from "../utils/annualBudgetSheet";
 import {
   GOLD, NAVY, NAVY2, NAVY3, CARD_BG, BORDER, RED, TEAL,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
@@ -254,12 +253,22 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
 
           {(() => {
             const cats = sortedLines.filter((l) => l.row_type === "category" && !l.archived);
+            // 消化(実支出)= 本部が焼いた実支出シリーズ monthly_spent の合計。
+            // 将来月の予算配分は含まない (確定実測+経過月/当月ライブ実支出のみ)。
+            // 旧 committed データ (monthly_spent 無し) は消化 0 にフォールバック (エラーにしない)。
+            const sumLineSpent = (l) => {
+              const s = l?.monthly_spent;
+              if (!s || typeof s !== "object") return 0;
+              let sum = 0;
+              for (const k of Object.keys(s)) sum += Number(s[k]) || 0;
+              return sum;
+            };
             // Phase 1c: 本部が年間総予算を設定済ならそれを全体予算に、未設定ならカテゴリ別合計へフォールバック。
             const annualSet = Number(data.committedAnnualTotalTarget) > 0;
             const totalBudget = annualSet
               ? Number(data.committedAnnualTotalTarget)
               : cats.reduce((s, l) => s + (Number(l.target_value) || 0), 0);
-            const totalActual = cats.reduce((s, l) => s + sumLineYear(l, resolveCell), 0);
+            const totalActual = cats.reduce((s, l) => s + sumLineSpent(l), 0);
             const tPct = totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0;
             const tColor = tPct >= 100 ? RED : tPct >= 80 ? GOLD : TEAL;
 
@@ -293,7 +302,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {cats.map((line) => {
                     const b = Number(line.target_value) || 0;
-                    const a = sumLineYear(line, resolveCell);
+                    const a = sumLineSpent(line);
                     const p = b > 0 ? Math.round((a / b) * 100) : 0;
                     const c = p >= 100 ? RED : p >= 80 ? GOLD : TEAL;
                     return (
