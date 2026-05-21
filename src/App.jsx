@@ -34,6 +34,7 @@ import MonthlyReviewViewer from "./components/MonthlyReviewViewer";
 import ReportTabs from "./components/ReportTabs";
 import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
+import { useAnnualBudgets } from "./hooks/useAnnualBudgets";
 import { useAuth } from "./context/AuthContext";
 import { migratePaymentsLoans } from "./lib/migratePaymentsLoans";
 import { migrateBudgets } from "./lib/migrateBudgets";
@@ -403,6 +404,10 @@ export default function App() {
   // 完了後に refetchPaymentMethods / refetchLoans で UI を最新 DB 状態へ同期。
   const { user: authUser, customerEditEnabled } = useAuth();
   const authUserId = authUser?.id ?? null;
+  // 繰越票 (annual_budgets) の committed snapshot を購読。月間サマリーの「月の予算」を
+  // HQ が決めた monthly_budget と連動させる (getCarryoverMonthBudget 経由)。
+  // AnnualBudgetViewer も別途同フックを使うが、ここは消費者を増やすだけ (Viewer 側は不変)。
+  const { data: carryoverBudget } = useAnnualBudgets(authUserId);
   const paymentsLoansMigrationStartedRef = useRef(false);
   useEffect(() => {
     if (!authUserId) return;
@@ -602,7 +607,41 @@ export default function App() {
   const budgetKey=(cat)=>`${budgetMonth.y}-${budgetMonth.m+1}-${cat}`;
   const getBudget=(cat)=>budgets[budgetKey(cat)];
 
+  // 繰越票 (annual_budgets committed) の月予算を、サイクル月 (暦月 m+1) で合算して返す。
+  //   - monthly_budget の jsonb キーはサイクル月番号 1..12 (admin 側 setMonthlyBudget /
+  //     commit 焼き込みが String(月番号) で保存。暦月 m+1 と同じ番号体系)。
+  //   - 通常カテゴリ行のみ対象 (特殊行: 納税/その他精算/調整額 = category_id null /
+  //     row_type 'special_*' は除外。archived も除外)。
+  //   - reportMonth が committed の年度範囲外、または monthly_budget 未保存なら 0。
+  //     (fiscal_year_start_month を跨ぐ年度のため、サイクル月→暦年を逆算して年一致を確認)
+  const getCarryoverMonthBudget = (y, m) => {
+    const d = carryoverBudget;
+    const lines = Array.isArray(d?.committed_lines) ? d.committed_lines : [];
+    if (lines.length === 0) return 0;
+    const mm = m + 1; // サイクル月番号 1..12
+    const fy = Number(d.fiscal_year);
+    const startM = Number(d.fiscal_year_start_month) || 1;
+    // サイクル月 mm の暦年: 年度開始月以降は fy、開始月より前は翌年 (fy+1)。
+    const expectedYear = mm >= startM ? fy : fy + 1;
+    if (!Number.isFinite(fy) || y !== expectedYear) return 0;
+    let sum = 0;
+    for (const line of lines) {
+      if (!line) continue;
+      if (line.category_id == null) continue;                       // 特殊行 (category_id null)
+      if (String(line.row_type || '').startsWith('special_')) continue; // 特殊行 (row_type)
+      if (line.archived) continue;                                  // 削除済みカテゴリ
+      const mb = line.monthly_budget;
+      if (!mb) continue;
+      const v = mb[mm] ?? mb[String(mm)];
+      if (v != null) sum += Number(v) || 0;
+    }
+    return sum;
+  };
+
   const getEffectiveMonthBudget = (y, m) => {
+    // 繰越票 (HQ が決めた月予算) を最優先。週予算/手動月予算より上位。
+    const carryover = getCarryoverMonthBudget(y, m);
+    if (carryover > 0) return carryover;
     const manualTotal = expenseCats.reduce((s,c)=>s+(budgets[`${y}-${m+1}-${c.id}`]||0),0);
     if(manualTotal>0) return manualTotal;
     const weekKeys = [`${y}-${m+1}-w1`,`${y}-${m+1}-w2`,`${y}-${m+1}-w3`,`${y}-${m+1}-w4`];
