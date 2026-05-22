@@ -133,65 +133,127 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     if (!el || pdfBusy.current) return;
     pdfBusy.current = true;
     try {
-      // 全14列 (カテゴリ＋1〜12月＋目標) の実幅をライブ DOM から測る。
-      // table は overflowX:auto ラッパー内でクリップ表示されているが、
-      // scrollWidth/offsetWidth は目標列まで含む“はみ出し込みの実幅”を返す。
-      const tableEl = el.querySelector("table");
-      const tableW = Math.ceil(Math.max(tableEl?.scrollWidth || 0, tableEl?.offsetWidth || 0));
-      // キャプチャ幅 = テーブル実幅 + 左右ボーダー/余白の保険。最低 800px は確保。
-      const captureW = Math.max(tableW + 4, 800);
-
-      const canvas = await html2canvas(el, {
-        scale: 2,                   // 文字をシャープに
-        backgroundColor: CARD_BG,   // 透明部分をカード地色で埋める (暗テーマのまま)
-        useCORS: true,
-        width: captureW,            // キャプチャ範囲を全14列の実幅まで広げる (目標列の切れ対策)
-        windowWidth: captureW + 40, // レイアウト計算幅もそれ以上に
-        // PDF ボタン等 (.no-print) はキャプチャから除外。
-        ignoreElements: (node) => node.classList?.contains?.("no-print"),
-        // 画面 (maxWidth 430px) では横スクロールラッパーが table(minWidth:720) をクリップし、
-        // さらに .annual-pdf-root の inline overflow:hidden が右端 (目標列) を切り落とす。
-        // クローン DOM だけを操作してクリップを全解除し、root を全14列の実幅まで広げる。
-        // (live UI には一切影響しない)
-        onclone: (clonedDoc) => {
-          const root = clonedDoc.querySelector(".annual-pdf-root");
-          if (root) {
-            root.style.width = `${captureW}px`;
-            root.style.maxWidth = "none";
-            root.style.overflow = "visible"; // ← inline overflow:hidden を解除 (目標列クリップの元凶)
-          }
-          clonedDoc.querySelectorAll(".annual-pdf-scroll").forEach((n) => {
-            n.style.overflow = "visible";
-            n.style.width = "auto";
-          });
-          clonedDoc.querySelectorAll(".annual-pdf-root table").forEach((t) => {
-            t.style.minWidth = "0";
-            t.style.width = "100%"; // root が全幅になったので 100% で全14列が収まる
-          });
-        },
-      });
-      const imgData = canvas.toDataURL("image/png");
+      const scale = 2;
+      const marginMm = 8;
       const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
       const pageW = doc.internal.pageSize.getWidth();   // 297mm
       const pageH = doc.internal.pageSize.getHeight();  // 210mm
-      // 画像をページ幅いっぱいに合わせ、高さはアスペクト比から算出。
-      const imgW = pageW;
-      const imgH = (canvas.height * imgW) / canvas.width;
-      if (imgH <= pageH) {
-        doc.addImage(imgData, "PNG", 0, 0, imgW, imgH);
-      } else {
-        // 1枚に収まらない: 同じ画像を上にずらして貼り、addPage で各ページ分のスライスを表示。
-        let remaining = imgH;
-        let position = 0;
-        while (remaining > 0) {
-          doc.addImage(imgData, "PNG", 0, position, imgW, imgH);
-          remaining -= pageH;
-          if (remaining > 0) {
-            doc.addPage();
-            position -= pageH;
-          }
+      const contentWmm = pageW - marginMm * 2;
+      const contentHmm = pageH - marginMm * 2;
+
+      // 全14列 (カテゴリ＋1〜12月＋目標) の実幅をライブ DOM から測りキャプチャ幅を決める。
+      const tableEl = el.querySelector("table");
+      const tableW = Math.ceil(Math.max(tableEl?.scrollWidth || 0, tableEl?.offsetWidth || 0));
+      const captureW = Math.max(tableW + 4, 800);
+      // 1ページ分の縦容量 (CSS px)。captureW px 幅を contentWmm に写すスケールで換算。
+      const pageContentPx = (contentHmm * captureW) / contentWmm;
+
+      // ---- live DOM から各行/セクションの高さを測る (行は nowrap で一定高さ) ----
+      const headerH = el.querySelector('[data-pdf="header"]')?.offsetHeight || 0;
+      const theadH = el.querySelector("thead")?.offsetHeight || 0;
+      const bodyRows = Array.from(el.querySelectorAll("tbody tr"));
+      const rowHs = bodyRows.map((r) => r.offsetHeight || 1);
+
+      // ---- テーブルページ: 行を「行境界で」チャンク化 (各ページ thead 分、先頭は header も確保) ----
+      const tablePages = [];
+      {
+        let i = 0; let first = true;
+        while (i < bodyRows.length) {
+          const budget = pageContentPx - theadH - (first ? headerH : 0);
+          let used = 0; const start = i;
+          while (i < bodyRows.length && (used === 0 || used + rowHs[i] <= budget)) { used += rowHs[i]; i += 1; }
+          tablePages.push({ start, end: i, showHeader: first });
+          first = false;
         }
+        if (tablePages.length === 0) tablePages.push({ start: 0, end: 0, showHeader: true });
       }
+
+      // ---- 末尾セクション (年間合計 + 消化サマリー + 凡例) を unit 単位でページ詰め ----
+      const tailUnits = [];
+      const pushUnit = (key, node) => { if (node) tailUnits.push({ key, h: node.offsetHeight || 1 }); };
+      pushUnit("grandtotal", el.querySelector('[data-pdf="grandtotal"]'));
+      pushUnit("sum-title", el.querySelector('[data-pdf-unit="sum-title"]'));
+      pushUnit("sum-overall", el.querySelector('[data-pdf-unit="sum-overall"]'));
+      Array.from(el.querySelectorAll('[data-pdf-unit="sum-bar"]')).forEach((n, idx) => pushUnit(`sum-bar:${idx}`, n));
+      pushUnit("sum-note", el.querySelector('[data-pdf-unit="sum-note"]'));
+      pushUnit("legend", el.querySelector('[data-pdf="legend"]'));
+      const tailPages = [];
+      {
+        let used = 0; let cur = [];
+        for (const u of tailUnits) {
+          if (cur.length > 0 && used + u.h > pageContentPx) { tailPages.push(cur); cur = []; used = 0; }
+          cur.push(u.key); used += u.h;
+        }
+        if (cur.length > 0) tailPages.push(cur);
+      }
+
+      // 共通 onclone: 幅展開・クリップ解除・カテゴリ列の sticky 解除 (左端ずれ防止)。
+      const baseClone = (clonedDoc) => {
+        const root = clonedDoc.querySelector(".annual-pdf-root");
+        if (root) { root.style.width = `${captureW}px`; root.style.maxWidth = "none"; root.style.overflow = "visible"; }
+        clonedDoc.querySelectorAll(".annual-pdf-scroll").forEach((n) => { n.style.overflow = "visible"; n.style.width = "auto"; });
+        clonedDoc.querySelectorAll(".annual-pdf-root table").forEach((t) => { t.style.minWidth = "0"; t.style.width = "100%"; });
+        clonedDoc.querySelectorAll(".annual-pdf-root th, .annual-pdf-root td").forEach((c) => {
+          if (c.style.position === "sticky") { c.style.position = "static"; c.style.left = "auto"; }
+        });
+      };
+      const setDisp = (cd, sel, show) => { const n = cd.querySelector(sel); if (n) n.style.display = show ? "" : "none"; };
+      const capture = (configure) => html2canvas(el, {
+        scale, backgroundColor: CARD_BG, useCORS: true,
+        width: captureW, windowWidth: captureW + 40,
+        ignoreElements: (node) => node.classList?.contains?.("no-print"),
+        onclone: (clonedDoc) => { baseClone(clonedDoc); configure(clonedDoc); },
+      });
+
+      // 各ページ canvas を A4 横に貼付 (左右に marginMm、横中央寄せ、高さは念のため clamp)。
+      let pageIndex = 0;
+      const addCanvasPage = (canvas) => {
+        if (pageIndex > 0) doc.addPage();
+        pageIndex += 1;
+        let w = contentWmm;
+        let h = (canvas.height * w) / canvas.width;
+        if (h > contentHmm) { h = contentHmm; w = (canvas.width * h) / canvas.height; }
+        doc.addImage(canvas.toDataURL("image/png"), "PNG", (pageW - w) / 2, marginMm, w, h);
+      };
+
+      // テーブルページ (thead は各ページ自動的に含まれる = 見出し繰り返し)。
+      for (const tp of tablePages) {
+        // eslint-disable-next-line no-await-in-loop
+        const canvas = await capture((cd) => {
+          setDisp(cd, '[data-pdf="header"]', tp.showHeader);
+          setDisp(cd, '[data-pdf="grandtotal"]', false);
+          setDisp(cd, '[data-pdf="summary"]', false);
+          setDisp(cd, '[data-pdf="legend"]', false);
+          cd.querySelectorAll(".annual-pdf-root tbody tr").forEach((tr, i) => {
+            tr.style.display = (i >= tp.start && i < tp.end) ? "" : "none";
+          });
+        });
+        addCanvasPage(canvas);
+      }
+
+      // 末尾ページ (年間合計 / 消化サマリー / 凡例)。
+      for (const units of tailPages) {
+        const set = new Set(units);
+        const hasSummary = set.has("sum-title") || set.has("sum-overall") || set.has("sum-note") || units.some((k) => k.startsWith("sum-bar"));
+        // eslint-disable-next-line no-await-in-loop
+        const canvas = await capture((cd) => {
+          setDisp(cd, '[data-pdf="header"]', false);
+          setDisp(cd, ".annual-pdf-scroll", false);
+          setDisp(cd, '[data-pdf="grandtotal"]', set.has("grandtotal"));
+          setDisp(cd, '[data-pdf="legend"]', set.has("legend"));
+          setDisp(cd, '[data-pdf="summary"]', hasSummary);
+          if (hasSummary) {
+            setDisp(cd, '[data-pdf-unit="sum-title"]', set.has("sum-title"));
+            setDisp(cd, '[data-pdf-unit="sum-overall"]', set.has("sum-overall"));
+            setDisp(cd, '[data-pdf-unit="sum-note"]', set.has("sum-note"));
+            cd.querySelectorAll('[data-pdf-unit="sum-bar"]').forEach((b, i) => {
+              b.style.display = set.has(`sum-bar:${i}`) ? "" : "none";
+            });
+          }
+        });
+        addCanvasPage(canvas);
+      }
+
       doc.save(`支出管理繰越票_${data?.fiscal_year ?? ""}年度.pdf`);
     } finally {
       pdfBusy.current = false;
@@ -249,7 +311,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
 
   const card = (
     <div ref={pdfRef} className="annual-pdf-root" style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
-      <div style={{
+      <div data-pdf="header" style={{
         padding: "12px 16px", borderBottom: `1px solid ${BORDER}`,
         display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12,
       }}>
@@ -338,7 +400,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         </table>
       </div>
       {grandTotal != null && (
-        <div style={{
+        <div data-pdf="grandtotal" style={{
           padding: "10px 16px", borderTop: `1px solid ${BORDER}`,
           display: "flex", justifyContent: "space-between", alignItems: "center",
         }}>
@@ -351,8 +413,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
 
       {/* Phase 2: カテゴリ別 目標消化率 (進捗バー) */}
       {sortedLines.filter((l) => l.row_type === "category" && !l.archived).length > 0 && (
-        <div style={{ margin: "0 16px", paddingTop: 16, paddingBottom: 16, borderTop: `1px solid ${BORDER}` }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: GOLD, marginBottom: 10 }}>
+        <div data-pdf="summary" style={{ margin: "0 16px", paddingTop: 16, paddingBottom: 16, borderTop: `1px solid ${BORDER}` }}>
+          <div data-pdf-unit="sum-title" style={{ fontSize: 13, fontWeight: 700, color: GOLD, marginBottom: 10 }}>
             📊 年間予算 消化サマリー
           </div>
 
@@ -391,7 +453,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             return (
               <>
                 {/* 全体 */}
-                <div style={{ marginBottom: 14 }}>
+                <div data-pdf-unit="sum-overall" style={{ marginBottom: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
                     <span style={{ fontWeight: 600, color: TEXT_PRIMARY }}>
                       年間予算 合計 <span style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 400 }}>{annualSet ? "(年間総予算)" : "(カテゴリ合計)"}</span>
@@ -411,7 +473,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                     const p = b > 0 ? Math.round((a / b) * 100) : 0;
                     const c = p >= 100 ? RED : p >= 80 ? GOLD : TEAL;
                     return (
-                      <div key={line.category_id}>
+                      <div key={line.category_id} data-pdf-unit="sum-bar">
                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}>
                           <span style={{ color: TEXT_SECONDARY }}>{line.category_name}</span>
                           <span style={{ color: c }}>{b > 0 ? `${p}%` : "予算未設定"}</span>
@@ -425,14 +487,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             );
           })()}
 
-          <div style={{ marginTop: 10, fontSize: 10, color: "rgba(255,255,255,0.5)" }}>
+          <div data-pdf-unit="sum-note" style={{ marginTop: 10, fontSize: 10, color: "rgba(255,255,255,0.5)" }}>
             色:〜79% TEAL / 80〜99% GOLD / 100%+ RED
           </div>
         </div>
       )}
 
       {hasSettled && (
-        <div style={{ padding: "8px 16px", borderTop: `1px solid ${BORDER}`, fontSize: 10, color: TEXT_MUTED }}>
+        <div data-pdf="legend" style={{ padding: "8px 16px", borderTop: `1px solid ${BORDER}`, fontSize: 10, color: TEXT_MUTED }}>
           <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: `${RED}1A`, border: `1px solid ${RED}`, marginRight: 6, verticalAlign: "middle" }} />
           赤背景 = 確定月 (凍結実測)
         </div>
