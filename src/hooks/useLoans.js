@@ -21,6 +21,8 @@ function rowToItem(row) {
     pmId: row.pm_id,
     // Phase 3 (固定費 月別): 繰越票で月別に編集された額。{ "1".."12": 額 } | null。
     monthlyAmounts: row.monthly_amounts ?? null,
+    // Phase 3 (固定費 目標): 繰越票で手入力された年間目標。null = 未設定。
+    annualTarget: row.annual_target ?? null,
   };
 }
 

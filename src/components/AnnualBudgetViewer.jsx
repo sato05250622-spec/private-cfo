@@ -22,7 +22,7 @@ function buildFixedCostLines(loans) {
     row_type: "fixed_cost",
     monthly_amount: Number(loan.amount) || 0,
     monthly_amounts: loan.monthlyAmounts || null,
-    target_value: null,
+    target_value: loan.annualTarget ?? null,
     archived: false,
     display_order: i,
   }));
@@ -279,7 +279,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   const totalsMonthly = data.committed_totals?.monthly || {};
   const grandTotal = data.committed_totals?.grandTotal ?? null;
   // 月合計行の目標列 = 全 line の target_value 合計 (= 年間目標合計)。
-  const targetGrandTotal = sortedLines.reduce((s, l) => s + (Number(l?.target_value) || 0), 0);
+  // Phase 3 (固定費): committed 由来 (sortedLines) に加え、固定費行 (loans 由来) の
+  // 目標 (annual_target → target_value) も加算する → displayLines で集計。
+  const targetGrandTotal = displayLines.reduce((s, l) => s + (Number(l?.target_value) || 0), 0);
 
   // Phase 1: 本部が確定した月 (committed_settled_months)。該当月セルを赤塗りする。
   const committedSettledMonths = Array.isArray(data?.committedSettledMonths)
