@@ -19,6 +19,8 @@ function rowToItem(row) {
     bank: row.bank,
     withdrawalDay: row.withdrawal_day,
     pmId: row.pm_id,
+    // Phase 3 (固定費 月別): 繰越票で月別に編集された額。{ "1".."12": 額 } | null。
+    monthlyAmounts: row.monthly_amounts ?? null,
   };
 }
 

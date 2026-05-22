@@ -2,10 +2,31 @@ import { useState, useEffect, useRef } from "react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
+import { useLoans } from "../hooks/useLoans";
 import {
   GOLD, NAVY, NAVY2, NAVY3, CARD_BG, BORDER, RED, TEAL,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 } from "@shared/theme";
+
+// Phase 3 (固定費): loans (借入、useLoans の app-shape: label/amount) → 繰越票の固定費行。
+// 本部アプリ annualBudgetSheet.js の buildFixedCostLines と同等 (別リポのため再実装)。
+//   - row_type 'fixed_cost'、category_id に loans.id、基準月額 (amount) を monthly_amount に
+//   - monthly_amounts (月別上書き jsonb) も保持 → 各月セル = monthly_amounts[m] ?? monthly_amount
+//   - committed_lines には焼かれない (描画時にライブ生成し最上部に prepend)
+//   - 並び順は loans の取得順 (created_at 昇順、reorder なし) をそのまま使う
+function buildFixedCostLines(loans) {
+  const arr = Array.isArray(loans) ? loans : [];
+  return arr.map((loan, i) => ({
+    category_id: loan.id,
+    category_name: loan.label,
+    row_type: "fixed_cost",
+    monthly_amount: Number(loan.amount) || 0,
+    monthly_amounts: loan.monthlyAmounts || null,
+    target_value: null,
+    archived: false,
+    display_order: i,
+  }));
+}
 
 // =============================================================
 // 支出管理繰越票 read-only ビューア (Phase E 最終ゴール — 顧客アプリ)。
@@ -31,6 +52,13 @@ function pickMonth(obj, m) {
 // 優先度: monthly_overrides[m] → monthly_values[m] → null。
 // (admin 側の live 集計値は snapshot に含まれないため override / values のみ)
 function resolveCell(line, m) {
+  // Phase 3 (固定費): 各月 monthly_amounts[m] ?? monthly_amount (基準額)。読み取り専用。
+  if (line?.row_type === "fixed_cost") {
+    const ma = line.monthly_amounts;
+    const mv = ma ? (ma[m] ?? ma[String(m)]) : null;
+    const a = mv != null ? Number(mv) : Number(line.monthly_amount);
+    return Number.isFinite(a) && a !== 0 ? a : null;
+  }
   const ov = pickMonth(line?.monthly_overrides, m);
   if (ov != null) return ov;
   const base = pickMonth(line?.monthly_values, m);
@@ -72,6 +100,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // fiscalYear は予約 prop (現状 API は最新年度のみ)。明示参照して lint 回避。
   void fiscalYear;
   const { data, loading, error } = useAnnualBudgets(clientId);
+  // Phase 3 (固定費): データ源は loans (借入)。ログイン顧客の loans を購読 (auth ベース)。
+  // 繰越票最上部にライブ生成行として描画する (committed_lines には含まれない)。
+  const { loans } = useLoans();
 
   // 横画面検出 (Rules of Hooks: 早期 return より前で呼ぶ)。
   // landscape のときだけ繰越票テーブルを全画面パネル化し、12ヶ月を横スクロール無しで表示する。
@@ -179,6 +210,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   const sortedLines = [...lines].sort(
     (a, b) => (Number(a?.display_order) || 0) - (Number(b?.display_order) || 0),
   );
+  // Phase 3 (固定費): 固定費行をライブ生成し、committed 由来の行の前 (最上部) に prepend。
+  // 描画専用 (sortedLines は targetGrandTotal / 消化サマリーで従来どおり使用)。
+  const fixedCostLines = buildFixedCostLines(loans);
+  const displayLines = [...fixedCostLines, ...sortedLines];
   const totalsMonthly = data.committed_totals?.monthly || {};
   const grandTotal = data.committed_totals?.grandTotal ?? null;
   // 月合計行の目標列 = 全 line の target_value 合計 (= 年間目標合計)。
@@ -254,7 +289,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             </tr>
           </thead>
           <tbody>
-            {sortedLines.map((line, i) => (
+            {displayLines.map((line, i) => {
+              // 固定費行は確定塗り (赤) を適用しない (毎月同額の予算=実測。本部 Phase 2a と整合)。
+              const isFixed = line?.row_type === "fixed_cost";
+              return (
               <tr key={line?.category_id || line?.row_type || i}>
                 <td style={{
                   ...cellStyle, ...stickyBase, background: CARD_BG,
@@ -266,17 +304,18 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 </td>
                 {monthOrder.map((m) => (
                   <td key={m}
-                    style={isMonthSettled(m)
+                    style={(isMonthSettled(m) && !isFixed)
                       ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}` }
                       : cellStyle}
-                    title={isMonthSettled(m) ? "この月は確定済 (凍結実測)" : undefined}
+                    title={(isMonthSettled(m) && !isFixed) ? "この月は確定済 (凍結実測)" : undefined}
                   >{fmtCell(resolveCell(line, m))}</td>
                 ))}
                 <td style={{ ...cellStyle, fontWeight: 700, color: line?.target_value == null ? TEXT_MUTED : GOLD }}>
                   {fmtCell(line?.target_value)}
                 </td>
               </tr>
-            ))}
+              );
+            })}
             <tr>
               <td style={{
                 ...cellStyle, ...stickyBase, background: NAVY2,

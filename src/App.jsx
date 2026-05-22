@@ -2215,15 +2215,15 @@ export default function App() {
         <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}>
             <button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
-            <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>🔁 定期支出</span>
+            <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>🔁 固定費</span>
             <button onClick={()=>{setLoanDraft({label:"",amount:"",bank:"",withdrawalDay:"",pmId:""});setEditingLoanId(null);setShowLoanForm(true);}} style={{background:"none",border:`1px solid ${GOLD}`,borderRadius:20,padding:"4px 12px",color:GOLD,fontSize:12,fontWeight:700,cursor:"pointer"}}>＋追加</button>
           </div>
-          <div style={{padding:"12px 16px",fontSize:10,color:TEXT_MUTED,lineHeight:1.6}}>💡 住宅ローン・車ローン・奨学金など定期的な引き落としを登録しておくと、月次サマリーで合算して表示できます。</div>
+          <div style={{padding:"12px 16px",fontSize:10,color:TEXT_MUTED,lineHeight:1.6}}>💡 家賃・ローン・保険など毎月の固定費を登録しておくと、月次サマリーで合算して表示できます。</div>
           <div style={{padding:"0 16px"}}>
             {loans.length===0?(
               <div style={{textAlign:"center",padding:"40px 20px",color:TEXT_MUTED}}>
                 <div style={{fontSize:32,marginBottom:8}}>🏠</div>
-                <div style={{fontSize:13}}>登録されたローンがありません</div>
+                <div style={{fontSize:13}}>登録された固定費がありません</div>
                 <div style={{fontSize:10,marginTop:4}}>右上の「＋追加」から登録してください</div>
               </div>
             ):(
@@ -2488,7 +2488,7 @@ export default function App() {
       {icon:"📋",label:"月別レポート",action:()=>setMenuScreen("monthlyReport")},
       {icon:"🤝",label:"面談予定",action:()=>setMenuScreen("appointment")},
     ]];
-    const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"定期支出",action:()=>setMenuScreen("loanSetting")}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
+    const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"固定費",action:()=>setMenuScreen("loanSetting")}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
 
     return(
       <div>
@@ -2686,7 +2686,7 @@ export default function App() {
                       <div style={{textAlign:"center",padding:"40px 20px"}}>
                         <div style={{fontSize:24,marginBottom:8}}>🏦</div>
                         <div style={{fontSize:12,color:TEXT_MUTED}}>引き落とし予定がありません</div>
-                        <div style={{fontSize:10,color:TEXT_MUTED,marginTop:4}}>カードの引き落とし日・銀行を設定するか<br/>定期支出を追加してください</div>
+                        <div style={{fontSize:10,color:TEXT_MUTED,marginTop:4}}>カードの引き落とし日・銀行を設定するか<br/>固定費を追加してください</div>
                       </div>
                     );
                     return(
@@ -2709,7 +2709,7 @@ export default function App() {
                                 <div style={{width:8,height:8,borderRadius:"50%",background:item.color,flexShrink:0}}/>
                                 <div style={{flex:1}}>
                                   <div style={{fontSize:13,fontWeight:600,color:TEXT_PRIMARY}}>{item.label}</div>
-                                  <div style={{fontSize:10,color:TEXT_MUTED,marginTop:2}}>{item.type==="loan"?"🔁 定期支出":"💳 カード"} ／ {item.day==="－"?"引落日未設定":`毎月${item.day}${item.day!=="末"?"日":""}引き落とし`}</div>
+                                  <div style={{fontSize:10,color:TEXT_MUTED,marginTop:2}}>{item.type==="loan"?"🔁 固定費":"💳 カード"} ／ {item.day==="－"?"引落日未設定":`毎月${item.day}${item.day!=="末"?"日":""}引き落とし`}</div>
                                 </div>
                                 <span style={{fontSize:15,fontWeight:700,color:RED}}>{item.amount.toLocaleString()}円</span>
                               </div>
@@ -2743,7 +2743,7 @@ export default function App() {
               <div style={{fontSize:13,color:TEXT_SECONDARY}}>「{deleteLoanTarget.label}」</div>
             </div>
             <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>{const id=deleteLoanTarget.id;deleteLoan(id).catch(e=>{console.error('[loans] delete failed',id,e);alert('借入の削除に失敗しました');});setDeleteLoanTarget(null);}} style={{flex:1,padding:"14px",background:`${RED}22`,border:`1px solid ${RED}44`,borderRadius:14,fontSize:15,fontWeight:700,color:RED,cursor:"pointer"}}>削除する</button>
+              <button onClick={()=>{const id=deleteLoanTarget.id;deleteLoan(id).catch(e=>{console.error('[loans] delete failed',id,e);alert('固定費の削除に失敗しました');});setDeleteLoanTarget(null);}} style={{flex:1,padding:"14px",background:`${RED}22`,border:`1px solid ${RED}44`,borderRadius:14,fontSize:15,fontWeight:700,color:RED,cursor:"pointer"}}>削除する</button>
               <button onClick={()=>setDeleteLoanTarget(null)} style={{flex:1,padding:"14px",background:"none",border:`1px solid ${BORDER}`,borderRadius:14,fontSize:15,fontWeight:600,color:TEXT_SECONDARY,cursor:"pointer"}}>キャンセル</button>
             </div>
           </div>
@@ -2755,7 +2755,7 @@ export default function App() {
         <div onClick={()=>setShowLoanForm(false)} style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
           <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,width:"100%",borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(24px + env(safe-area-inset-bottom))",maxHeight:"85dvh",overflowY:"auto"}}>
             <div style={{padding:"16px 20px 10px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <span style={{fontSize:15,fontWeight:700,color:TEXT_PRIMARY}}>🔁 {editingLoanId?"定期支出編集":"定期支出追加"}</span>
+              <span style={{fontSize:15,fontWeight:700,color:TEXT_PRIMARY}}>🔁 {editingLoanId?"固定費編集":"固定費追加"}</span>
               <button onClick={()=>setShowLoanForm(false)} style={{background:"none",border:"none",fontSize:22,color:TEXT_MUTED,cursor:"pointer"}}>✕</button>
             </div>
             <div style={{padding:"16px 20px"}}>
@@ -2786,9 +2786,9 @@ export default function App() {
                 if(!loanDraft.label.trim()||!loanDraft.amount||Number(loanDraft.amount)<=0)return;
                 const patch={...loanDraft,amount:Number(loanDraft.amount)};
                 if(editingLoanId){
-                  updateLoan(editingLoanId,patch).catch(e=>{console.error('[loans] update failed',editingLoanId,e);alert('借入の更新に失敗しました');});
+                  updateLoan(editingLoanId,patch).catch(e=>{console.error('[loans] update failed',editingLoanId,e);alert('固定費の更新に失敗しました');});
                 } else {
-                  createLoan({...patch,id:`loan_${Date.now()}`}).catch(e=>{console.error('[loans] create failed',e);alert('借入の追加に失敗しました');});
+                  createLoan({...patch,id:`loan_${Date.now()}`}).catch(e=>{console.error('[loans] create failed',e);alert('固定費の追加に失敗しました');});
                 }
                 setShowLoanForm(false);setEditingLoanId(null);setLoanDraft({label:"",amount:"",bank:"",withdrawalDay:"",pmId:""});
               }} style={{width:"100%",padding:"14px",background:loanDraft.label.trim()&&loanDraft.amount?GOLD_GRAD:"rgba(255,255,255,0.1)",border:"none",borderRadius:24,fontSize:15,fontWeight:700,color:loanDraft.label.trim()&&loanDraft.amount?"#0A1628":TEXT_MUTED,cursor:"pointer"}}>{editingLoanId?"変更を保存":"登録する"}</button>

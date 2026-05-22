@@ -35,6 +35,9 @@ export function AuthProvider({ children }) {
   // 未取得 / 取得失敗 / サインアウト時は false (= ロック) を default とする。
   // App.jsx の requestEdit() がこの値を見て編集導線を許可 / トースト案内に分岐。
   const [customerEditEnabled, setCustomerEditEnabled] = useState(false);
+  // Phase 3: 固定費 込み/抜きフラグ (profiles.include_fixed_expenses)。HQ が顧客ごとに切替。
+  // true = 込み (固定費行を表示、DB default)。未取得 / 失敗 / サインアウト時も true を default。
+  const [includeFixedExpenses, setIncludeFixedExpenses] = useState(true);
 
   useEffect(() => {
     // eslint-disable-next-line no-console
@@ -47,7 +50,7 @@ export function AuthProvider({ children }) {
       try {
         const q = supabase
           .from('profiles')
-          .select('role, approved, management_start_day, customer_edit_enabled')
+          .select('role, approved, management_start_day, customer_edit_enabled, include_fixed_expenses')
           .eq('id', userId)
           .maybeSingle();
         const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles fetch');
@@ -64,6 +67,7 @@ export function AuthProvider({ children }) {
         setRole(data?.role ?? null);
         setApproved(data?.approved ?? null);
         setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
+        setIncludeFixedExpenses(data?.include_fixed_expenses ?? true);
         // B-2: profile.msd が non-null かつ localStorage と異なるとき localStorage を上書き。
         // NULL は no-op (既存 localStorage の値を破壊しない、B-1 未実施ユーザー保護)。
         // Supabase = source of truth、ただし NULL は「未充填」として扱う。
@@ -175,6 +179,7 @@ export function AuthProvider({ children }) {
       setRole(data?.role ?? null);
       setApproved(data?.approved ?? null);
       setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
+      setIncludeFixedExpenses(data?.include_fixed_expenses ?? true);
       // B-2: loadProfile と同じ msd sync (refresh 経路でも一貫性を保つ)
       if (data?.management_start_day != null) {
         const local = getManagementStartDay();
@@ -194,6 +199,7 @@ export function AuthProvider({ children }) {
     role,
     approved,
     customerEditEnabled,
+    includeFixedExpenses,
     isAdmin: role === 'admin',
     isApproved: approved === true,
     signIn,
