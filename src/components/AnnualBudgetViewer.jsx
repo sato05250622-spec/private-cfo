@@ -432,12 +432,26 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               for (const k of Object.keys(s)) sum += Number(s[k]) || 0;
               return sum;
             };
-            // Phase 1c: 本部が年間総予算を設定済ならそれを全体予算に、未設定ならカテゴリ別合計へフォールバック。
-            const annualSet = Number(data.committedAnnualTotalTarget) > 0;
-            const totalBudget = annualSet
-              ? Number(data.committedAnnualTotalTarget)
-              : cats.reduce((s, l) => s + (Number(l.target_value) || 0), 0);
-            const totalActual = cats.reduce((s, l) => s + sumLineSpent(l), 0);
+            // 固定費行 (committed に monthly_spent 無し) の年間実測 = Σ(monthly_amounts[m] ?? monthly_amount)。
+            // 本部 rowYearSpent の固定費分岐と同等。
+            const lineYearSpent = (l) => {
+              if (l?.row_type === "fixed_cost") {
+                const ma = l.monthly_amounts; const base = Number(l.monthly_amount) || 0;
+                let s = 0;
+                for (let m = 1; m <= 12; m++) {
+                  const v = ma ? (ma[m] ?? ma[String(m)]) : null;
+                  s += (v != null ? Number(v) : base) || 0;
+                }
+                return s;
+              }
+              return sumLineSpent(l);
+            };
+            // 総予算・実測とも全行 (固定費＋カテゴリー＋特殊行) で集計しスコープ一致 (本部と同方針)。
+            //   totalBudget = 全行の target_value 合計 (= targetGrandTotal、月合計行の目標と同値)
+            //   totalActual = 全行の年間実測合計 (固定費込み)
+            // committedAnnualTotalTarget の手入力値依存は廃止。
+            const totalBudget = targetGrandTotal;
+            const totalActual = displayLines.reduce((s, l) => s + (lineYearSpent(l) || 0), 0);
             const tPct = totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0;
             const tColor = tPct >= 100 ? RED : tPct >= 80 ? GOLD : TEAL;
 
@@ -458,7 +472,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 <div data-pdf-unit="sum-overall" style={{ marginBottom: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
                     <span style={{ fontWeight: 600, color: TEXT_PRIMARY }}>
-                      年間予算 合計 <span style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 400 }}>{annualSet ? "(年間総予算)" : "(カテゴリ合計)"}</span>
+                      年間予算 合計 <span style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 400 }}>(全行合計・固定費込み)</span>
                     </span>
                     <span style={{ color: tColor, fontWeight: 700 }}>
                       {totalBudget > 0 ? `${tPct}% 消化` : "予算未設定"}
