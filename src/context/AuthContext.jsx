@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { getManagementStartDay, setManagementStartDay } from '../utils/cycle';
 
@@ -39,6 +39,10 @@ export function AuthProvider({ children }) {
   // true = 込み (固定費行を表示、DB default)。未取得 / 失敗 / サインアウト時も true を default。
   const [includeFixedExpenses, setIncludeFixedExpenses] = useState(true);
 
+  // #6 修正: profile を読み込み済みの userId。onAuthStateChange が同一ユーザーで
+  // 再発火 (TOKEN_REFRESHED 等) したとき profile 再取得をスキップするための番兵。
+  const loadedUserIdRef = useRef(null);
+
   useEffect(() => {
     // eslint-disable-next-line no-console
     console.log('[auth] useEffect start');
@@ -47,6 +51,8 @@ export function AuthProvider({ children }) {
     async function loadProfile(userId) {
       // eslint-disable-next-line no-console
       console.log('[auth] loadProfile start', userId);
+      // 読み込み着手した userId を記録 (同一ユーザーの再発火で再取得しないため)。
+      loadedUserIdRef.current = userId;
       try {
         const q = supabase
           .from('profiles')
@@ -61,7 +67,8 @@ export function AuthProvider({ children }) {
           console.error('[auth] loadProfile error', error);
           setRole(null);
           setApproved(null);
-          setCustomerEditEnabled(false);
+          // #6 修正: 取得失敗時は customerEditEnabled / includeFixedExpenses を変更しない
+          //   (false に落とすと予算編集が誤ロックされるため。成功時のみ更新)。
           return;
         }
         setRole(data?.role ?? null);
@@ -82,7 +89,7 @@ export function AuthProvider({ children }) {
         if (!mounted) return;
         setRole(null);
         setApproved(null);
-        setCustomerEditEnabled(false);
+        // #6 修正: タイムアウト/例外時も customerEditEnabled は変更しない (誤ロック防止)。
       }
     }
 
@@ -123,12 +130,19 @@ export function AuthProvider({ children }) {
       if (!mounted) return;
       setSession(next);
       try {
-        if (next?.user?.id) {
-          await loadProfile(next.user.id);
+        const nextId = next?.user?.id ?? null;
+        if (nextId) {
+          // #6 修正: 同一ユーザーの再発火 (TOKEN_REFRESHED / フォーカス復帰など) では
+          //   profile を再取得しない。ログイン/ユーザー変更/初回ロード時のみ取得。
+          //   これにより復帰のたびの再取得失敗で customerEditEnabled が揺れるのを防ぐ。
+          if (nextId === loadedUserIdRef.current) return;
+          await loadProfile(nextId);
         } else {
+          // サインアウト: 編集フラグを既定 (ロック) に戻し、番兵もクリア。
           setRole(null);
           setApproved(null);
           setCustomerEditEnabled(false);
+          loadedUserIdRef.current = null;
         }
       } catch (e) {
         console.error('[auth] onAuthStateChange loadProfile exception', e);
