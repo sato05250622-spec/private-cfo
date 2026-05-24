@@ -3,10 +3,28 @@ import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import { useLoans } from "../hooks/useLoans";
+import { cycleStart, cycleEnd, getManagementStartDay } from "../utils/cycle";
+import { toDateStr } from "@shared/format";
 import {
   GOLD, NAVY, NAVY2, NAVY3, CARD_BG, BORDER, RED, TEAL,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 } from "@shared/theme";
+
+// #1: 固定費の年間消化を「現在の進捗で進める」ため、本部 annualBudgetSheet.js の
+// classifyMonth / fiscalMonthCalendarYear と同一ロジックを顧客側に再実装 (別リポのため)。
+// 月 m (年度内) が past/current/future のどれかを msd 基準サイクルで判定する。
+function fiscalMonthCalendarYear(fiscalYear, startMonth, m) {
+  const s = Math.max(1, Math.min(12, Number(startMonth) || 1));
+  return Number(m) >= s ? fiscalYear : fiscalYear + 1;
+}
+function classifyMonth(year, m, msd, todayStr, startMonth = 1) {
+  const cy = fiscalMonthCalendarYear(year, startMonth, m);
+  const startStr = toDateStr(cycleStart(cy, m - 1, msd));
+  const endStr = toDateStr(cycleEnd(cy, m - 1, msd));
+  if (endStr < todayStr) return "past";
+  if (startStr > todayStr) return "future";
+  return "current";
+}
 
 // Phase 3 (固定費): loans (借入、useLoans の app-shape: label/amount) → 繰越票の固定費行。
 // 本部アプリ annualBudgetSheet.js の buildFixedCostLines と同等 (別リポのため再実装)。
@@ -269,6 +287,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
 
   const startMonth = Number(data.fiscal_year_start_month) || 1;
   const monthOrder = Array.from({ length: 12 }, (_, i) => ((startMonth - 1 + i) % 12) + 1);
+  // #1: 固定費の月区分判定 (classifyMonth) に使う年度・管理開始日・今日。
+  //   fyYear = 年度の暦年、msd = 管理スタート日 (localStorage)、todayStr = 'YYYY-MM-DD'。
+  const fyYear = Number(data.fiscal_year) || new Date().getFullYear();
+  const msd = getManagementStartDay();
+  const todayStr = toDateStr(new Date());
   const sortedLines = [...lines].sort(
     (a, b) => (Number(a?.display_order) || 0) - (Number(b?.display_order) || 0),
   );
@@ -434,11 +457,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             };
             // 固定費行 (committed に monthly_spent 無し) の年間実測 = Σ(monthly_amounts[m] ?? monthly_amount)。
             // 本部 rowYearSpent の固定費分岐と同等。
+            // #1 修正: 12ヶ月全合算 (常に満額) をやめ、classifyMonth が past/current の月だけ合算
+            //   (将来月は不算入)。カテゴリ行 (monthly_spent ベース) と同じ「現在の進捗で進む」挙動に揃える。
             const lineYearSpent = (l) => {
               if (l?.row_type === "fixed_cost") {
                 const ma = l.monthly_amounts; const base = Number(l.monthly_amount) || 0;
                 let s = 0;
                 for (let m = 1; m <= 12; m++) {
+                  if (classifyMonth(fyYear, m, msd, todayStr, startMonth) === "future") continue;
                   const v = ma ? (ma[m] ?? ma[String(m)]) : null;
                   s += (v != null ? Number(v) : base) || 0;
                 }
@@ -481,11 +507,13 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   <Bar budget={totalBudget} pct={tPct} color={tColor} height={6} />
                 </div>
 
-                {/* カテゴリ別 */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {cats.map((line) => {
+                {/* #1: 1 行分のバー描画 (固定費・カテゴリで共通)。actualFn で実測の出し方を切替。 */}
+                {(() => {
+                  // 固定費行 (displayLines 由来。actual は現在の進捗で進む lineYearSpent)。
+                  const fixedCosts = displayLines.filter((l) => l?.row_type === "fixed_cost" && !l?.archived);
+                  const renderBar = (line, actualFn) => {
                     const b = Number(line.target_value) || 0;
-                    const a = sumLineSpent(line);
+                    const a = actualFn(line) || 0;
                     const p = b > 0 ? Math.round((a / b) * 100) : 0;
                     const c = p >= 100 ? RED : p >= 80 ? GOLD : TEAL;
                     return (
@@ -497,8 +525,31 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                         <Bar budget={b} pct={p} color={c} />
                       </div>
                     );
-                  })}
-                </div>
+                  };
+                  return (
+                    <>
+                      {/* 固定費 (グルーピング小見出し付き。バーはカテゴリと共通) */}
+                      {fixedCosts.length > 0 && (
+                        <div data-pdf-unit="sum-fixed-group" style={{ marginBottom: 12 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_SECONDARY, marginBottom: 6 }}>固定費</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {fixedCosts.map((line) => renderBar(line, lineYearSpent))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* カテゴリ別 */}
+                      {cats.length > 0 && (
+                        <div data-pdf-unit="sum-cat-group">
+                          <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_SECONDARY, marginBottom: 6 }}>カテゴリ</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {cats.map((line) => renderBar(line, sumLineSpent))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </>
             );
           })()}
