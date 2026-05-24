@@ -51,8 +51,6 @@ export function AuthProvider({ children }) {
     async function loadProfile(userId) {
       // eslint-disable-next-line no-console
       console.log('[auth] loadProfile start', userId);
-      // 読み込み着手した userId を記録 (同一ユーザーの再発火で再取得しないため)。
-      loadedUserIdRef.current = userId;
       try {
         const q = supabase
           .from('profiles')
@@ -75,6 +73,11 @@ export function AuthProvider({ children }) {
         setApproved(data?.approved ?? null);
         setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
         setIncludeFixedExpenses(data?.include_fixed_expenses ?? true);
+        // #6 修正: 「取得成功時のみ」ロード済み userId を記録する。
+        //   こうすると失敗/タイムアウトしたロードは "未ロード" のまま残り、次の focus
+        //   再発火で再試行され、customerEditEnabled の false 張り付きが自己回復する。
+        //   成功後は同一ユーザーの再発火で onAuthStateChange が loadProfile を skip。
+        loadedUserIdRef.current = userId;
         // B-2: profile.msd が non-null かつ localStorage と異なるとき localStorage を上書き。
         // NULL は no-op (既存 localStorage の値を破壊しない、B-1 未実施ユーザー保護)。
         // Supabase = source of truth、ただし NULL は「未充填」として扱う。
