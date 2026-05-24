@@ -3,6 +3,7 @@ import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import { useLoans } from "../hooks/useLoans";
+import { useBudgets } from "../hooks/useBudgets";
 import { cycleStart, cycleEnd, getManagementStartDay } from "../utils/cycle";
 import { toDateStr } from "@shared/format";
 import {
@@ -24,6 +25,34 @@ function classifyMonth(year, m, msd, todayStr, startMonth = 1) {
   if (endStr < todayStr) return "past";
   if (startStr > todayStr) return "future";
   return "current";
+}
+
+// #2: 予算VS実績 (week_cat_budgets) を繰越票の将来月予算の入力元にする (本部とロジック統一)。
+//   useBudgets の weekCatBudgets は { '${year}-${cycleMonth}-w${weekNum}_${categoryId}': amount } の Record。
+//   指定カテゴリの cycle_month ごとに Σ(週) を取り、classifyMonth が future の月だけ返す。
+//   返り値: { [m(1-12)]: Σ(週) }。月対応は本部 deriveFutureWeekBudgetForCategory と同一。
+function deriveFutureWeekBudgetForCategory(weekCatRecord, categoryId, { fiscalYear, startMonth = 1, msd, todayStr }) {
+  const out = {};
+  if (!weekCatRecord || typeof weekCatRecord !== "object" || categoryId == null) return out;
+  const byMonth = {};
+  for (const key of Object.keys(weekCatRecord)) {
+    // key 形式: 'YYYY-CM-wWN_categoryId' (categoryId はハイフンを含みうるので末尾 greedy)。
+    const mt = key.match(/^(\d+)-(\d+)-w(\d+)_(.+)$/);
+    if (!mt) continue;
+    const year = Number(mt[1]);
+    const cm = Number(mt[2]);
+    const cid = mt[4];
+    if (String(cid) !== String(categoryId)) continue;
+    if (!(cm >= 1 && cm <= 12)) continue;
+    const cy = fiscalMonthCalendarYear(fiscalYear, startMonth, cm);
+    if (year !== cy) continue;
+    byMonth[cm] = (byMonth[cm] || 0) + (Number(weekCatRecord[key]) || 0);
+  }
+  for (const cmStr of Object.keys(byMonth)) {
+    const cm = Number(cmStr);
+    if (classifyMonth(fiscalYear, cm, msd, todayStr, startMonth) === "future") out[cm] = byMonth[cm];
+  }
+  return out;
 }
 
 // Phase 3 (固定費): loans (借入、useLoans の app-shape: label/amount) → 繰越票の固定費行。
@@ -121,6 +150,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // Phase 3 (固定費): データ源は loans (借入)。ログイン顧客の loans を購読 (auth ベース)。
   // 繰越票最上部にライブ生成行として描画する (committed_lines には含まれない)。
   const { loans } = useLoans();
+  // #2: 予算VS実績 (week_cat_budgets) を将来月予算の入力元にするため購読 (auth ベース)。
+  //   カテゴリ将来月セルを Σ(週) で上書き表示する (本部 resolveCell とロジック統一)。
+  const { weekCatBudgets } = useBudgets();
 
   // 横画面検出 (Rules of Hooks: 早期 return より前で呼ぶ)。
   // landscape のときだけ繰越票テーブルを全画面パネル化し、12ヶ月を横スクロール無しで表示する。
@@ -299,6 +331,24 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // 描画専用 (sortedLines は targetGrandTotal / 消化サマリーで従来どおり使用)。
   const fixedCostLines = buildFixedCostLines(loans);
   const displayLines = [...fixedCostLines, ...sortedLines];
+  // #2: カテゴリ×将来月の week_cat_budgets 由来 monthly_budget (Σ週)。{ categoryId → { m: Σ週 } }。
+  //   committed の将来月セルより優先して表示する (本部の resolveCell と挙動を揃える)。
+  const weekBudgetByCat = {};
+  for (const line of sortedLines) {
+    if (line?.row_type === "category" && line?.category_id) {
+      weekBudgetByCat[line.category_id] = deriveFutureWeekBudgetForCategory(
+        weekCatBudgets, line.category_id, { fiscalYear: fyYear, startMonth, msd, todayStr },
+      );
+    }
+  }
+  // committed セル解決 (resolveCell) の上に、カテゴリ将来月だけ週予算 Σ を被せる表示用リゾルバ。
+  const resolveCellDisplay = (line, m) => {
+    if (line?.row_type === "category" && line?.category_id) {
+      const wb = weekBudgetByCat[line.category_id];
+      if (wb && wb[m] != null) return wb[m];
+    }
+    return resolveCell(line, m);
+  };
   const totalsMonthly = data.committed_totals?.monthly || {};
   const grandTotal = data.committed_totals?.grandTotal ?? null;
   // 月合計行の目標列 = 全 line の target_value 合計 (= 年間目標合計)。
@@ -395,7 +445,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                       ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}` }
                       : cellStyle}
                     title={(isMonthSettled(m) && !isFixed) ? "この月は確定済 (凍結実測)" : undefined}
-                  >{fmtCell(resolveCell(line, m))}</td>
+                  >{fmtCell(resolveCellDisplay(line, m))}</td>
                 ))}
                 <td style={{ ...cellStyle, fontWeight: 700, color: line?.target_value == null ? TEXT_MUTED : GOLD }}>
                   {fmtCell(line?.target_value)}
