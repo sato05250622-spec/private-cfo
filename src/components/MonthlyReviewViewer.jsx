@@ -30,6 +30,70 @@ function formatVarianceRatio(budget, actual) {
   return { text: `(${(Math.abs(r) * 100).toFixed(1)}%)`, color: TEAL };
 }
 
+// #5: 本部 computeGroupSums 相当 (別リポのため再実装)。group ごとに配下 leaf の
+//   budget/actual を再帰合算した Map<groupId, {budget, actual}> を返す。
+function computeGroupSums(lines) {
+  const arr = Array.isArray(lines) ? lines : [];
+  const childrenOf = new Map();
+  for (const l of arr) {
+    const pid = l?.parent_id ?? null;
+    if (!childrenOf.has(pid)) childrenOf.set(pid, []);
+    childrenOf.get(pid).push(l);
+  }
+  const sums = new Map();
+  const sumOf = (line) => {
+    if (line?.type !== "group") {
+      return { budget: Number(line?.budget) || 0, actual: Number(line?.actual) || 0 };
+    }
+    let b = 0, a = 0;
+    for (const c of (childrenOf.get(line.id) || [])) {
+      const s = sumOf(c);
+      b += s.budget; a += s.actual;
+    }
+    const result = { budget: b, actual: a };
+    sums.set(line.id, result);
+    return result;
+  };
+  for (const l of arr) if (l?.type === "group") sumOf(l);
+  return sums;
+}
+
+// #5/#6: ソートキー用の budget/actual (group は子合計 sums、leaf は自身値)。
+function rowBudgetActual(line, sums) {
+  if (line?.type === "group") {
+    const s = sums?.get(line.id);
+    return { budget: Number(s?.budget) || 0, actual: Number(s?.actual) || 0 };
+  }
+  return { budget: Number(line?.budget) || 0, actual: Number(line?.actual) || 0 };
+}
+
+// #6: 同 parent の兄弟を sortMode で並べ替える (表示専用、committed は不変)。本部 sortedSiblings 準拠。
+//   'manual'=display_order 昇順 / 'overpct'=超過率降順(予算≤0は末尾) / 'amount'=当月金額降順。
+//   「その他(未分類)」(display_order 9999) は全モード末尾固定。
+function sortedSiblings(lines, parentId, sortMode, sums) {
+  const sibs = (lines || []).filter((l) => (l?.parent_id ?? null) === (parentId ?? null));
+  const byOrder = (a, b) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0);
+  if (sortMode === "manual") return sibs.sort(byOrder);
+  const isOther = (l) => Number(l?.display_order) === 9999 || l?._readOnlyRow === true || l?.id === "__other_uncategorized__";
+  const ratioKey = (l) => {
+    const { budget, actual } = rowBudgetActual(l, sums);
+    return budget <= 0 ? null : (actual - budget) / budget;
+  };
+  return sibs.slice().sort((a, b) => {
+    const ao = isOther(a), bo = isOther(b);
+    if (ao !== bo) return ao ? 1 : -1;
+    if (ao && bo) return byOrder(a, b);
+    if (sortMode === "amount") {
+      return rowBudgetActual(b, sums).actual - rowBudgetActual(a, sums).actual;
+    }
+    const ra = ratioKey(a), rb = ratioKey(b);
+    if (ra == null && rb == null) return byOrder(a, b);
+    if (ra == null) return 1;
+    if (rb == null) return -1;
+    return rb - ra;
+  });
+}
+
 // 既存 App.jsx「準備中」カードと見た目完全一致のステータスカード。
 // loading / 未公開 / 該当無し / 取得失敗 のいずれでも親に null を返さず
 // この自己完結カードを表示する。
@@ -96,6 +160,8 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // #6: 明細ソートモード (表示専用)。'manual'/'overpct'/'amount'。既定は手動。
+  const [sortMode, setSortMode] = useState("manual");
 
   useEffect(() => {
     let mounted = true;
@@ -156,44 +222,74 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
         <Section label="📌 次回アクションコメント" value={data.next_action_comment} />
         <Section label="🗒 担当者コメント" value={data.staff_comment} />
 
-        {/* 明細テーブル */}
+        {/* 明細テーブル (#5: ツリー表示 + #6: 表示専用ソート) */}
         {lines.length > 0 && (
-          <div style={{ marginTop: 4, overflowX: "auto" }}>
-            <div style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 700, marginBottom: 4 }}>📊 明細</div>
-            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 400 }}>
-              <thead>
-                <tr>
-                  <th style={{ ...cellStyle, textAlign: "left", color: GOLD, fontWeight: 700, background: NAVY3 }}>項目</th>
-                  <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3 }}>予算</th>
-                  <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3 }}>当月金額</th>
-                  <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3 }}>予算比</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((line, i) => {
-                  const isGroup = line?.type === "group";
-                  // group は子合計を持たないケースがあるため自身の budget/actual で算出 (本部も leaf 基準)。
-                  const vr = isGroup ? null : formatVarianceRatio(line?.budget, line?.actual);
-                  const reason = !isGroup && line?.variance_reason ? String(line.variance_reason).trim() : "";
+          <div style={{ marginTop: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 700 }}>📊 明細</div>
+              {/* #6: 並び替えトグル (表示専用、手動/予算超過%順/金額順) */}
+              <div style={{ display: "inline-flex", background: NAVY2, border: `1px solid ${BORDER}`, borderRadius: 999, padding: 2 }}>
+                {[["manual", "手動"], ["overpct", "超過%"], ["amount", "金額"]].map(([mode, label]) => {
+                  const active = sortMode === mode;
                   return (
-                    <tr key={line?.id || i} style={{ background: isGroup ? "rgba(212,168,67,0.06)" : "transparent" }}>
-                      <td style={{ ...cellStyle, fontWeight: isGroup ? 700 : 400 }}>
-                        {isGroup ? "📁 " : ""}{line?.label || "(無題)"}
-                        {/* 差異理由: 5列化を避け項目名の下にサブ表示 (空なら出さない) */}
-                        {reason && (
-                          <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 2, fontWeight: 400 }}>↳ {reason}</div>
-                        )}
-                      </td>
-                      <td style={{ ...cellStyle, textAlign: "right" }}>{fmtNum(line?.budget)}</td>
-                      <td style={{ ...cellStyle, textAlign: "right" }}>{fmtNum(line?.actual)}</td>
-                      <td style={{ ...cellStyle, textAlign: "right", color: vr ? vr.color : TEXT_MUTED, fontWeight: 600 }}>
-                        {vr ? vr.text : "—"}
-                      </td>
-                    </tr>
+                    <button key={mode} onClick={() => setSortMode(mode)}
+                      style={{
+                        border: "none", cursor: "pointer", borderRadius: 999,
+                        padding: "3px 9px", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap",
+                        background: active ? GOLD : "transparent",
+                        color: active ? NAVY2 : TEXT_SECONDARY,
+                      }}>{label}</button>
                   );
                 })}
-              </tbody>
-            </table>
+              </div>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 360 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...cellStyle, textAlign: "left", color: GOLD, fontWeight: 700, background: NAVY3 }}>項目</th>
+                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3 }}>予算</th>
+                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3 }}>当月金額</th>
+                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3 }}>予算比</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    // #5/#6: parent_id ツリーを depth 優先で再帰描画。各階層の兄弟を sortMode でソート。
+                    const sums = computeGroupSums(lines);
+                    const renderRows = (parentId, depth) => {
+                      const rows = [];
+                      for (const line of sortedSiblings(lines, parentId, sortMode, sums)) {
+                        const isGroup = line?.type === "group";
+                        // group は子合計 (sums)、leaf は自身値。予算比は両方で算出 (本部 LineRow 準拠)。
+                        const { budget, actual } = rowBudgetActual(line, sums);
+                        const vr = formatVarianceRatio(budget, actual);
+                        const reason = !isGroup && line?.variance_reason ? String(line.variance_reason).trim() : "";
+                        rows.push(
+                          <tr key={line?.id || `${parentId}-${depth}-${rows.length}`} style={{ background: isGroup ? "rgba(212,168,67,0.06)" : "transparent" }}>
+                            <td style={{ ...cellStyle, fontWeight: isGroup ? 700 : 400, paddingLeft: 8 + depth * 10 }}>
+                              {isGroup ? "📁 " : ""}{line?.label || "(無題)"}
+                              {/* 差異理由: 列を増やさず項目名の下にサブ表示 (空なら出さない) */}
+                              {reason && (
+                                <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 2, fontWeight: 400 }}>↳ {reason}</div>
+                              )}
+                            </td>
+                            <td style={{ ...cellStyle, textAlign: "right" }}>{fmtNum(budget)}</td>
+                            <td style={{ ...cellStyle, textAlign: "right" }}>{fmtNum(actual)}</td>
+                            <td style={{ ...cellStyle, textAlign: "right", color: vr ? vr.color : TEXT_MUTED, fontWeight: 600 }}>
+                              {vr ? vr.text : "—"}
+                            </td>
+                          </tr>,
+                        );
+                        if (isGroup) rows.push(...renderRows(line.id, depth + 1));
+                      }
+                      return rows;
+                    };
+                    return renderRows(null, 0);
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
