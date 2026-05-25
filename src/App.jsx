@@ -226,6 +226,9 @@ function useLocalStorage(key, initialValue) {
 
 export default function App() {
   const [tab, setTab] = useState("daily");
+  // #11: 月間サマリーで固定費(loans)を合算するか。'split'(分ける=既定/カテゴリのみ) / 'incl'(込み)。
+  //   localStorage 'monthly_fixedCostMode' で永続 (本部アプリとは別キー)。
+  const [fixedCostMode, setFixedCostMode] = useLocalStorage("monthly_fixedCostMode", "split");
   const {
     expenses: transactions,
     addExpense,
@@ -1410,6 +1413,17 @@ export default function App() {
   const renderMonthly = () => {
     const {y,m}=reportMonth;
     const rBudget=getEffectiveMonthBudget(y,m);
+    // #11: 当月の固定費合計 = Σ loans ( monthlyAmounts[cycleMonth(m+1)] ?? amount )。
+    //   「込み」のとき予算・実績の両方に同額加算 (固定費=確定債務)。残=budget−spent で「分ける」と同値。
+    const inclFixed = fixedCostMode === 'incl';
+    const fixedCostMonthTotal = loans.reduce((s, l) => {
+      const ma = l?.monthlyAmounts;
+      const mv = ma ? (ma[m + 1] ?? ma[String(m + 1)]) : null;
+      const amt = mv != null ? Number(mv) : (Number(l?.amount) || 0);
+      return s + (Number(amt) || 0);
+    }, 0);
+    const dispBudget = inclFixed ? rBudget + fixedCostMonthTotal : rBudget;
+    const dispSpent  = inclFixed ? reportExpense + fixedCostMonthTotal : reportExpense;
     return (
       <div>
         <div style={{display:"flex",alignItems:"center",padding:"8px 14px",background:CARD_BG}}>
@@ -1446,7 +1460,19 @@ export default function App() {
               </div>
             </div>
             {progressTab === "budget" ? (<>
-            <SummaryBar spent={reportExpense} budget={rBudget} remain={rBudget-reportExpense} labelBudget="月の予算" labelSpent="月の支出" labelRemain="月の残予算"/>
+            {/* #11: 固定費 込み/分ける トグル (pill型・SummaryBar 直上)。'split'=既定(カテゴリのみ)。 */}
+            <div style={{padding:"0 14px 8px",background:CARD_BG}}>
+              <div style={{display:"inline-flex",background:NAVY3,border:`1px solid ${BORDER}`,borderRadius:999,padding:2}}>
+                {[["split","固定費分ける"],["incl","固定費込み"]].map(([mode,label])=>{
+                  const active=fixedCostMode===mode;
+                  return (
+                    <button key={mode} onClick={()=>setFixedCostMode(mode)}
+                      style={{border:"none",cursor:"pointer",borderRadius:999,padding:"4px 12px",fontSize:11,fontWeight:700,whiteSpace:"nowrap",background:active?GOLD:"transparent",color:active?NAVY:TEXT_SECONDARY}}>{label}</button>
+                  );
+                })}
+              </div>
+            </div>
+            <SummaryBar spent={dispSpent} budget={dispBudget} remain={dispBudget-dispSpent} labelBudget={inclFixed?"月の予算 (固定費込)":"月の予算"} labelSpent={inclFixed?"月の支出 (固定費込)":"月の支出"} labelRemain="月の残予算"/>
 
             {/* ★ 円グラフはそのまま維持 */}
             {catBreakdown.length>0&&(
