@@ -11,6 +11,9 @@ import {
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 } from "@shared/theme";
 
+// #2修正: 予算セルの数字色 (本部 AnnualBudgetTab の BLUE と統一)。実測セルは TEXT_PRIMARY (白系)。
+const BUDGET_BLUE = "#5BA8FF";
+
 // #1: 固定費の年間消化を「現在の進捗で進める」ため、本部 annualBudgetSheet.js の
 // classifyMonth / fiscalMonthCalendarYear と同一ロジックを顧客側に再実装 (別リポのため)。
 // 月 m (年度内) が past/current/future のどれかを msd 基準サイクルで判定する。
@@ -27,10 +30,10 @@ function classifyMonth(year, m, msd, todayStr, startMonth = 1) {
   return "current";
 }
 
-// #2: 予算VS実績 (week_cat_budgets) を繰越票の将来月予算の入力元にする (本部とロジック統一)。
+// #2: 予算VS実績 (week_cat_budgets) を繰越票の月予算の入力元にする (本部とロジック統一)。
 //   useBudgets の weekCatBudgets は { '${year}-${cycleMonth}-w${weekNum}_${categoryId}': amount } の Record。
-//   指定カテゴリの cycle_month ごとに Σ(週) を取り、classifyMonth が future の月だけ返す。
-//   返り値: { [m(1-12)]: Σ(週) }。月対応は本部 deriveFutureWeekBudgetForCategory と同一。
+//   指定カテゴリの cycle_month ごとに Σ(週) を取り、classifyMonth が current/future の月を返す。
+//   返り値: { [m(1-12)]: Σ(週) }。月対応・対象月とも本部 deriveFutureWeekBudgetForCategory と同一。
 function deriveFutureWeekBudgetForCategory(weekCatRecord, categoryId, { fiscalYear, startMonth = 1, msd, todayStr }) {
   const out = {};
   if (!weekCatRecord || typeof weekCatRecord !== "object" || categoryId == null) return out;
@@ -50,7 +53,8 @@ function deriveFutureWeekBudgetForCategory(weekCatRecord, categoryId, { fiscalYe
   }
   for (const cmStr of Object.keys(byMonth)) {
     const cm = Number(cmStr);
-    if (classifyMonth(fiscalYear, cm, msd, todayStr, startMonth) === "future") out[cm] = byMonth[cm];
+    const cls = classifyMonth(fiscalYear, cm, msd, todayStr, startMonth);
+    if (cls === "future" || cls === "current") out[cm] = byMonth[cm];
   }
   return out;
 }
@@ -341,13 +345,34 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       );
     }
   }
-  // committed セル解決 (resolveCell) の上に、カテゴリ将来月だけ週予算 Σ を被せる表示用リゾルバ。
+  // committed セル解決 (resolveCell) の上に、カテゴリの「当月＋将来月」は週予算 Σ を被せる
+  // 表示用リゾルバ。返り値 { value, kind }。kind で色分け (budget=青 / actual=白)。
+  //   - 過去月: committed の実測表示 (actual)。
+  //   - 将来月: 週予算ライブ (budget)。無ければ committed (budget)。
+  //   - 当月: committed の実測 (monthly_spent あり) があれば実測表示、無ければ週予算 (budget)。
+  //     ※ 本部はライブ expenses で判定するが、顧客 viewer は committed の monthly_spent を
+  //       実測有無の根拠にする (反映後に整合。反映前の当月実測は次回反映で反映)。
   const resolveCellDisplay = (line, m) => {
     if (line?.row_type === "category" && line?.category_id) {
       const wb = weekBudgetByCat[line.category_id];
-      if (wb && wb[m] != null) return wb[m];
+      const liveBudget = wb && wb[m] != null ? wb[m] : null;
+      const committedVal = resolveCell(line, m);
+      const cls = classifyMonth(fyYear, m, msd, todayStr, startMonth);
+      if (cls === "current") {
+        const spent = pickMonth(line?.monthly_spent, m);
+        if (spent != null) return { value: committedVal != null ? committedVal : spent, kind: "actual" };
+        if (liveBudget != null) return { value: liveBudget, kind: "budget" };
+        return { value: committedVal, kind: committedVal != null ? "actual" : "none" };
+      }
+      if (cls === "future") {
+        if (liveBudget != null) return { value: liveBudget, kind: "budget" };
+        return { value: committedVal, kind: committedVal != null ? "budget" : "none" };
+      }
+      // past
+      return { value: committedVal, kind: committedVal != null ? "actual" : "none" };
     }
-    return resolveCell(line, m);
+    const v = resolveCell(line, m);
+    return { value: v, kind: v != null ? "actual" : "none" };
   };
   const totalsMonthly = data.committed_totals?.monthly || {};
   const grandTotal = data.committed_totals?.grandTotal ?? null;
@@ -439,14 +464,25 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 >
                   {line?.category_name || "(無題)"}
                 </td>
-                {monthOrder.map((m) => (
-                  <td key={m}
-                    style={(isMonthSettled(m) && !isFixed)
-                      ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}` }
-                      : cellStyle}
-                    title={(isMonthSettled(m) && !isFixed) ? "この月は確定済 (凍結実測)" : undefined}
-                  >{fmtCell(resolveCellDisplay(line, m))}</td>
-                ))}
+                {monthOrder.map((m) => {
+                  const cell = resolveCellDisplay(line, m);
+                  const settledCell = isMonthSettled(m) && !isFixed;
+                  // #2修正 数字色: 予算=青 (BUDGET_BLUE)、実測=白系 (TEXT_PRIMARY)。
+                  //   確定月は赤背景を維持し、文字は実測扱い(白)。値なしは TEXT_MUTED。
+                  const numColor = cell.value == null ? TEXT_MUTED
+                    : cell.kind === "budget" ? BUDGET_BLUE
+                    : TEXT_PRIMARY;
+                  return (
+                    <td key={m}
+                      style={settledCell
+                        ? { ...cellStyle, color: numColor, background: `${RED}1A`, border: `1px solid ${RED}` }
+                        : { ...cellStyle, color: numColor }}
+                      title={settledCell ? "この月は確定済 (凍結実測)"
+                        : cell.kind === "budget" ? "予算 (予算VS実績の週予算合計)"
+                        : undefined}
+                    >{fmtCell(cell.value)}</td>
+                  );
+                })}
                 <td style={{ ...cellStyle, fontWeight: 700, color: line?.target_value == null ? TEXT_MUTED : GOLD }}>
                   {fmtCell(line?.target_value)}
                 </td>
