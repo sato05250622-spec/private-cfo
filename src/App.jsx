@@ -31,7 +31,9 @@ import SortableCategoryRow from "./components/SortableCategoryRow";
 import SortablePaymentRow from "./components/SortablePaymentRow";
 import AnnualBudgetViewer from "./components/AnnualBudgetViewer";
 import MonthlyReviewViewer from "./components/MonthlyReviewViewer";
+import MonthDialPicker from "./components/MonthDialPicker";
 import ReportTabs from "./components/ReportTabs";
+import { listPublishedByClient } from "./lib/api/monthlyReviews";
 import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
 import { useAnnualBudgets } from "./hooks/useAnnualBudgets";
@@ -460,6 +462,13 @@ export default function App() {
   const [editingLoanId, setEditingLoanId] = useState(null);
   const [loanDraft, setLoanDraft] = useState({label:"",amount:"",bank:"",withdrawalDay:"",pmId:""});
   const [reportSearchQuery, setReportSearchQuery] = useState("");
+  // #2+#3: 月次レポートの表示月 (暦年月、初期=当月)。ダイヤルピッカーで切替。
+  const [mrMonth, setMrMonth] = useState(() => ({ y: today.getFullYear(), m: today.getMonth() + 1 }));
+  // #2+#3: ダイヤルの月候補 (昇順 [{y,m,label}])。最古の公開済みレビュー月〜当月。0件なら当月のみ。
+  const [mrMonths, setMrMonths] = useState(() => {
+    const y = today.getFullYear(), m = today.getMonth() + 1;
+    return [{ y, m, label: `${y}年${m}月` }];
+  });
   const { balance: userPoints, history: pointHistory } = usePoints();
   const { body: telopBody } = useLatestTelop();
   const telopText = telopBody ?? FALLBACK_TELOP;
@@ -469,6 +478,38 @@ export default function App() {
   const [dayCalcInput, setDayCalcInput] = useState("");
   const [editingPaymentId, setEditingPaymentId] = useState(null);
   const longPressTimer = useRef(null);
+
+  // #2+#3: 公開済み月次レビューを取得し、ダイヤルの月候補 [最古公開月 〜 当月] を構築。
+  //   listPublishedByClient は year/month DESC で全件 → 末尾が最古。0件なら当月のみ。
+  useEffect(() => {
+    if (!authUserId) return;
+    let alive = true;
+    listPublishedByClient(authUserId)
+      .then((rows) => {
+        if (!alive) return;
+        const curY = today.getFullYear(), curM = today.getMonth() + 1;
+        let oy = curY, om = curM;
+        if (Array.isArray(rows) && rows.length > 0) {
+          const oldest = rows[rows.length - 1]; // DESC のため末尾が最古
+          const ry = Number(oldest?.year), rm = Number(oldest?.month);
+          // 最古が当月より過去のときだけ下限に採用 (未来月は無視)。
+          if (Number.isFinite(ry) && Number.isFinite(rm) && (ry < curY || (ry === curY && rm < curM))) {
+            oy = ry; om = rm;
+          }
+        }
+        // 最古 → 当月 の連続月配列 (昇順)。
+        const out = [];
+        let y = oy, m = om;
+        while (y < curY || (y === curY && m <= curM)) {
+          out.push({ y, m, label: `${y}年${m}月` });
+          m += 1; if (m > 12) { m = 1; y += 1; }
+          if (out.length > 240) break; // 安全弁
+        }
+        setMrMonths(out.length > 0 ? out : [{ y: curY, m: curM, label: `${curY}年${curM}月` }]);
+      })
+      .catch((e) => { console.error("[mrMonths]", e); });
+    return () => { alive = false; };
+  }, [authUserId]);
 
   // today が属するサイクルの year/month と日付範囲。
   // 月予算キー / "今月" 判定 / 月別サマリ等、today を起点にした計算は全てここを通す。
@@ -2290,21 +2331,29 @@ export default function App() {
     );
 
     if(menuScreen==="currentMonthReport"){
-      // 今日が属するサイクルの y / 1-indexed month を表示用に取得。
-      const y=todayCycle.year, m=todayCycle.month+1;
-      // 月次レビューは暦年月で照合する (monthly_reviews は admin が暦年月で作成)。
-      const now=new Date();
+      // #2+#3: 月次レポートを「ダイヤル付き1画面」に統合。表示月は mrMonth (state)。
+      //   予算タブは年度ビューで月非依存のため、画面ヘッダは月を出さず「レポート」固定。
+      //   月見出し/選択は月次レビュー側 (ダイヤル) に持たせる。
       return(
         <div style={{minHeight:"100dvh",background:NAVY}}>
           <div style={S.overlayHeader}>
             <button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer",fontWeight:300}}>‹</button>
-            <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{y}年{m}月　レポート</span>
+            <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>レポート</span>
             <span style={{width:40}}/>
           </div>
           <div style={{margin:"16px 16px 0"}}>
             <ReportTabs
               viewer={<AnnualBudgetViewer clientId={authUserId} />}
-              review={<MonthlyReviewViewer clientId={authUserId} year={now.getFullYear()} month={now.getMonth()+1} />}
+              review={(
+                <div>
+                  {/* #2+#3: ダイヤル式 月ピッカー (月次レビューの表示月を選ぶ。予算タブには非表示) */}
+                  <div style={{fontSize:10,color:TEXT_MUTED,fontWeight:700,marginBottom:6,textAlign:"center"}}>
+                    月を選択（{mrMonth.y}年{mrMonth.m}月）
+                  </div>
+                  <MonthDialPicker months={mrMonths} value={mrMonth} onChange={setMrMonth} />
+                  <MonthlyReviewViewer clientId={authUserId} year={mrMonth.y} month={mrMonth.m} />
+                </div>
+              )}
             />
           </div>
           <div style={{height:20}}/>
@@ -2459,59 +2508,12 @@ export default function App() {
       );
     }
 
-    if(menuScreen==="monthlyReport") return(
-      <div style={{minHeight:"100dvh",background:NAVY,display:"flex",flexDirection:"column"}}>
-        <div style={S.overlayHeader}><button onClick={()=>{setMenuScreen("main");setReportSearchQuery("");}} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>月別レポート</span><span style={{width:40}}/></div>
-        <div style={{padding:"10px 16px",background:NAVY2,borderBottom:`1px solid ${BORDER}`}}>
-          <div style={{display:"flex",alignItems:"center",background:NAVY3,borderRadius:10,padding:"8px 14px",gap:8,border:`1px solid ${BORDER}`}}>
-            <span style={{fontSize:13,color:TEXT_MUTED}}>🔍</span>
-            <input value={reportSearchQuery} onChange={e=>setReportSearchQuery(e.target.value)} placeholder="例：2026年4月" style={{flex:1,border:"none",background:"transparent",fontSize:14,outline:"none",color:TEXT_PRIMARY}}/>
-            {reportSearchQuery&&<button onClick={()=>setReportSearchQuery("")} style={{background:"none",border:"none",color:TEXT_MUTED,cursor:"pointer",fontSize:14}}>✕</button>}
-          </div>
-        </div>
-        <div style={{flex:1,overflowY:"auto"}}>
-          <div style={{margin:"8px 16px",background:CARD_BG,borderRadius:12,overflow:"hidden",border:`1px solid ${BORDER}`}}>
-            {(()=>{
-              const currentY=today.getFullYear();
-              const allMonths=[];
-              for(let y=2026;y<=currentY+1;y++){for(let m=(y===2026?7:1);m<=12;m++){allMonths.push({y,m,label:`${y}年${m}月`});}}
-              const filtered=reportSearchQuery?allMonths.filter(({label})=>label.includes(reportSearchQuery)):allMonths;
-              return filtered.length===0
-                ? <div style={{padding:"24px",textAlign:"center",fontSize:12,color:TEXT_MUTED}}>該当する月がありません</div>
-                : filtered.map(({y,m,label},i)=>(
-                  <div key={label} onClick={()=>setMenuScreen(`report_${y}_${m}`)} style={{display:"flex",alignItems:"center",padding:"10px 16px",borderBottom:i<filtered.length-1?`1px solid ${BORDER}`:"none",cursor:"pointer",gap:10}}>
-                    <div style={{width:6,height:6,borderRadius:"50%",background:y===todayCycle.year&&m===todayCycle.month+1?GOLD:BORDER,flexShrink:0}}/>
-                    <span style={{flex:1,fontSize:13,fontWeight:y===todayCycle.year&&m===todayCycle.month+1?600:400,color:y===todayCycle.year&&m===todayCycle.month+1?TEXT_PRIMARY:TEXT_SECONDARY}}>{label}</span>
-                    {y===todayCycle.year&&m===todayCycle.month+1&&<span style={{fontSize:9,color:GOLD,background:`${GOLD}18`,borderRadius:6,padding:"2px 6px",fontWeight:600}}>今月</span>}
-                    <span style={{color:TEXT_MUTED,fontSize:12}}>›</span>
-                  </div>
-                ));
-            })()}
-          </div>
-          <div style={{height:20}}/>
-        </div>
-      </div>
-    );
-
-    if(menuScreen&&menuScreen.startsWith("report_")){
-      const parts=menuScreen.split("_");const ry=Number(parts[1]);const rm=Number(parts[2]);
-      return(
-        <div style={{minHeight:"100dvh",background:NAVY}}>
-          <div style={S.overlayHeader}><button onClick={()=>setMenuScreen("monthlyReport")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>{ry}年{rm}月　レポート</span><span style={{width:40}}/></div>
-          <div style={{margin:"16px 16px 0"}}>
-            <ReportTabs
-              viewer={<AnnualBudgetViewer clientId={authUserId} />}
-              review={<MonthlyReviewViewer clientId={authUserId} year={ry} month={rm} />}
-            />
-          </div>
-          <div style={{height:20}}/>
-        </div>
-      );
-    }
+    // #2+#3: monthlyReport (月リスト) / report_{y}_{m} (個別月) は currentMonthReport の
+    //   ダイヤル統合により廃止。導線は currentMonthReport に向け直し済 (下の menuGroups)。
 
     const menuGroups=[[
       {icon:"📊",label:"当月レポート",action:()=>setMenuScreen("currentMonthReport")},
-      {icon:"📋",label:"月別レポート",action:()=>setMenuScreen("monthlyReport")},
+      {icon:"📋",label:"月別レポート",action:()=>setMenuScreen("currentMonthReport")},
       {icon:"🤝",label:"面談予定",action:()=>setMenuScreen("appointment")},
     ]];
     const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"固定費",action:()=>setMenuScreen("loanSetting")}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
