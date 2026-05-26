@@ -2,8 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
+import { listFiscalYearsByClient } from "../lib/api/annualBudgets";
 import { useLoans } from "../hooks/useLoans";
 import { useBudgets } from "../hooks/useBudgets";
+import { DialPicker } from "./MonthDialPicker";
 import { cycleStart, cycleEnd, getManagementStartDay } from "../utils/cycle";
 import { toDateStr } from "@shared/format";
 import {
@@ -148,9 +150,21 @@ function StatusCard({ message, showBadge }) {
 }
 
 export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
-  // fiscalYear は予約 prop (現状 API は最新年度のみ)。明示参照して lint 回避。
+  // fiscalYear は予約 prop (現状は未使用、年度ダイヤルで上書き制御)。明示参照して lint 回避。
   void fiscalYear;
-  const { data, loading, error } = useAnnualBudgets(clientId);
+  // ③: 表示年度 (null = 最新年度)。年度ダイヤルで切替。
+  const [selectedYear, setSelectedYear] = useState(null);
+  // ③: 確定済み年度の一覧 (DESC)。年度ダイヤルの候補。
+  const [fiscalYears, setFiscalYears] = useState([]);
+  const { data, loading, error } = useAnnualBudgets(clientId, selectedYear);
+  useEffect(() => {
+    let alive = true;
+    if (!clientId) { setFiscalYears([]); return undefined; }
+    listFiscalYearsByClient(clientId)
+      .then((ys) => { if (alive) setFiscalYears(Array.isArray(ys) ? ys : []); })
+      .catch((e) => { console.error("[fiscalYears]", e); if (alive) setFiscalYears([]); });
+    return () => { alive = false; };
+  }, [clientId]);
   // Phase 3 (固定費): データ源は loans (借入)。ログイン顧客の loans を購読 (auth ベース)。
   // 繰越票最上部にライブ生成行として描画する (committed_lines には含まれない)。
   const { loans } = useLoans();
@@ -435,6 +449,20 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           📄 PDF
         </button>
       </div>
+      {/* ③: 年度ダイヤル (確定済み年度が 2 件以上のときのみ表示。PDF には出さない) */}
+      {fiscalYears.length > 1 && (
+        <div className="no-print" style={{ padding: "10px 16px 0" }}>
+          <div style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 700, textAlign: "center", marginBottom: 4 }}>
+            年度を選択（{(selectedYear ?? Number(data.fiscal_year))}年度）
+          </div>
+          <DialPicker
+            items={fiscalYears.map((y) => ({ key: y, label: `${y}年度` }))}
+            value={selectedYear ?? Number(data.fiscal_year)}
+            onChange={(y) => setSelectedYear(Number(y))}
+            width={160}
+          />
+        </div>
+      )}
       <div className="annual-pdf-scroll" style={{ overflowX: "auto" }}>
         <table style={tableStyle}>
           <thead>

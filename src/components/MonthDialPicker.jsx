@@ -2,68 +2,66 @@ import { useEffect, useRef } from "react";
 import { GOLD, NAVY2, BORDER, TEXT_MUTED } from "@shared/theme";
 
 // =============================================================
-// MonthDialPicker — iOS 風の縦スクロール・ホイール月ピッカー (顧客アプリ・モバイル前提)。
-//   CSS scroll-snap (y mandatory) で各月セルが中央にスナップ。中央のセル = 選択月。
+// DialPicker — iOS 風の縦スクロール・ホイール（汎用）。
+//   CSS scroll-snap (y mandatory) で各セルが中央にスナップ。中央のセル = 選択値。
+//   ⑤: 以前より細く・コンパクトに (ITEM_H 38→28、横幅は maxWidth で絞る)。
 //
-// props:
-//   - months: [{ y, m, label }]  古い順 (昇順) で渡す想定。先頭=最古、末尾=当月。
-//   - value:  { y, m }           現在の選択月。
-//   - onChange({ y, m })         スクロール停止 / タップで選択月が変わったとき。
+// props (汎用):
+//   - items: [{ key, label }]   昇順で渡す想定。key は一意 (文字列/数値)。
+//   - value: key                現在の選択キー。
+//   - onChange(key)             スクロール停止 / タップで選択が変わったとき。
+//   - width: number             最大横幅 (px、既定 200)。
 //
-// 幾何: VISIBLE 個 (奇数) を表示、各セル ITEM_H。上下に PAD のスペーサを置き、
-//   セルは scroll-snap-align:center。これで「中央セル中心 = スクロールポート中心」が
-//   scrollTop = index*ITEM_H にぴったり一致する (PAD と H/2 が相殺)。
-//   index = round(scrollTop / ITEM_H)。
+// 幾何: VISIBLE 個 (奇数) を表示、各セル ITEM_H。上下に PAD スペーサ + セル
+//   scroll-snap-align:center で「中央セル中心 = スクロールポート中心」が
+//   scrollTop = index*ITEM_H に一致 (index = round(scrollTop/ITEM_H))。
 // =============================================================
 
-const ITEM_H = 38;
-const VISIBLE = 5;                       // 奇数
+const ITEM_H = 28;                        // ⑤: 38 → 28 に縮小
+const VISIBLE = 5;                        // 奇数 (据え置き)
 const PAD = ((VISIBLE - 1) / 2) * ITEM_H; // 上下スペーサ
 
-export default function MonthDialPicker({ months = [], value, onChange }) {
+export function DialPicker({ items = [], value, onChange, width = 200 }) {
   const ref = useRef(null);
   const timer = useRef(null);
 
-  const selectedIdx = Math.max(
-    0,
-    months.findIndex((mo) => mo.y === value?.y && mo.m === value?.m),
-  );
+  const selectedIdx = Math.max(0, items.findIndex((it) => it.key === value));
 
-  // value 変化 / 月候補変化で該当位置へスクロール (アニメ)。
+  // value 変化 / 候補変化で該当位置へスクロール (アニメ)。
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const idx = months.findIndex((mo) => mo.y === value?.y && mo.m === value?.m);
+    const idx = items.findIndex((it) => it.key === value);
     if (idx < 0) return;
-    // smooth だと連続変更で揺れるため、初期化系は instant、以降も誤差が出ないよう top 指定。
     el.scrollTo({ top: idx * ITEM_H, behavior: "smooth" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value?.y, value?.m, months.length]);
+  }, [value, items.length]);
 
   const handleScroll = () => {
     const el = ref.current;
     if (!el) return;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      const idx = Math.min(months.length - 1, Math.max(0, Math.round(el.scrollTop / ITEM_H)));
-      const mo = months[idx];
-      if (mo && (mo.y !== value?.y || mo.m !== value?.m)) onChange?.({ y: mo.y, m: mo.m });
+      const idx = Math.min(items.length - 1, Math.max(0, Math.round(el.scrollTop / ITEM_H)));
+      const it = items[idx];
+      if (it && it.key !== value) onChange?.(it.key);
     }, 120);
   };
 
   return (
     <div style={{
       position: "relative", height: VISIBLE * ITEM_H,
-      background: NAVY2, border: `1px solid ${BORDER}`, borderRadius: 12,
-      overflow: "hidden", marginBottom: 12,
+      width: "100%", maxWidth: width, margin: "0 auto 10px",
+      background: NAVY2, border: `1px solid ${BORDER}`, borderRadius: 10,
+      overflow: "hidden",
     }}>
       {/* 中央ハイライト帯 (選択位置) */}
       <div style={{
-        position: "absolute", top: PAD, left: 10, right: 10, height: ITEM_H,
+        position: "absolute", top: PAD, left: 8, right: 8, height: ITEM_H,
         borderTop: `1px solid ${GOLD}55`, borderBottom: `1px solid ${GOLD}55`,
-        background: `${GOLD}11`, borderRadius: 8, pointerEvents: "none", zIndex: 1,
+        background: `${GOLD}11`, borderRadius: 7, pointerEvents: "none", zIndex: 1,
       }} />
-      {/* 上下フェード (任意の見た目) */}
+      {/* 上下フェード */}
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: PAD, background: `linear-gradient(${NAVY2}, ${NAVY2}00)`, pointerEvents: "none", zIndex: 2 }} />
       <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: PAD, background: `linear-gradient(${NAVY2}00, ${NAVY2})`, pointerEvents: "none", zIndex: 2 }} />
 
@@ -77,28 +75,45 @@ export default function MonthDialPicker({ months = [], value, onChange }) {
         }}
       >
         <div style={{ height: PAD }} />
-        {months.map((mo, i) => {
+        {items.map((it, i) => {
           const active = i === selectedIdx;
           return (
             <div
-              key={`${mo.y}-${mo.m}`}
-              onClick={() => onChange?.({ y: mo.y, m: mo.m })}
+              key={it.key}
+              onClick={() => onChange?.(it.key)}
               style={{
                 height: ITEM_H, scrollSnapAlign: "center",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 cursor: "pointer", userSelect: "none",
-                fontSize: active ? 15 : 13,
+                fontSize: active ? 14 : 12,
                 fontWeight: active ? 700 : 500,
                 color: active ? GOLD : TEXT_MUTED,
                 transition: "color .15s, font-size .15s",
               }}
             >
-              {mo.label}
+              {it.label}
             </div>
           );
         })}
         <div style={{ height: PAD }} />
       </div>
     </div>
+  );
+}
+
+// 月ダイヤル (既存 API 維持: months=[{y,m,label}] / value={y,m} / onChange({y,m}))。
+// 内部は汎用 DialPicker に委譲 (key = "y-m")。
+export default function MonthDialPicker({ months = [], value, onChange }) {
+  const items = months.map((mo) => ({ key: `${mo.y}-${mo.m}`, label: mo.label }));
+  const valueKey = value ? `${value.y}-${value.m}` : null;
+  return (
+    <DialPicker
+      items={items}
+      value={valueKey}
+      onChange={(key) => {
+        const [y, m] = String(key).split("-").map(Number);
+        onChange?.({ y, m });
+      }}
+    />
   );
 }
