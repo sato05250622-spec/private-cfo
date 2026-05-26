@@ -462,8 +462,15 @@ export default function App() {
   const [editingLoanId, setEditingLoanId] = useState(null);
   const [loanDraft, setLoanDraft] = useState({label:"",amount:"",bank:"",withdrawalDay:"",pmId:""});
   const [reportSearchQuery, setReportSearchQuery] = useState("");
-  // #2+#3: 月次レポートの表示月 (暦年月、初期=当月)。ダイヤルピッカーで切替。
-  const [mrMonth, setMrMonth] = useState(() => ({ y: today.getFullYear(), m: today.getMonth() + 1 }));
+  // #2+#3/④: 月次レポートの表示月 (暦年月)。ダイヤルピッカーで切替。
+  //   初期は「先月」(当月の1ヶ月前、1月は前年12月)。候補レンジ外なら effect でクランプ。
+  const [mrMonth, setMrMonth] = useState(() => {
+    let y = today.getFullYear(), m = today.getMonth(); // getMonth()=当月0-indexed → そのまま先月の1-indexed候補
+    if (m < 1) { m = 12; y -= 1; }
+    return { y, m };
+  });
+  // ④: 初期選択 (先月クランプ) を1度だけ適用するための番兵。
+  const mrInitRef = useRef(false);
   // #2+#3: ダイヤルの月候補 (昇順 [{y,m,label}])。最古の公開済みレビュー月〜当月。0件なら当月のみ。
   const [mrMonths, setMrMonths] = useState(() => {
     const y = today.getFullYear(), m = today.getMonth() + 1;
@@ -505,7 +512,18 @@ export default function App() {
           m += 1; if (m > 12) { m = 1; y += 1; }
           if (out.length > 240) break; // 安全弁
         }
-        setMrMonths(out.length > 0 ? out : [{ y: curY, m: curM, label: `${curY}年${curM}月` }]);
+        const list = out.length > 0 ? out : [{ y: curY, m: curM, label: `${curY}年${curM}月` }];
+        setMrMonths(list);
+        // ④: 初回のみ、初期選択を「先月」にクランプ。先月が候補レンジ内ならそれを、
+        //    範囲外 (公開が当月分のみ等) なら最新 (= list 末尾 = 当月) を初期選択にする。
+        if (!mrInitRef.current) {
+          mrInitRef.current = true;
+          let py = curY, pm = curM - 1;
+          if (pm < 1) { pm = 12; py -= 1; }
+          const inRange = list.some((o) => o.y === py && o.m === pm);
+          const init = inRange ? { y: py, m: pm } : { y: list[list.length - 1].y, m: list[list.length - 1].m };
+          setMrMonth(init);
+        }
       })
       .catch((e) => { console.error("[mrMonths]", e); });
     return () => { alive = false; };
@@ -2512,8 +2530,7 @@ export default function App() {
     //   ダイヤル統合により廃止。導線は currentMonthReport に向け直し済 (下の menuGroups)。
 
     const menuGroups=[[
-      {icon:"📊",label:"当月レポート",action:()=>setMenuScreen("currentMonthReport")},
-      {icon:"📋",label:"月別レポート",action:()=>setMenuScreen("currentMonthReport")},
+      {icon:"📊",label:"レポート",action:()=>setMenuScreen("currentMonthReport")},
       {icon:"🤝",label:"面談予定",action:()=>setMenuScreen("appointment")},
     ]];
     const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"固定費",action:()=>setMenuScreen("loanSetting")}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
