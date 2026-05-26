@@ -162,6 +162,8 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
   const [error, setError] = useState(null);
   // #6: 明細ソートモード (表示専用)。'manual'/'overpct'/'amount'。既定は手動。
   const [sortMode, setSortMode] = useState("manual");
+  // ⑥: 旧フォーマット (振り返り/アドバイス/プラン) アコーディオン開閉 (本部準拠、既定 閉)。
+  const [legacyOpen, setLegacyOpen] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -215,14 +217,8 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
           {diag.label}
         </div>
 
-        {/* 本文セクション */}
-        <Section label="📝 今月の振り返り" value={data.summary} />
-        <Section label="💡 CFOからのアドバイス" value={data.advice} />
-        <Section label="🚀 来月のアクションプラン" value={data.next_month_plan} />
-        <Section label="📌 次回アクションコメント" value={data.next_action_comment} />
-        <Section label="🗒 担当者コメント" value={data.staff_comment} />
-
-        {/* 明細テーブル (#5: ツリー表示 + #6: 表示専用ソート) */}
+        {/* ⑥: 明細テーブル — 本部 LineRow と同じ 5 列 (項目/予算/当月金額/予算比/差異理由)。
+            ツリー(#5) + 表示専用ソート(#6) + 合計行(TotalsRow 相当)。閲覧専用 (編集列なし)。 */}
         {lines.length > 0 && (
           <div style={{ marginTop: 4 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
@@ -244,13 +240,14 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
               </div>
             </div>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 360 }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 560 }}>
                 <thead>
                   <tr>
-                    <th style={{ ...cellStyle, textAlign: "left", color: GOLD, fontWeight: 700, background: NAVY3 }}>項目</th>
-                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3 }}>予算</th>
-                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3 }}>当月金額</th>
-                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3 }}>予算比</th>
+                    <th style={{ ...cellStyle, textAlign: "left", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 130 }}>項目</th>
+                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 80 }}>予算</th>
+                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 80 }}>当月金額</th>
+                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 60 }}>予算比</th>
+                    <th style={{ ...cellStyle, textAlign: "left", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 130 }}>差異理由</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -264,20 +261,20 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
                         // group は子合計 (sums)、leaf は自身値。予算比は両方で算出 (本部 LineRow 準拠)。
                         const { budget, actual } = rowBudgetActual(line, sums);
                         const vr = formatVarianceRatio(budget, actual);
+                        // ⑥: 差異理由は独立列 (leaf のみ。group/合成行は "—")。本部 LineRow と同じ列構成。
                         const reason = !isGroup && line?.variance_reason ? String(line.variance_reason).trim() : "";
                         rows.push(
                           <tr key={line?.id || `${parentId}-${depth}-${rows.length}`} style={{ background: isGroup ? "rgba(212,168,67,0.06)" : "transparent" }}>
                             <td style={{ ...cellStyle, fontWeight: isGroup ? 700 : 400, paddingLeft: 8 + depth * 10 }}>
                               {isGroup ? "📁 " : ""}{line?.label || "(無題)"}
-                              {/* 差異理由: 列を増やさず項目名の下にサブ表示 (空なら出さない) */}
-                              {reason && (
-                                <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 2, fontWeight: 400 }}>↳ {reason}</div>
-                              )}
                             </td>
                             <td style={{ ...cellStyle, textAlign: "right" }}>{fmtNum(budget)}</td>
                             <td style={{ ...cellStyle, textAlign: "right" }}>{fmtNum(actual)}</td>
                             <td style={{ ...cellStyle, textAlign: "right", color: vr ? vr.color : TEXT_MUTED, fontWeight: 600 }}>
                               {vr ? vr.text : "—"}
+                            </td>
+                            <td style={{ ...cellStyle, color: reason ? TEXT_SECONDARY : TEXT_MUTED, fontSize: 10 }}>
+                              {reason || "—"}
                             </td>
                           </tr>,
                         );
@@ -285,7 +282,23 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
                       }
                       return rows;
                     };
-                    return renderRows(null, 0);
+                    const body = renderRows(null, 0);
+                    // 合計行 (本部 TotalsRow 相当)。予算合計 / 当月合計 / 予算比。
+                    if (totals.total_budget != null || totals.total_actual != null) {
+                      const tb = Number(totals.total_budget) || 0;
+                      const ta = Number(totals.total_actual) || 0;
+                      const tvr = formatVarianceRatio(tb, ta);
+                      body.push(
+                        <tr key="__totals__" style={{ background: NAVY2, borderTop: `2px solid ${GOLD}55` }}>
+                          <td style={{ ...cellStyle, fontWeight: 700, color: GOLD }}>合計</td>
+                          <td style={{ ...cellStyle, textAlign: "right", fontWeight: 700, color: TEXT_PRIMARY }}>{fmtNum(tb)}</td>
+                          <td style={{ ...cellStyle, textAlign: "right", fontWeight: 700, color: TEXT_PRIMARY }}>{fmtNum(ta)}</td>
+                          <td style={{ ...cellStyle, textAlign: "right", fontWeight: 700, color: tvr ? tvr.color : TEXT_MUTED }}>{tvr ? tvr.text : "—"}</td>
+                          <td style={{ ...cellStyle, color: TEXT_MUTED }}>—</td>
+                        </tr>,
+                      );
+                    }
+                    return body;
                   })()}
                 </tbody>
               </table>
@@ -293,43 +306,35 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
           </div>
         )}
 
-        {/* 合計サマリー */}
+        {/* ⑥: 管理サマリー (本部 ManagementSummary と同じ MetricCard 3枚) */}
         {(totals.total_budget != null || totals.total_actual != null || totals.achievement_ratio != null) && (
-          <div style={{
-            marginTop: 12, padding: 14, background: NAVY2,
-            borderRadius: 12, borderTop: `2px solid ${GOLD}55`,
-            display: "flex", flexDirection: "column", gap: 8,
-          }}>
-            {totals.total_budget != null && (
-              <Row label="予算合計" value={`${fmtNum(totals.total_budget)}円`} />
+          <ManagementSummaryView totals={totals} />
+        )}
+
+        {/* ⑥: コメント類 (明細・サマリーの下、本部と同じ並び: 次回対策 → 担当者) */}
+        <div style={{ marginTop: 14 }}>
+          <Section label="🎯 次回対策コメント" value={data.next_action_comment} />
+          <Section label="💬 担当者コメント" value={data.staff_comment} />
+        </div>
+
+        {/* ⑥: 旧フォーマット (参考) アコーディオン — 本部 ReviewCard と同じく下部に格納。
+            今月の振り返り / CFOからのアドバイス / 来月のアクションプラン。 */}
+        {(data.summary || data.advice || data.next_month_plan) && (
+          <div style={{ marginTop: 8, borderTop: `1px solid ${BORDER}`, paddingTop: 10 }}>
+            <button
+              onClick={() => setLegacyOpen((o) => !o)}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "4px 0", background: "transparent", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, color: TEXT_MUTED, textAlign: "left" }}
+            >
+              <span>{legacyOpen ? "▼" : "▶"}</span>
+              <span>📁 旧フォーマット (参考)</span>
+            </button>
+            {legacyOpen && (
+              <div style={{ marginTop: 8 }}>
+                <Section label="📝 今月の振り返り" value={data.summary} />
+                <Section label="💡 CFOからのアドバイス" value={data.advice} />
+                <Section label="🚀 来月のアクションプラン" value={data.next_month_plan} />
+              </div>
             )}
-            {totals.total_actual != null && (
-              <Row label="当月合計" value={`${fmtNum(totals.total_actual)}円`} />
-            )}
-            {/* 予算超過額 / 節約額 (本部 ManagementSummary と揃える、0 は表示しない) */}
-            {Number(totals.over_amount) > 0 && (
-              <Row label="予算超過額" value={`¥${Number(totals.over_amount).toLocaleString("ja-JP")}`} valueColor={RED} />
-            )}
-            {Number(totals.save_amount) > 0 && (
-              <Row label="予算節約額" value={`¥${Number(totals.save_amount).toLocaleString("ja-JP")}`} valueColor={TEAL} />
-            )}
-            {totals.achievement_ratio != null && (() => {
-              // achievement_ratio は 0〜1 の分数 (本部 recalcTotals)。×100 して % 化。
-              // ratioPct>0=予算内(TEAL) / <0=超過(RED) / 0=MUTED。バー幅は正の残率を 0-100 でクランプ。
-              const ratioPct = Number(totals.achievement_ratio) * 100;
-              const barColor = ratioPct > 0 ? TEAL : ratioPct < 0 ? RED : TEXT_MUTED;
-              return (
-                <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
-                    <span style={{ color: TEXT_MUTED }}>予算達成率</span>
-                    <span style={{ color: barColor, fontWeight: 700 }}>{ratioPct.toFixed(1)}%</span>
-                  </div>
-                  <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${Math.min(Math.max(ratioPct, 0), 100)}%`, background: barColor, borderRadius: 3, transition: "width 0.3s" }} />
-                  </div>
-                </div>
-              );
-            })()}
           </div>
         )}
       </div>
@@ -337,11 +342,30 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
   );
 }
 
-function Row({ label, value, valueColor }) {
+// ⑥: 管理サマリー (本部 ManagementSummary 準拠の MetricCard 3枚)。
+function MetricCard({ label, value, color }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-      <span style={{ color: TEXT_MUTED }}>{label}</span>
-      <span style={{ color: valueColor || TEXT_PRIMARY, fontWeight: 700 }}>{value}</span>
+    <div style={{ background: NAVY3, border: `1px solid ${BORDER}`, borderRadius: 8, padding: "8px 10px" }}>
+      <div style={{ fontSize: 9, color: TEXT_MUTED, fontWeight: 700, letterSpacing: "0.04em", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color }}>{value}</div>
+    </div>
+  );
+}
+
+function ManagementSummaryView({ totals }) {
+  const ratio = Number(totals?.achievement_ratio) || 0;
+  const over = Number(totals?.over_amount) || 0;
+  const save = Number(totals?.save_amount) || 0;
+  const ratioPct = (ratio * 100).toFixed(1) + "%";
+  const ratioColor = ratio > 0 ? TEAL : ratio < 0 ? RED : TEXT_MUTED;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: GOLD, marginBottom: 8, letterSpacing: "0.06em" }}>🧾 管理サマリー</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+        <MetricCard label="予算達成率" value={ratioPct} color={ratioColor} />
+        <MetricCard label="予算超過額" value={over > 0 ? `¥${over.toLocaleString("ja-JP")}` : "—"} color={over > 0 ? RED : TEXT_MUTED} />
+        <MetricCard label="予算節約額" value={save > 0 ? `¥${save.toLocaleString("ja-JP")}` : "—"} color={save > 0 ? TEAL : TEXT_MUTED} />
+      </div>
     </div>
   );
 }
