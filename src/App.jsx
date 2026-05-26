@@ -31,7 +31,7 @@ import SortableCategoryRow from "./components/SortableCategoryRow";
 import SortablePaymentRow from "./components/SortablePaymentRow";
 import AnnualBudgetViewer from "./components/AnnualBudgetViewer";
 import MonthlyReviewViewer from "./components/MonthlyReviewViewer";
-import MonthDialPicker from "./components/MonthDialPicker";
+import { MonthPopoverDial } from "./components/MonthDialPicker";
 import ReportTabs from "./components/ReportTabs";
 import { listPublishedByClient } from "./lib/api/monthlyReviews";
 import { useLatestTelop } from "./hooks/useNotifications";
@@ -2364,11 +2364,11 @@ export default function App() {
               viewer={<AnnualBudgetViewer clientId={authUserId} />}
               review={(
                 <div>
-                  {/* #2+#3: ダイヤル式 月ピッカー (月次レビューの表示月を選ぶ。予算タブには非表示) */}
-                  <div style={{fontSize:10,color:TEXT_MUTED,fontWeight:700,marginBottom:6,textAlign:"center"}}>
-                    月を選択（{mrMonth.y}年{mrMonth.m}月）
+                  {/* A/B: コンパクトなチップ + タップでダイヤル展開 (月次レビュー本体をメインに) */}
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                    <span style={{fontSize:10,color:TEXT_MUTED,fontWeight:700}}>表示月</span>
+                    <MonthPopoverDial months={mrMonths} value={mrMonth} onChange={setMrMonth} />
                   </div>
-                  <MonthDialPicker months={mrMonths} value={mrMonth} onChange={setMrMonth} />
                   <MonthlyReviewViewer clientId={authUserId} year={mrMonth.y} month={mrMonth.m} />
                 </div>
               )}

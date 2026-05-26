@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GOLD, NAVY2, BORDER, TEXT_MUTED } from "@shared/theme";
 
 // =============================================================
@@ -110,6 +110,73 @@ export default function MonthDialPicker({ months = [], value, onChange }) {
     <DialPicker
       items={items}
       value={valueKey}
+      onChange={(key) => {
+        const [y, m] = String(key).split("-").map(Number);
+        onChange?.({ y, m });
+      }}
+    />
+  );
+}
+
+// =============================================================
+// PopoverDial — A/B: コンパクトなチップ + タップで DialPicker を展開するラッパー。
+//   既定は「選択中ラベル + ▾」の小さいチップだけ表示。タップでチップ直下に
+//   DialPicker をポップアップ。値を選ぶ (タップ/スクロール確定) と閉じてチップに戻る。
+//   外側タップでも閉じる (透明 backdrop)。
+//
+// props: items=[{key,label}] / value=key / onChange(key) / placeholder / width
+// =============================================================
+export function PopoverDial({ items = [], value, onChange, width = 170, placeholder = "選択" }) {
+  const [open, setOpen] = useState(false);
+  const current = items.find((it) => it.key === value);
+  const label = current ? current.label : placeholder;
+  return (
+    <div style={{ position: "relative", display: "inline-block" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 6,
+          background: NAVY2, border: `1px solid ${open ? GOLD : BORDER}`, borderRadius: 999,
+          padding: "5px 12px", cursor: "pointer", color: GOLD, fontSize: 12, fontWeight: 700,
+          whiteSpace: "nowrap",
+        }}
+      >
+        <span>{label}</span>
+        <span style={{ fontSize: 9, color: TEXT_MUTED, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▾</span>
+      </button>
+      {open && (
+        <>
+          {/* 外側タップで閉じる透明 backdrop */}
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+          {/* チップ直下にダイヤルをポップアップ */}
+          <div style={{
+            position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 41,
+            background: NAVY2, border: `1px solid ${GOLD}55`, borderRadius: 12,
+            boxShadow: "0 6px 20px rgba(0,0,0,0.5)", padding: 6,
+          }}>
+            <DialPicker
+              items={items}
+              value={value}
+              onChange={(key) => { onChange?.(key); setOpen(false); }}
+              width={width}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// 月用ラッパー (months=[{y,m,label}] / value={y,m} / onChange({y,m}))。PopoverDial に委譲。
+export function MonthPopoverDial({ months = [], value, onChange }) {
+  const items = months.map((mo) => ({ key: `${mo.y}-${mo.m}`, label: mo.label }));
+  const valueKey = value ? `${value.y}-${value.m}` : null;
+  return (
+    <PopoverDial
+      items={items}
+      value={valueKey}
+      placeholder="月を選択"
       onChange={(key) => {
         const [y, m] = String(key).split("-").map(Number);
         onChange?.({ y, m });

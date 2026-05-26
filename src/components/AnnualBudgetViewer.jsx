@@ -5,7 +5,7 @@ import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import { listFiscalYearsByClient } from "../lib/api/annualBudgets";
 import { useLoans } from "../hooks/useLoans";
 import { useBudgets } from "../hooks/useBudgets";
-import { DialPicker } from "./MonthDialPicker";
+import { PopoverDial } from "./MonthDialPicker";
 import { cycleStart, cycleEnd, getManagementStartDay } from "../utils/cycle";
 import { toDateStr } from "@shared/format";
 import {
@@ -450,16 +450,16 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         </button>
       </div>
       {/* ③: 年度ダイヤル (確定済み年度が 2 件以上のときのみ表示。PDF には出さない) */}
-      {fiscalYears.length > 1 && (
-        <div className="no-print" style={{ padding: "10px 16px 0" }}>
-          <div style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 700, textAlign: "center", marginBottom: 4 }}>
-            年度を選択（{(selectedYear ?? Number(data.fiscal_year))}年度）
-          </div>
-          <DialPicker
+      {/* A/B: 年度ピッカー = コンパクトなチップ + タップでダイヤル展開。確定年度1件でも表示。 */}
+      {fiscalYears.length >= 1 && (
+        <div className="no-print" style={{ padding: "10px 16px 0", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 700 }}>表示年度</span>
+          <PopoverDial
             items={fiscalYears.map((y) => ({ key: y, label: `${y}年度` }))}
             value={selectedYear ?? Number(data.fiscal_year)}
             onChange={(y) => setSelectedYear(Number(y))}
-            width={160}
+            placeholder="年度を選択"
+            width={140}
           />
         </div>
       )}
