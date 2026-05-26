@@ -157,6 +157,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // ③: 確定済み年度の一覧 (DESC)。年度ダイヤルの候補。
   const [fiscalYears, setFiscalYears] = useState([]);
   const { data, loading, error } = useAnnualBudgets(clientId, selectedYear);
+  // 修正2(b): 繰越票の月ダイヤル。選択月 (初期=当月) の列へ横スクロール＆ハイライト。
+  const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1);
+  const monthThRefs = useRef({}); // { [month]: <th> } 選択月へ scrollIntoView するため
+  useEffect(() => {
+    const el = monthThRefs.current[selectedMonth];
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
+  }, [selectedMonth, data]);
   useEffect(() => {
     let alive = true;
     if (!clientId) { setFiscalYears([]); return undefined; }
@@ -450,31 +459,45 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         </button>
       </div>
       {/* ③: 年度ダイヤル (確定済み年度が 2 件以上のときのみ表示。PDF には出さない) */}
-      {/* A/B: 年度ピッカー = コンパクトなチップ + タップでダイヤル展開。確定年度1件でも表示。 */}
-      {fiscalYears.length >= 1 && (
-        <div className="no-print" style={{ padding: "10px 16px 0", display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 700 }}>表示年度</span>
-          <PopoverDial
-            items={fiscalYears.map((y) => ({ key: y, label: `${y}年度` }))}
-            value={selectedYear ?? Number(data.fiscal_year)}
-            onChange={(y) => setSelectedYear(Number(y))}
-            placeholder="年度を選択"
-            width={140}
-          />
-        </div>
-      )}
+      {/* A/B: 年度ピッカー + 修正2(b): 月ピッカー (どちらもタップ式 PopoverDial)。 */}
+      <div className="no-print" style={{ padding: "10px 16px 0", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {fiscalYears.length >= 1 && (
+          <>
+            <span style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 700 }}>表示年度</span>
+            <PopoverDial
+              items={fiscalYears.map((y) => ({ key: y, label: `${y}年度` }))}
+              value={selectedYear ?? Number(data.fiscal_year)}
+              onChange={(y) => setSelectedYear(Number(y))}
+              placeholder="年度を選択"
+              width={140}
+            />
+          </>
+        )}
+        <span style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 700 }}>月</span>
+        <PopoverDial
+          items={monthOrder.map((m) => ({ key: m, label: `${m}月` }))}
+          value={monthOrder.includes(selectedMonth) ? selectedMonth : monthOrder[0]}
+          onChange={(m) => setSelectedMonth(Number(m))}
+          placeholder="月を選択"
+          width={110}
+        />
+      </div>
       <div className="annual-pdf-scroll" style={{ overflowX: "auto" }}>
         <table style={tableStyle}>
           <thead>
             <tr>
               <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3 }}>カテゴリ</th>
-              {monthOrder.map((m) => (
-                <th key={m} style={isMonthSettled(m)
+              {monthOrder.map((m) => {
+                const sel = m === selectedMonth;
+                const thStyle = isMonthSettled(m)
                   ? { ...headCellStyle, border: `1px solid ${RED}`, color: RED }
-                  : headCellStyle}
-                  title={isMonthSettled(m) ? "この月は確定済 (凍結実測)" : undefined}
-                >{m}月</th>
-              ))}
+                  : (sel ? { ...headCellStyle, background: `${GOLD}22`, color: GOLD } : headCellStyle);
+                return (
+                  <th key={m} ref={(el) => { monthThRefs.current[m] = el; }} style={thStyle}
+                    title={isMonthSettled(m) ? "この月は確定済 (凍結実測)" : (sel ? "選択中の月" : undefined)}
+                  >{m}月</th>
+                );
+              })}
               <th style={{ ...headCellStyle }}>目標</th>
             </tr>
           </thead>
@@ -495,16 +518,19 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 {monthOrder.map((m) => {
                   const cell = resolveCellDisplay(line, m);
                   const settledCell = isMonthSettled(m) && !isFixed;
+                  const sel = m === selectedMonth;
                   // #2修正 数字色: 予算=青 (BUDGET_BLUE)、実測=白系 (TEXT_PRIMARY)。
                   //   確定月は赤背景を維持し、文字は実測扱い(白)。値なしは TEXT_MUTED。
                   const numColor = cell.value == null ? TEXT_MUTED
                     : cell.kind === "budget" ? BUDGET_BLUE
                     : TEXT_PRIMARY;
+                  // 修正2(b): 選択月の列を GOLD 系の控えめなティントでハイライト (確定の赤が優先)。
+                  const tdStyle = settledCell
+                    ? { ...cellStyle, color: numColor, background: `${RED}1A`, border: `1px solid ${RED}` }
+                    : (sel ? { ...cellStyle, color: numColor, background: `${GOLD}14` } : { ...cellStyle, color: numColor });
                   return (
                     <td key={m}
-                      style={settledCell
-                        ? { ...cellStyle, color: numColor, background: `${RED}1A`, border: `1px solid ${RED}` }
-                        : { ...cellStyle, color: numColor }}
+                      style={tdStyle}
                       title={settledCell ? "この月は確定済 (凍結実測)"
                         : cell.kind === "budget" ? "予算 (予算VS実績の週予算合計)"
                         : undefined}
@@ -524,13 +550,17 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               }}>
                 月合計
               </td>
-              {monthOrder.map((m) => (
-                <td key={m} style={isMonthSettled(m)
+              {monthOrder.map((m) => {
+                const sel = m === selectedMonth;
+                const tdStyle = isMonthSettled(m)
                   ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}`, fontWeight: 700, color: GOLD }
-                  : { ...cellStyle, background: NAVY2, fontWeight: 700, color: GOLD }}>
-                  {fmtCell(pickMonth(totalsMonthly, m))}
-                </td>
-              ))}
+                  : { ...cellStyle, background: sel ? `${GOLD}22` : NAVY2, fontWeight: 700, color: GOLD };
+                return (
+                  <td key={m} style={tdStyle}>
+                    {fmtCell(pickMonth(totalsMonthly, m))}
+                  </td>
+                );
+              })}
               <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: GOLD }}>
                 {fmtCell(targetGrandTotal || null)}
               </td>

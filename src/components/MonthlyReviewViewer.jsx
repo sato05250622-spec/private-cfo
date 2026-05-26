@@ -186,10 +186,15 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
   // 診断は手動設定優先・null は達成率から自動算出 (本部準拠)。常にバッジ表示。
   const diag = resolveDiagnosis(totals.achievement_ratio, data.diagnosis);
 
+  // 修正1: スマホ幅で「予算比」まで横スクロールなしに収まるよう padding/フォント圧縮。
   const cellStyle = {
-    padding: "5px 8px", fontSize: 11, color: TEXT_PRIMARY,
+    padding: "3px 5px", fontSize: 10, color: TEXT_PRIMARY,
     borderBottom: `1px solid ${BORDER}`,
   };
+  // 修正1: 数字3列 (予算/当月金額/予算比) は等幅数字で桁を揃える。
+  const numCell = { ...cellStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" };
+  // 修正1: 「項目」列の右に縦罫線 (項目↔予算の区切り)。
+  const itemColStyle = { ...cellStyle, borderRight: `1px solid ${BORDER}` };
 
   return (
     <div style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden", boxShadow: SHADOW }}>
@@ -240,14 +245,14 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
               </div>
             </div>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 560 }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 450 }}>
                 <thead>
                   <tr>
-                    <th style={{ ...cellStyle, textAlign: "left", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 130 }}>項目</th>
-                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 80 }}>予算</th>
-                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 80 }}>当月金額</th>
-                    <th style={{ ...cellStyle, textAlign: "right", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 60 }}>予算比</th>
-                    <th style={{ ...cellStyle, textAlign: "left", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 130 }}>差異理由</th>
+                    <th style={{ ...itemColStyle, textAlign: "left", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 96 }}>項目</th>
+                    <th style={{ ...numCell, color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 62 }}>予算</th>
+                    <th style={{ ...numCell, color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 62 }}>当月金額</th>
+                    <th style={{ ...numCell, color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 54 }}>予算比</th>
+                    <th style={{ ...cellStyle, textAlign: "left", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 120 }}>差異理由</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -265,15 +270,15 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
                         const reason = !isGroup && line?.variance_reason ? String(line.variance_reason).trim() : "";
                         rows.push(
                           <tr key={line?.id || `${parentId}-${depth}-${rows.length}`} style={{ background: isGroup ? "rgba(212,168,67,0.06)" : "transparent" }}>
-                            <td style={{ ...cellStyle, fontWeight: isGroup ? 700 : 400, paddingLeft: 8 + depth * 10 }}>
+                            <td style={{ ...itemColStyle, fontWeight: isGroup ? 700 : 400, paddingLeft: 5 + depth * 10 }}>
                               {isGroup ? "📁 " : ""}{line?.label || "(無題)"}
                             </td>
-                            <td style={{ ...cellStyle, textAlign: "right" }}>{fmtNum(budget)}</td>
-                            <td style={{ ...cellStyle, textAlign: "right" }}>{fmtNum(actual)}</td>
-                            <td style={{ ...cellStyle, textAlign: "right", color: vr ? vr.color : TEXT_MUTED, fontWeight: 600 }}>
+                            <td style={numCell}>{fmtNum(budget)}</td>
+                            <td style={numCell}>{fmtNum(actual)}</td>
+                            <td style={{ ...numCell, color: vr ? vr.color : TEXT_MUTED, fontWeight: 600 }}>
                               {vr ? vr.text : "—"}
                             </td>
-                            <td style={{ ...cellStyle, color: reason ? TEXT_SECONDARY : TEXT_MUTED, fontSize: 10 }}>
+                            <td style={{ ...cellStyle, color: reason ? TEXT_SECONDARY : TEXT_MUTED }}>
                               {reason || "—"}
                             </td>
                           </tr>,
@@ -290,10 +295,10 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
                       const tvr = formatVarianceRatio(tb, ta);
                       body.push(
                         <tr key="__totals__" style={{ background: NAVY2, borderTop: `2px solid ${GOLD}55` }}>
-                          <td style={{ ...cellStyle, fontWeight: 700, color: GOLD }}>合計</td>
-                          <td style={{ ...cellStyle, textAlign: "right", fontWeight: 700, color: TEXT_PRIMARY }}>{fmtNum(tb)}</td>
-                          <td style={{ ...cellStyle, textAlign: "right", fontWeight: 700, color: TEXT_PRIMARY }}>{fmtNum(ta)}</td>
-                          <td style={{ ...cellStyle, textAlign: "right", fontWeight: 700, color: tvr ? tvr.color : TEXT_MUTED }}>{tvr ? tvr.text : "—"}</td>
+                          <td style={{ ...itemColStyle, fontWeight: 700, color: GOLD }}>合計</td>
+                          <td style={{ ...numCell, fontWeight: 700, color: TEXT_PRIMARY }}>{fmtNum(tb)}</td>
+                          <td style={{ ...numCell, fontWeight: 700, color: TEXT_PRIMARY }}>{fmtNum(ta)}</td>
+                          <td style={{ ...numCell, fontWeight: 700, color: tvr ? tvr.color : TEXT_MUTED }}>{tvr ? tvr.text : "—"}</td>
                           <td style={{ ...cellStyle, color: TEXT_MUTED }}>—</td>
                         </tr>,
                       );

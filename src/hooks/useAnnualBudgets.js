@@ -53,5 +53,20 @@ export function useAnnualBudgets(clientId, fiscalYear) {
     refetch();
   }, [refetch]);
 
+  // 修正2(a): アプリ/タブに復帰したとき (focus / visibility=visible) に最新化。
+  //   本部が「反映」した後、顧客が画面を開いたまま (mount/clientId/fiscalYear 不変) でも
+  //   復帰時に refetch して committed_* の更新を取り込む。clientId 無しは何もしない。
+  useEffect(() => {
+    if (!clientId) return undefined;
+    const onFocus = () => { refetch(); };
+    const onVisible = () => { if (document.visibilityState === "visible") refetch(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [clientId, refetch]);
+
   return { data, loading, error, refetch };
 }

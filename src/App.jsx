@@ -930,7 +930,7 @@ export default function App() {
     // minHeight:0 が無いと flex item が overflow:auto を持っていても content-size に固着し
     // 内部スクロールが効かない(iOS Safari の典型バグ)。
     main:{flex:1,overflowY:"auto",overflowX:"hidden",minHeight:0,paddingBottom:140},
-    bottomNav:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:NAVY2,borderTop:`1px solid ${BORDER}`,display:"flex",zIndex:100,paddingBottom:"calc(env(safe-area-inset-bottom) + 8px)"},
+    bottomNav:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:NAVY2,borderTop:`1px solid ${BORDER}`,display:"flex",zIndex:100,paddingBottom:"max(8px, calc(env(safe-area-inset-bottom) - 12px))"},
     // 固定ゴールドボタン用:module-level 定数への参照で、毎レンダ同一参照を維持。
     // 実体は FIXED_SUBMIT_STYLE(GPU 合成レイヤー化済み)。
     fixedSubmit: FIXED_SUBMIT_STYLE,
