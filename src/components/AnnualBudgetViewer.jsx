@@ -61,6 +61,27 @@ function deriveFutureWeekBudgetForCategory(weekCatRecord, categoryId, { fiscalYe
   return out;
 }
 
+// 方針A: 指定カテゴリの「全12ヶ月」week_cat_budgets 合計 (年間予算)。消化サマリーの予算用。
+//   過去/当月/将来を問わず設定済みの月予算を全合算。本部 annualWeekBudgetForCategory と同一ロジック
+//   (顧客の weekCatBudgets は Record なのでキーをパースする)。
+function annualWeekBudgetForCategory(weekCatRecord, categoryId, { fiscalYear, startMonth = 1 }) {
+  if (!weekCatRecord || typeof weekCatRecord !== "object" || categoryId == null) return 0;
+  let sum = 0;
+  for (const key of Object.keys(weekCatRecord)) {
+    const mt = key.match(/^(\d+)-(\d+)-w(\d+)_(.+)$/);
+    if (!mt) continue;
+    const year = Number(mt[1]);
+    const cm = Number(mt[2]);
+    const cid = mt[4];
+    if (String(cid) !== String(categoryId)) continue;
+    if (!(cm >= 1 && cm <= 12)) continue;
+    const cy = fiscalMonthCalendarYear(fiscalYear, startMonth, cm);
+    if (year !== cy) continue;
+    sum += Number(weekCatRecord[key]) || 0;
+  }
+  return sum;
+}
+
 // Phase 3 (固定費): loans (借入、useLoans の app-shape: label/amount) → 繰越票の固定費行。
 // 本部アプリ annualBudgetSheet.js の buildFixedCostLines と同等 (別リポのため再実装)。
 //   - row_type 'fixed_cost'、category_id に loans.id、基準月額 (amount) を monthly_amount に
@@ -616,11 +637,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               }
               return sumLineSpent(l);
             };
-            // 総予算・実測とも全行 (固定費＋カテゴリー＋特殊行) で集計しスコープ一致 (本部と同方針)。
-            //   totalBudget = 全行の target_value 合計 (= targetGrandTotal、月合計行の目標と同値)
-            //   totalActual = 全行の年間実測合計 (固定費込み)
-            // committedAnnualTotalTarget の手入力値依存は廃止。
-            const totalBudget = targetGrandTotal;
+            // 方針A: 消化サマリーのカテゴリ予算 = 全12ヶ月 week_cat_budgets 合計 (実際に設定した月予算)。
+            //   固定費・特殊行は従来どおり target_value。本部 AnnualBudgetTab.summaryBudget と同一。
+            const summaryBudget = (l) => (
+              l?.row_type === "category" && l?.category_id
+                ? annualWeekBudgetForCategory(weekCatBudgets, l.category_id, { fiscalYear: fyYear, startMonth })
+                : (Number(l?.target_value) || 0)
+            );
+            // 総予算 = 全行 summaryBudget 合計、実測 = 全行 年間実測合計 (固定費込み)。
+            const totalBudget = displayLines.reduce((s, l) => s + (summaryBudget(l) || 0), 0);
             const totalActual = displayLines.reduce((s, l) => s + (lineYearSpent(l) || 0), 0);
             const tPct = totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0;
             const tColor = tPct >= 100 ? RED : tPct >= 80 ? GOLD : TEAL;
@@ -656,7 +681,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   // 固定費行 (displayLines 由来。actual は現在の進捗で進む lineYearSpent)。
                   const fixedCosts = displayLines.filter((l) => l?.row_type === "fixed_cost" && !l?.archived);
                   const renderBar = (line, actualFn) => {
-                    const b = Number(line.target_value) || 0;
+                    const b = summaryBudget(line);
                     const a = actualFn(line) || 0;
                     const p = b > 0 ? Math.round((a / b) * 100) : 0;
                     const c = p >= 100 ? RED : p >= 80 ? GOLD : TEAL;
