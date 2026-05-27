@@ -673,6 +673,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                       {totalBudget > 0 ? `${tPct}% 消化` : "予算未設定"}
                     </span>
                   </div>
+                  {/* 実績 / 予算 の金額 (本部 ProgressCard と同形式) */}
+                  <div style={{ fontSize: 11, color: TEXT_MUTED, marginBottom: 4 }}>
+                    <span style={{ color: TEXT_PRIMARY, fontWeight: 700 }}>¥{fmtNum(totalActual)}</span>
+                    {" / "}¥{fmtNum(totalBudget)}
+                  </div>
                   <Bar budget={totalBudget} pct={tPct} color={tColor} height={6} />
                 </div>
 
@@ -689,7 +694,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                       <div key={line.category_id} data-pdf-unit="sum-bar">
                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}>
                           <span style={{ color: TEXT_SECONDARY }}>{line.category_name}</span>
-                          <span style={{ color: c }}>{b > 0 ? `${p}%` : "予算未設定"}</span>
+                          <span style={{ color: c, fontWeight: 700 }}>{b > 0 ? `${p}%` : "予算未設定"}</span>
+                        </div>
+                        {/* 実績 / 予算 の金額 (本部 ProgressCard と同形式) */}
+                        <div style={{ fontSize: 11, color: TEXT_MUTED, marginBottom: 3 }}>
+                          <span style={{ color: TEXT_PRIMARY, fontWeight: 600 }}>¥{fmtNum(a)}</span>
+                          {" / "}¥{fmtNum(b)}
                         </div>
                         <Bar budget={b} pct={p} color={c} />
                       </div>
