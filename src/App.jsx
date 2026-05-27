@@ -514,15 +514,24 @@ export default function App() {
         }
         const list = out.length > 0 ? out : [{ y: curY, m: curM, label: `${curY}年${curM}月` }];
         setMrMonths(list);
-        // ④: 初回のみ、初期選択を「先月」にクランプ。先月が候補レンジ内ならそれを、
-        //    範囲外 (公開が当月分のみ等) なら最新 (= list 末尾 = 当月) を初期選択にする。
+        // 修正A: 初回のみ、初期選択を「公開済みレビューが実在する月」にする。
+        //   - 先月 (当月の1ヶ月前) に公開済みレビューが実在 → 先月 (従来の意図を尊重)。
+        //   - 無ければ → 最新の公開済み月 (rows は year/month DESC のため rows[0])。
+        //   - 公開が1件も無ければ → 当月のまま (準備中表示で正当)。
+        //   ※「レンジ内か」ではなく「その月に公開が実在するか」で判定 (準備中初期表示を防ぐ)。
         if (!mrInitRef.current) {
           mrInitRef.current = true;
           let py = curY, pm = curM - 1;
           if (pm < 1) { pm = 12; py -= 1; }
-          const inRange = list.some((o) => o.y === py && o.m === pm);
-          const init = inRange ? { y: py, m: pm } : { y: list[list.length - 1].y, m: list[list.length - 1].m };
-          setMrMonth(init);
+          const isPublished = (yy, mm) =>
+            Array.isArray(rows) && rows.some((r) => Number(r?.year) === yy && Number(r?.month) === mm);
+          if (isPublished(py, pm)) {
+            setMrMonth({ y: py, m: pm });
+          } else if (Array.isArray(rows) && rows.length > 0) {
+            const latest = rows[0]; // DESC 先頭 = 最新の公開済み月
+            setMrMonth({ y: Number(latest.year), m: Number(latest.month) });
+          }
+          // 公開0件のときは初期 (当月) のまま = 準備中表示で正当。
         }
       })
       .catch((e) => { console.error("[mrMonths]", e); });

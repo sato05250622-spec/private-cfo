@@ -13,28 +13,51 @@ import { supabase } from '../supabaseClient';
 
 const TABLE = 'annual_budgets';
 
-// 指定 client の最新年度 (fiscal_year DESC) の繰越票を 1 件取得。
+// 指定 client の繰越票を 1 件取得。
 // 返却 shape:
 //   { fiscal_year, fiscal_year_start_month,
 //     committed_lines, committed_totals, last_committed_at }
 //   - last_committed_at が null のレコードは「未反映 = 準備中」。
-//     フィルタせずそのまま返し、準備中判定は呼び側 (Hook/UI) が行う。
+//     指定年度 (fiscalYear) 取得時はフィルタせずそのまま返し、準備中判定は呼び側に委ねる。
 // 該当レコードが無い場合は null を返す。
-// ③: fiscalYear 省略時は最新年度 (fiscal_year DESC, limit 1)、指定時はその年度を取得。
+// ③/修正B: fiscalYear 指定時はその年度。省略時は「最新の“反映済み”年度」(last_committed_at
+//   not null の最大 fiscal_year)。年度ダイヤル候補 (listFiscalYearsByClient) と既定表示を
+//   揃え、年度ロールオーバー直後の未反映年度 (例: FY2026) を既定で掴んで "準備中" に
+//   落ちるのを防ぐ。反映済みが1件も無いときのみ、絶対最新年度 (未反映含む) にフォールバック。
 export async function getCommittedByClient(clientId, fiscalYear) {
   if (!clientId) return null;
-  let q = supabase
-    .from(TABLE)
-    .select('fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at')
-    .eq('client_id', clientId);
   if (fiscalYear != null) {
-    q = q.eq('fiscal_year', fiscalYear);
-  } else {
-    q = q.order('fiscal_year', { ascending: false }).limit(1);
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select('fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at')
+      .eq('client_id', clientId)
+      .eq('fiscal_year', fiscalYear)
+      .maybeSingle();
+    if (error) throw error;
+    return data ?? null;
   }
-  const { data, error } = await q.maybeSingle();
-  if (error) throw error;
-  return data ?? null;
+  const SELECT = 'fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at';
+  // 既定: 反映済み (last_committed_at not null) の最新年度を優先。
+  const committed = await supabase
+    .from(TABLE)
+    .select(SELECT)
+    .eq('client_id', clientId)
+    .not('last_committed_at', 'is', null)
+    .order('fiscal_year', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (committed.error) throw committed.error;
+  if (committed.data) return committed.data;
+  // 反映済みが無い場合のみ、絶対最新年度 (未反映含む) を返す (従来挙動のフォールバック)。
+  const latest = await supabase
+    .from(TABLE)
+    .select(SELECT)
+    .eq('client_id', clientId)
+    .order('fiscal_year', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latest.error) throw latest.error;
+  return latest.data ?? null;
 }
 
 // ③: 指定 client の「確定済み (反映済み)」年度一覧を新しい順 (DESC) で返す。
