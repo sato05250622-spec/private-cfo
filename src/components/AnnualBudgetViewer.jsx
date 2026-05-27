@@ -149,6 +149,8 @@ function fmtDateTime(iso) {
 }
 
 const fmtCell = (n) => (n == null ? "—" : Number(n).toLocaleString());
+// 金額表示 (消化サマリーの ¥実績/¥予算)。null/undefined/NaN は 0 にフォールバックして必ず数値表示。
+const fmtNum = (n) => (Number.isFinite(Number(n)) ? Number(n) : 0).toLocaleString();
 
 // 既存 App.jsx「準備中」カードと見た目完全一致のステータスカード。
 // loading / 未反映 / 取得失敗 / data 無し のいずれでも親に null を返さず
