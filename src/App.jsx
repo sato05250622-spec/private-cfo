@@ -31,6 +31,7 @@ import SortableCategoryRow from "./components/SortableCategoryRow";
 import SortablePaymentRow from "./components/SortablePaymentRow";
 import AnnualBudgetViewer from "./components/AnnualBudgetViewer";
 import MonthlyReviewViewer from "./components/MonthlyReviewViewer";
+import InvestmentRecoveryViewer from "./pages/InvestmentRecoveryViewer";
 import { MonthPopoverDial } from "./components/MonthDialPicker";
 import ReportTabs from "./components/ReportTabs";
 import { listPublishedByClient } from "./lib/api/monthlyReviews";
@@ -2381,6 +2382,7 @@ export default function App() {
                   <MonthlyReviewViewer clientId={authUserId} year={mrMonth.y} month={mrMonth.m} />
                 </div>
               )}
+              recovery={<InvestmentRecoveryViewer clientId={authUserId} />}
             />
           </div>
           <div style={{height:20}}/>

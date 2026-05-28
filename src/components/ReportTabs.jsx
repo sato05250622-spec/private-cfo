@@ -2,12 +2,15 @@ import { useState } from "react";
 import { GOLD_GRAD, NAVY, NAVY3, BORDER, TEXT_SECONDARY } from "@shared/theme";
 
 // =============================================================
-// レポート画面の「📊 繰越票 / 📝 レビュー」セグメント切替。
-// 当月レポート / 月別レポートの 2 画面で共用 (App.jsx)。
-// viewer / review に各ビューア要素を渡し、選択側のみマウントする。
+// レポート画面のセグメント切替。
+//   "budget"   → 📊 繰越票  (viewer)
+//   "review"   → 📝 レビュー (review)
+//   "recovery" → 👥 投資回収 (recovery、省略時は 3 つ目タブ非表示)
+// viewer / review / recovery に各ビューア要素を渡し、選択側のみマウントする。
 // =============================================================
-export default function ReportTabs({ viewer, review, defaultTab = "budget" }) {
+export default function ReportTabs({ viewer, review, recovery, defaultTab = "budget" }) {
   const [tab, setTab] = useState(defaultTab);
+  const hasRecovery = recovery !== undefined && recovery !== null;
 
   const btnStyle = (active) => ({
     flex: 1,
@@ -15,13 +18,19 @@ export default function ReportTabs({ viewer, review, defaultTab = "budget" }) {
     background: active ? GOLD_GRAD : "transparent",
     color: active ? NAVY : TEXT_SECONDARY,
     border: "none",
-    padding: "8px 12px",
-    fontSize: 13,
+    padding: "8px 8px",
+    fontSize: 12,
     fontWeight: 700,
     cursor: "pointer",
     transition: "background 0.2s, color 0.2s",
     whiteSpace: "nowrap",
   });
+
+  // 選択側のみ描画 (マウント切替)。
+  let content;
+  if (tab === "recovery" && hasRecovery) content = recovery;
+  else if (tab === "review") content = review;
+  else content = viewer;
 
   return (
     <div>
@@ -41,10 +50,14 @@ export default function ReportTabs({ viewer, review, defaultTab = "budget" }) {
         <button type="button" style={btnStyle(tab === "review")} onClick={() => setTab("review")}>
           📝 レビュー
         </button>
+        {hasRecovery && (
+          <button type="button" style={btnStyle(tab === "recovery")} onClick={() => setTab("recovery")}>
+            👥 投資回収
+          </button>
+        )}
       </div>
 
-      {/* 選択側のみ描画 (マウント切替) */}
-      {tab === "budget" ? viewer : review}
+      {content}
     </div>
   );
 }

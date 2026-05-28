@@ -18,6 +18,8 @@ function toApp(row, userId) {
     recurId: row.recur_id ?? null,
     enteredBy: row.entered_by ?? null,
     isProxyEntry: !!(row.entered_by && row.entered_by !== userId),
+    // 人別経費投資回収シート: 紐づけた投資対象者の id (NULL = 一般支出)。
+    target_id: row.target_id ?? null,
   };
 }
 
