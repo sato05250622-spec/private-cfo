@@ -137,9 +137,10 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading }) {
         date: e.date,
         memo: e.memo ?? '',
         amount: Number(e.amount) || 0,
-        // #3-A Fix 2: useExpenses.toApp が createdAt を持ち上げるよう拡張済 → 本部 raw 行と
-        //   同じ created_at で 2 次ソートでき、同日複数行の cum/diff/judge が本部と一致する。
-        createdAt: e.createdAt ?? '',
+        // useExpenses の toApp は created_at を持たないため、ID 比較等は date 同値時のみ発生。
+        // 入金 (raw row) には created_at がある一方、expense (toApp) には無い → 同日比較は安定しない場合あり。
+        // 実害は少ないが、二次キーは入金側のみ created_at を使う。
+        createdAt: '',
       });
     }
     for (const r of (incomes || [])) {
