@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../lib/api/expenses';
+import { supabase } from '../lib/supabaseClient';
 
 // DB 行 → App.jsx が期待する形 への変換。
 // App.jsx 既存コードが触る識別子(`t.date` / `t.amount` / `t.memo` /
@@ -20,6 +21,10 @@ function toApp(row, userId) {
     isProxyEntry: !!(row.entered_by && row.entered_by !== userId),
     // 人別経費投資回収シート: 紐づけた投資対象者の id (NULL = 一般支出)。
     target_id: row.target_id ?? null,
+    // #3-A 同期修正 (Fix 2): InvestmentRecoveryViewer の mergedRows で同日 2 次ソート
+    //   に使うため created_at を持ち上げる。本部 InvestmentRecoveryView と並びを揃え、
+    //   同日複数行の cum/diff/judge が一致するようにする。
+    createdAt: row.created_at ?? null,
   };
 }
 
@@ -69,6 +74,34 @@ export function useExpenses() {
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  // #3-A 同期修正: Supabase Realtime + focus/visibility refetch。
+  //   本部 (admin) が代理書込 / target_id 付与した場合に、開きっぱなしの顧客画面で
+  //   自動再取得して反映する。realtime 不達のフォールバックに focus/visibilitychange を併用。
+  useEffect(() => {
+    const onFocus = () => { refetch(); };
+    const onVis = () => { if (!document.hidden) refetch(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVis);
+    if (!userId) {
+      return () => {
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onVis);
+      };
+    }
+    const channel = supabase
+      .channel(`expenses-${userId}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'expenses',
+        filter: `client_id=eq.${userId}`,
+      }, () => { refetch(); })
+      .subscribe();
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
+      supabase.removeChannel(channel);
+    };
+  }, [userId, refetch]);
 
   const addExpense = useCallback(
     async (app) => {
