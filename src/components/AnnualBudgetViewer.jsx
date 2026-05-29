@@ -731,7 +731,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           - 0 除算回避: 年間予算 0 → pct=0、バー塗りは描画しない (背景のみ)
       */}
       {(() => {
-        const cum = Number(grandTotal) || 0;
+        // バー専用の「累計（確定分）」: lineYearSpent は将来月除外済
+        // （admin が monthly_spent を焼く際に classifyMonth='future' を除外して合算）。
+        // data.committed_totals.grandTotal は予算込みの年間見込み合計として
+        // 支出合計 grand cell で引き続き使用するため変更しない。
+        const cum = displayLines.reduce((s, l) => s + (lineYearSpent(l) || 0), 0);
         // 消化サマリー L836-842 と同一ロジックを inline 再定義 (スコープ独立で安全)。
         // #5 修正: 固定費行で annual_target 未設定のとき monthly_amount × 12 をフォールバック
         //   採用 (cum=snapshot.grandTotal は admin computeTotalsRow で fixed_cost の monthly_amounts
