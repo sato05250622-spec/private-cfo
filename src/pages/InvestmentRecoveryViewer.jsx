@@ -93,11 +93,27 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading }) {
   const { incomes, loading: inLoading, error: inError } = useInvestmentIncomes(clientId, target.id);
 
   // この対象者に紐づく支出 (useExpenses の toApp で target_id が乗っている。
-  // 本タスクで toApp 拡張済み。soft-delete 済み expense は API 側で除外済み)。
-  const expensesForTarget = useMemo(
-    () => (allExpenses || []).filter((e) => e && e.target_id === target.id),
-    [allExpenses, target.id],
-  );
+  // soft-delete 済み expense は API 側で除外済み)。
+  // Task #4: 明示タグ (target_id) と memo 部分一致の OR で引き取る。
+  //   - byId : expense.target_id === target.id (既存の明示タグ)
+  //   - byMemo: target.name.trim() が非空 AND memo が非nullで target.name を substring 含む
+  // target.name が空白のみのときは byMemo を発火させない (全支出引き込み事故防止)。
+  // 両ヒット時は id で 1 件に重複排除して 1 回だけ集計する。本部 InvestmentRecoveryView と
+  // 完全一致のロジック (calc / 表示は下流の集計に委譲、本部準拠)。
+  const expensesForTarget = useMemo(() => {
+    const list = allExpenses || [];
+    const targetName = (target.name || '').trim();
+    const map = new Map();
+    for (const e of list) {
+      if (!e) continue;
+      const byId = e.target_id === target.id;
+      const byMemo = targetName !== '' && e.memo != null && String(e.memo).includes(targetName);
+      if (byId || byMemo) {
+        if (!map.has(e.id)) map.set(e.id, e);
+      }
+    }
+    return Array.from(map.values());
+  }, [allExpenses, target.id, target.name]);
 
   // 経費合計 / 総入金 / 最終回収差額 / 最終判定 — 本部版と同一ロジック。
   const expensesTotal = useMemo(
