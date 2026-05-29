@@ -674,7 +674,8 @@ export default function App() {
       expense: transactions.filter(t => t.date >= sStr && t.date <= eStr).reduce((s, t) => s + t.amount, 0),
     };
   }), [transactions, reportYear, managementStartDay]);
-  const yearlyTotal=yearlyData.reduce((s,d)=>s+d.expense,0);
+  // #4 数字ずれ修正: 年間合計支出 standalone 表示を削除したため yearlyTotal も廃止。
+  // 残った yearlyData は AreaChart / 月別バー (L1717,L1788,L1804) で引き続き使用。
 
   const budgetKey=(cat)=>`${budgetMonth.y}-${budgetMonth.m+1}-${cat}`;
   const getBudget=(cat)=>budgets[budgetKey(cat)];
@@ -1710,9 +1711,11 @@ export default function App() {
               <button style={S.navArrow} onClick={()=>setReportYear(y=>y+1)}>›</button>
             </div>
             <div style={{background:CARD_BG,padding:"20px 20px 16px",marginBottom:1}}>
-              <div style={{fontSize:11,color:TEXT_SECONDARY,fontWeight:500,marginBottom:6}}>年間合計支出</div>
-              <div style={{fontSize:34,fontWeight:700,color:RED}}>{yearlyTotal.toLocaleString()}<span style={{fontSize:15,color:TEXT_SECONDARY,fontWeight:400}}>円</span></div>
-              <div style={{marginTop:16,height:200}}>
+              {/* #4 数字ずれ修正: 「年間合計支出 ¥X 円」standalone 表示を削除。
+                  繰越票 (AnnualBudgetViewer) の支出合計 grand cell (snapshot 由来) と
+                  ここでの transactions live 合計 (異なる集計) が並んで誤誘導していたため、
+                  代表値表示は繰越票側に一本化。AreaChart / 月別バーは温存。 */}
+              <div style={{height:200}}>
                 <ResponsiveContainer width="100%" height={200}>
                   <AreaChart data={yearlyData} margin={{top:16,right:8,left:8,bottom:0}}>
                     <defs>
