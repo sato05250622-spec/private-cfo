@@ -733,10 +733,28 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       {(() => {
         const cum = Number(grandTotal) || 0;
         // 消化サマリー L836-842 と同一ロジックを inline 再定義 (スコープ独立で安全)。
+        // #5 修正: 固定費行で annual_target 未設定のとき monthly_amount × 12 をフォールバック
+        //   採用 (cum=snapshot.grandTotal は admin computeTotalsRow で fixed_cost の monthly_amounts
+        //   を 12 ヶ月加算しているため、分母にも同額を当てて非対称を解消し、バーが常に MAX 化する
+        //   バグを修正)。消化サマリー側 (L958-) も同パッチで整合。
         const summaryBudget = (l) => (
           l?.row_type === "category" && l?.category_id
             ? annualWeekBudgetForCategory(weekCatBudgets, l.category_id, { fiscalYear: fyYear, startMonth })
-            : (Number(l?.target_value) || 0)
+            : (() => {
+                const tv = Number(l?.target_value);
+                if (Number.isFinite(tv) && tv > 0) return tv;
+                if (l?.row_type === "fixed_cost") {
+                  const ma = l?.monthly_amounts;
+                  const base = Number(l?.monthly_amount) || 0;
+                  let s = 0;
+                  for (let m = 1; m <= 12; m++) {
+                    const v = ma ? (ma[m] ?? ma[String(m)]) : null;
+                    s += (v != null ? Number(v) : base) || 0;
+                  }
+                  return s;
+                }
+                return 0;
+              })()
         );
         const yearBudgetTotal = displayLines.reduce((s, l) => s + (summaryBudget(l) || 0), 0);
         const pct = yearBudgetTotal > 0 ? Math.min((cum / yearBudgetTotal) * 100, 100) : 0;
@@ -954,11 +972,27 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             // sumLineSpent / lineYearSpent は本部準拠で viewer スコープに引き上げ済み (上 L443/L450)。
             // ここからは両関数を直接参照する (重複定義を削除)。
             // 方針A: 消化サマリーのカテゴリ予算 = 全12ヶ月 week_cat_budgets 合計 (実際に設定した月予算)。
-            //   固定費・特殊行は従来どおり target_value。本部 AnnualBudgetTab.summaryBudget と同一。
+            //   固定費・特殊行は target_value を優先、固定費で annual_target 未設定なら
+            //   monthly_amount × 12 を fallback (#5 修正、年間累計バー L736- と同パッチ。
+            //   実測 totalActual との非対称を解消)。
             const summaryBudget = (l) => (
               l?.row_type === "category" && l?.category_id
                 ? annualWeekBudgetForCategory(weekCatBudgets, l.category_id, { fiscalYear: fyYear, startMonth })
-                : (Number(l?.target_value) || 0)
+                : (() => {
+                    const tv = Number(l?.target_value);
+                    if (Number.isFinite(tv) && tv > 0) return tv;
+                    if (l?.row_type === "fixed_cost") {
+                      const ma = l?.monthly_amounts;
+                      const base = Number(l?.monthly_amount) || 0;
+                      let s = 0;
+                      for (let m = 1; m <= 12; m++) {
+                        const v = ma ? (ma[m] ?? ma[String(m)]) : null;
+                        s += (v != null ? Number(v) : base) || 0;
+                      }
+                      return s;
+                    }
+                    return 0;
+                  })()
             );
             // 総予算 = 全行 summaryBudget 合計、実測 = 全行 年間実測合計 (固定費込み)。
             const totalBudget = displayLines.reduce((s, l) => s + (summaryBudget(l) || 0), 0);
