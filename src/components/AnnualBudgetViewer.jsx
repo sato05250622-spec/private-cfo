@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { Fragment, useState, useEffect, useRef } from "react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
@@ -553,6 +553,51 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     return sumLineSpent(l);
   };
 
+  // #2 固定費合計 / 変動費合計 subtotal の事前計算 (b4bcfa2 revert からの再導入、findLastIndex 排除版)。
+  //   - 元実装 (916c1ce) は displayLines.findLastIndex(...) を使っていたが iOS Safari 15.4 未満で
+  //     TypeError を投げるため、forward 1 パス for ループに置換 (pure ES2017)。
+  //   - displayLines = [...fixedCostLines, ...sortedLines] の順 (L474) で並ぶが、
+  //     row_type で判定して **最後に出現した index を上書き** すれば findLastIndex と等価。
+  //   - 副作用なし、render 中の純粋計算。
+  let lastFixedIdx = -1;
+  let lastVariableIdx = -1;
+  for (let i = 0; i < displayLines.length; i++) {
+    const l = displayLines[i];
+    if (!l) continue;
+    if (l.row_type === "fixed_cost") {
+      lastFixedIdx = i;
+    } else {
+      lastVariableIdx = i;
+    }
+  }
+  // subtotal 値: resolveCell ベースで partition 集計 → 月別 / grand 実測 / grand 目標。
+  // サニティ: fixed + variable = 「支出合計」行 (snapshot 由来、loans 不変時に一致)。
+  const computeSubtotalsForType = (predicate) => {
+    const monthly = {};
+    let grand = null;
+    for (let m = 1; m <= 12; m++) {
+      let s = 0;
+      let any = false;
+      for (const line of displayLines) {
+        if (!line || !predicate(line)) continue;
+        const v = resolveCell(line, m);
+        if (v == null) continue;
+        s += Number(v) || 0;
+        any = true;
+      }
+      monthly[m] = any ? s : null;
+      if (any) grand = (grand ?? 0) + s;
+    }
+    let target = 0;
+    for (const line of displayLines) {
+      if (!line || !predicate(line)) continue;
+      target += Number(line?.target_value) || 0;
+    }
+    return { monthly, grand, target };
+  };
+  const fixedSubtotals    = computeSubtotalsForType((l) => l.row_type === "fixed_cost");
+  const variableSubtotals = computeSubtotalsForType((l) => l.row_type !== "fixed_cost");
+
   // 横画面では横方向 padding を詰めて 12ヶ月 + カテゴリ列が横スクロール無しで収まるようにする。
   // fontSize は可読下限 11px 維持。
   const cellPadX = isLandscape ? 5 : 8;
@@ -574,6 +619,50 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   const tableStyle = { borderCollapse: "collapse", width: "100%", minWidth: 800 };
   // isLandscape は PDF 全画面化 (横画面 breakout) で引き続き使用するため残置。
   void isLandscape;
+
+  // #2 subtotal 行 (固定/変動 で形は同一、ラベルと値だけ切替)。
+  //   - 月別セル: 確定系=TEXT_PRIMARY (#4 色テーマ準拠)
+  //   - 実測 grand: TEXT_PRIMARY、目標 grand: BUDGET_BLUE
+  //   - 強調: NAVY2 背景 + 上下 2px GOLD55 border、fontWeight 600
+  const renderSubtotalRow = (label, sub) => (
+    <tr>
+      <td style={{
+        ...cellStyle, ...stickyBase, background: NAVY2,
+        fontWeight: 600, color: TEXT_PRIMARY,
+        borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
+      }}>
+        {label}
+      </td>
+      {monthOrder.map((m) => {
+        const v = pickMonth(sub.monthly, m);
+        return (
+          <td key={m} style={{
+            ...cellStyle, background: NAVY2,
+            fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY,
+            borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
+          }}>
+            {fmtCell(v)}
+          </td>
+        );
+      })}
+      {/* 実測 grand (subtotal 内 partition の Σ resolveCell) */}
+      <td style={{
+        ...cellStyle, background: NAVY2,
+        fontWeight: 600, color: sub.grand == null ? TEXT_MUTED : TEXT_PRIMARY,
+        borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
+      }}>
+        {fmtCell(sub.grand)}
+      </td>
+      {/* 目標 grand (subtotal 内 Σ target_value) — 予算系=青 */}
+      <td style={{
+        ...cellStyle, background: NAVY2,
+        fontWeight: 600, color: (sub.target || 0) > 0 ? BUDGET_BLUE : TEXT_MUTED,
+        borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
+      }}>
+        {fmtCell((sub.target || 0) > 0 ? sub.target : null)}
+      </td>
+    </tr>
+  );
 
   const card = (
     <div ref={pdfRef} className="annual-pdf-root" style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
@@ -747,8 +836,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             {displayLines.map((line, i) => {
               // 固定費行は確定塗り (赤) を適用しない (毎月同額の予算=実測。本部 Phase 2a と整合)。
               const isFixed = line?.row_type === "fixed_cost";
+              const rowKey = line?.category_id || line?.row_type || i;
               return (
-              <tr key={line?.category_id || line?.row_type || i}>
+              <Fragment key={rowKey}>
+              <tr>
                 <td style={{
                   ...cellStyle, ...stickyBase, background: CARD_BG,
                   fontWeight: 600, color: line?.archived ? TEXT_MUTED : TEXT_SECONDARY,
@@ -787,6 +878,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   {fmtCell(line?.target_value)}
                 </td>
               </tr>
+              {/* #2 各グループ末尾の直後に subtotal 行を 1 本挿入。
+                  既存「支出合計」「累計支出」より前 = 月合計の手前で固定/変動の分解を提示。
+                  lastFixedIdx / lastVariableIdx は forward 1 パス計算 (findLastIndex 不使用)。 */}
+              {i === lastFixedIdx    && renderSubtotalRow("固定費合計", fixedSubtotals)}
+              {i === lastVariableIdx && renderSubtotalRow("変動費合計", variableSubtotals)}
+              </Fragment>
               );
             })}
             {/* 本部準拠: 合計行① 支出合計 (月別 + 年間実測 grand + 目標 grand)
