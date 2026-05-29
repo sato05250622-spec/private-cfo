@@ -295,15 +295,16 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       // 修正②: 「年間合計」サマリー (NAVY/GOLD体裁) を文字列で合成して挿入する。
       //   #2② で表外 [data-pdf="grandtotal"] div を削除済 → ここで合成して tail unit 復活。
       const grandTotalVal = data.committed_totals?.grandTotal ?? null;
+      // #4 色テーマ: 年間合計=確定系=白 (#F0EAD6 = TEXT_PRIMARY)、年間目標=予算系=青 (#5BA8FF = BUDGET_BLUE)。
       const synthGrandHtml = (
         `<div data-pdf="grandtotal" data-pdf-synth="1" style="margin:12px 16px;padding:14px 16px;border-top:1px solid rgba(212,168,67,0.22);display:flex;justify-content:space-between;gap:16px;align-items:baseline;">` +
           `<div>` +
             `<div style="font-size:10px;color:rgba(240,234,214,0.55);margin-bottom:4px;">年間合計</div>` +
-            `<div style="font-size:18px;font-weight:700;color:#D4A843;">¥${Number(grandTotalVal || 0).toLocaleString()}</div>` +
+            `<div style="font-size:18px;font-weight:700;color:#F0EAD6;">¥${Number(grandTotalVal || 0).toLocaleString()}</div>` +
           `</div>` +
           `<div style="text-align:right;">` +
             `<div style="font-size:10px;color:rgba(240,234,214,0.55);margin-bottom:4px;">年間目標</div>` +
-            `<div style="font-size:18px;font-weight:700;color:#43A047;">¥${Number(targetGrandTotal || 0).toLocaleString()}</div>` +
+            `<div style="font-size:18px;font-weight:700;color:#5BA8FF;">¥${Number(targetGrandTotal || 0).toLocaleString()}</div>` +
           `</div>` +
         `</div>`
       );
@@ -640,9 +641,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   >{m}月</th>
                 );
               })}
-              {/* 本部準拠: 「実測」(GOLD見出し) と「目標」(GREEN見出し) を月セル群の後に */}
-              <th style={{ ...headCellStyle }}>実測</th>
-              <th style={{ ...headCellStyle, color: TARGET_GREEN }}>目標</th>
+              {/* #4 色テーマ: 確定系=白 (TEXT_PRIMARY)、予算系=青 (BUDGET_BLUE)。
+                  headCellStyle.color のデフォルトは GOLD なので「実測」だけ override で白に上書き。 */}
+              <th style={{ ...headCellStyle, color: TEXT_PRIMARY }}>実測</th>
+              <th style={{ ...headCellStyle, color: BUDGET_BLUE }}>目標</th>
             </tr>
           </thead>
           <tbody>
@@ -681,29 +683,31 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                     >{fmtCell(cell.value)}</td>
                   );
                 })}
-                {/* 本部準拠: 行の年間「実測」(rowYearSpent 相当) */}
-                <td style={{ ...cellStyle, fontWeight: 700, color: GOLD }}>
+                {/* #4 色テーマ: 行の年間「実測」=確定系=白 (TEXT_PRIMARY)、「目標」=予算系=青 (BUDGET_BLUE)。 */}
+                <td style={{ ...cellStyle, fontWeight: 700, color: TEXT_PRIMARY }}>
                   {fmtCell(lineYearSpent(line))}
                 </td>
-                <td style={{ ...cellStyle, fontWeight: 700, color: line?.target_value == null ? TEXT_MUTED : TARGET_GREEN }}>
+                <td style={{ ...cellStyle, fontWeight: 700, color: line?.target_value == null ? TEXT_MUTED : BUDGET_BLUE }}>
                   {fmtCell(line?.target_value)}
                 </td>
               </tr>
               );
             })}
-            {/* 本部準拠: 合計行① 支出合計 (月別 + 年間実測 grand + 目標 grand) */}
+            {/* 本部準拠: 合計行① 支出合計 (月別 + 年間実測 grand + 目標 grand)
+                #4 色テーマ: 支出合計=確定系=白 (TEXT_PRIMARY)、目標 grand=予算系=青 (BUDGET_BLUE)。
+                赤確定月の数値も TEXT_PRIMARY 化 (背景の赤で「確定」を表示、文字色は確定系統一)。 */}
             <tr>
               <td style={{
                 ...cellStyle, ...stickyBase, background: NAVY2,
-                fontWeight: 700, color: GOLD,
+                fontWeight: 700, color: TEXT_PRIMARY,
               }}>
                 支出合計
               </td>
               {monthOrder.map((m) => {
                 const sel = m === selectedMonth;
                 const tdStyle = isMonthSettled(m)
-                  ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}`, fontWeight: 700, color: GOLD }
-                  : { ...cellStyle, background: sel ? `${GOLD}22` : NAVY2, fontWeight: 700, color: GOLD };
+                  ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}`, fontWeight: 700, color: TEXT_PRIMARY }
+                  : { ...cellStyle, background: sel ? `${GOLD}22` : NAVY2, fontWeight: 700, color: TEXT_PRIMARY };
                 return (
                   <td key={m} style={tdStyle}>
                     {fmtCell(pickMonth(totalsMonthly, m))}
@@ -711,18 +715,19 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 );
               })}
               {/* 年間実測 grand (data.committed_totals.grandTotal)。表外の「年間合計」div は廃止し、ここに統合。 */}
-              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: grandTotal == null ? TEXT_MUTED : GOLD }}>
+              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: grandTotal == null ? TEXT_MUTED : TEXT_PRIMARY }}>
                 {fmtCell(grandTotal)}
               </td>
-              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: (targetGrandTotal || 0) > 0 ? TARGET_GREEN : TEXT_MUTED }}>
+              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: (targetGrandTotal || 0) > 0 ? BUDGET_BLUE : TEXT_MUTED }}>
                 {fmtCell(targetGrandTotal || null)}
               </td>
             </tr>
-            {/* 本部準拠: 合計行② 累計支出 (data.committed_totals.cumulative、無ければ空) */}
+            {/* 本部準拠: 合計行② 累計支出 (data.committed_totals.cumulative、無ければ空)
+                #4 色テーマ: 累計支出=確定系=白 (ラベルも TEXT_PRIMARY 化、TEXT_SECONDARY 廃止)。 */}
             <tr>
               <td style={{
                 ...cellStyle, ...stickyBase, background: NAVY2,
-                fontWeight: 700, color: TEXT_SECONDARY,
+                fontWeight: 700, color: TEXT_PRIMARY,
               }}>
                 累計支出
               </td>
@@ -791,10 +796,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                       {totalBudget > 0 ? `${tPct}% 消化` : "予算未設定"}
                     </span>
                   </div>
-                  {/* 実績 / 予算 の金額 (本部 ProgressCard と同形式) */}
+                  {/* 実績 / 予算 の金額 (本部 ProgressCard と同形式)。
+                      #4 色テーマ: 実績=確定系=白 (TEXT_PRIMARY)、予算=予算系=青 (BUDGET_BLUE)。 */}
                   <div style={{ fontSize: 11, color: TEXT_MUTED, marginBottom: 4 }}>
                     <span style={{ color: TEXT_PRIMARY, fontWeight: 700 }}>¥{fmtNum(totalActual)}</span>
-                    {" / "}¥{fmtNum(totalBudget)}
+                    {" / "}<span style={{ color: BUDGET_BLUE }}>¥{fmtNum(totalBudget)}</span>
                   </div>
                   <Bar budget={totalBudget} pct={tPct} color={tColor} height={6} />
                 </div>
@@ -814,10 +820,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                           <span style={{ color: TEXT_SECONDARY }}>{line.category_name}</span>
                           <span style={{ color: c, fontWeight: 700 }}>{b > 0 ? `${p}%` : "予算未設定"}</span>
                         </div>
-                        {/* 実績 / 予算 の金額 (本部 ProgressCard と同形式) */}
+                        {/* 実績 / 予算 の金額 (本部 ProgressCard と同形式)。
+                            #4 色テーマ: 実績=確定系=白、予算=予算系=青 (BUDGET_BLUE)。 */}
                         <div style={{ fontSize: 11, color: TEXT_MUTED, marginBottom: 3 }}>
                           <span style={{ color: TEXT_PRIMARY, fontWeight: 600 }}>¥{fmtNum(a)}</span>
-                          {" / "}¥{fmtNum(b)}
+                          {" / "}<span style={{ color: BUDGET_BLUE }}>¥{fmtNum(b)}</span>
                         </div>
                         <Bar budget={b} pct={p} color={c} />
                       </div>
