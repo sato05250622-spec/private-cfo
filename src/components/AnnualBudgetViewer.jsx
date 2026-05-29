@@ -15,6 +15,8 @@ import {
 
 // #2修正: 予算セルの数字色 (本部 AnnualBudgetTab の BLUE と統一)。実測セルは TEXT_PRIMARY (白系)。
 const BUDGET_BLUE = "#5BA8FF";
+// 本部準拠: 目標列ヘッダ用 GREEN (admin AnnualBudgetTab の '#43A047' と同色)。
+const TARGET_GREEN = "#43A047";
 
 // #1: 固定費の年間消化を「現在の進捗で進める」ため、本部 annualBudgetSheet.js の
 // classifyMonth / fiscalMonthCalendarYear と同一ロジックを顧客側に再実装 (別リポのため)。
@@ -224,8 +226,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // PDF 出力 (C 案): window.print() は iOS/iPadOS Safari が @page landscape を無視し
   // 縦向き＋途中列クリップになるため廃止。繰越票カード全体 (テーブル＋消化サマリー) を
   // html2canvas でキャプチャ → jsPDF で A4 横に貼り付ける。
-  // ・ページ幅にフィット (アスペクト比維持) させるため全14列が必ず1枚の横幅に収まる。
+  // ・ページ幅にフィット (アスペクト比維持) させるため全15列が必ず1枚の横幅に収まる。
   // ・縦に長く1枚に収まらない場合は画像を上方向にずらしながら複数ページへ分割。
+  // 修正③: 15列で onclone リフロー時の列幅再配分による右端見切れを防ぐため、
+  //   table-layout:fixed + colgroup で列幅を明示する。
+  // 修正①: live DOM (モバイル横スクロール幅) と cloneDoc (captureW 幅) の行高差で
+  //   chunk が破綻するため、同じ変形を施した temp clone を offscreen に置いて再測定する。
+  // 修正②: 表外 [data-pdf="grandtotal"] div は #2② で削除済 → 年間合計サマリーを文字列で
+  //   合成し、measureEl & cloneDoc 双方に挿入して tail unit として復活させる。
   const pdfRef = useRef(null);
   const pdfBusy = useRef(false);
   const handlePrint = async () => {
@@ -241,42 +249,128 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       const contentWmm = pageW - marginMm * 2;
       const contentHmm = pageH - marginMm * 2;
 
-      // 全14列 (カテゴリ＋1〜12月＋目標) の実幅をライブ DOM から測りキャプチャ幅を決める。
+      // 全15列 (項目+1〜12月+実測+目標) の実幅をライブ DOM から測りキャプチャ幅を決める。
       const tableEl = el.querySelector("table");
       const tableW = Math.ceil(Math.max(tableEl?.scrollWidth || 0, tableEl?.offsetWidth || 0));
       const captureW = Math.max(tableW + 4, 800);
       // 1ページ分の縦容量 (CSS px)。captureW px 幅を contentWmm に写すスケールで換算。
       const pageContentPx = (contentHmm * captureW) / contentWmm;
 
-      // ---- live DOM から各行/セクションの高さを測る (行は nowrap で一定高さ) ----
-      const headerH = el.querySelector('[data-pdf="header"]')?.offsetHeight || 0;
-      const theadH = el.querySelector("thead")?.offsetHeight || 0;
-      const bodyRows = Array.from(el.querySelectorAll("tbody tr"));
-      const rowHs = bodyRows.map((r) => r.offsetHeight || 1);
+      // 修正③: 15列固定レイアウト用の列幅 (項目=130 / 各月=等分 / 実測=100 / 目標=100)。
+      //   table-layout:fixed + colgroup で onclone のリフロー時に列幅が再配分されて
+      //   右が見切れる問題を防ぐ。
+      const FIXED_CAT_W = 130;
+      const FIXED_ACT_W = 100;
+      const FIXED_TGT_W = 100;
+      const FIXED_MONTH_W = Math.max(40, Math.floor((captureW - FIXED_CAT_W - FIXED_ACT_W - FIXED_TGT_W) / 12));
+
+      // PDF キャプチャ用の変形を適用 (幅展開・列幅明示・sticky 解除)。measureEl と cloneDoc 双方に
+      // 同じ変形を効かせる (live 測定と clone 描画のズレを無くす)。
+      const applyPdfLayout = (rootEl, ownerDocument) => {
+        if (!rootEl) return;
+        rootEl.style.width = `${captureW}px`;
+        rootEl.style.maxWidth = "none";
+        rootEl.style.overflow = "visible";
+        rootEl.querySelectorAll(".annual-pdf-scroll").forEach((n) => { n.style.overflow = "visible"; n.style.width = "auto"; });
+        rootEl.querySelectorAll("table").forEach((t) => {
+          t.style.minWidth = "0";
+          t.style.width = "100%";
+          t.style.tableLayout = "fixed";
+          // 既存 colgroup があれば差し替え (再適用時の二重挿入を防ぐ)。
+          const existingCg = t.querySelector("colgroup");
+          if (existingCg) existingCg.remove();
+          const cg = ownerDocument.createElement("colgroup");
+          const addCol = (w) => { const c = ownerDocument.createElement("col"); c.style.width = `${w}px`; cg.appendChild(c); };
+          addCol(FIXED_CAT_W);
+          for (let i = 0; i < 12; i++) addCol(FIXED_MONTH_W);
+          addCol(FIXED_ACT_W);
+          addCol(FIXED_TGT_W);
+          t.insertBefore(cg, t.firstChild);
+        });
+        rootEl.querySelectorAll("th, td").forEach((c) => {
+          if (c.style.position === "sticky") { c.style.position = "static"; c.style.left = "auto"; }
+        });
+      };
+
+      // 修正②: 「年間合計」サマリー (NAVY/GOLD体裁) を文字列で合成して挿入する。
+      //   #2② で表外 [data-pdf="grandtotal"] div を削除済 → ここで合成して tail unit 復活。
+      const grandTotalVal = data.committed_totals?.grandTotal ?? null;
+      const synthGrandHtml = (
+        `<div data-pdf="grandtotal" data-pdf-synth="1" style="margin:12px 16px;padding:14px 16px;border-top:1px solid rgba(212,168,67,0.22);display:flex;justify-content:space-between;gap:16px;align-items:baseline;">` +
+          `<div>` +
+            `<div style="font-size:10px;color:rgba(240,234,214,0.55);margin-bottom:4px;">年間合計</div>` +
+            `<div style="font-size:18px;font-weight:700;color:#D4A843;">¥${Number(grandTotalVal || 0).toLocaleString()}</div>` +
+          `</div>` +
+          `<div style="text-align:right;">` +
+            `<div style="font-size:10px;color:rgba(240,234,214,0.55);margin-bottom:4px;">年間目標</div>` +
+            `<div style="font-size:18px;font-weight:700;color:#43A047;">¥${Number(targetGrandTotal || 0).toLocaleString()}</div>` +
+          `</div>` +
+        `</div>`
+      );
+      const injectSynthGrand = (rootEl, ownerDocument) => {
+        if (!rootEl) return null;
+        const existing = rootEl.querySelector('[data-pdf="grandtotal"][data-pdf-synth="1"]');
+        if (existing) return existing;
+        const wrap = ownerDocument.createElement("div");
+        wrap.innerHTML = synthGrandHtml;
+        const node = wrap.firstElementChild;
+        // 挿入位置: 消化サマリー [data-pdf="summary"] の直前 (テーブル直下)。
+        const summaryEl = rootEl.querySelector('[data-pdf="summary"]');
+        if (summaryEl && summaryEl.parentNode) summaryEl.parentNode.insertBefore(node, summaryEl);
+        else rootEl.appendChild(node);
+        return node;
+      };
+
+      // 修正①: clone ベースで行高 / ヘッダ高 / tail unit 高を再測定する。
+      //   live DOM はモバイル幅 (横スクロール) で nowrap、html2canvas が捕る幅 captureW で
+      //   再配分された行高と一致しない → live 測定の rowHs で chunk すると budget 超過 → 縦clamp
+      //   発火 → 画像縮小/見切れ (症状 ①④)。同じ変形を施した temp clone を offscreen に置き、
+      //   offsetHeight で測ることで chunk 精度を確保する。
+      const measureRoot = el.cloneNode(true);
+      measureRoot.style.position = "absolute";
+      measureRoot.style.left = "-99999px";
+      measureRoot.style.top = "0";
+      measureRoot.style.visibility = "hidden";
+      measureRoot.style.pointerEvents = "none";
+      document.body.appendChild(measureRoot);
+      applyPdfLayout(measureRoot, document);
+      const synthMeasureNode = injectSynthGrand(measureRoot, document);
+
+      const headerH = measureRoot.querySelector('[data-pdf="header"]')?.offsetHeight || 0;
+      const theadH  = measureRoot.querySelector("thead")?.offsetHeight || 0;
+      const rowHs = Array.from(measureRoot.querySelectorAll("tbody tr")).map((r) => r.offsetHeight || 1);
+      const synthGrandH = synthMeasureNode?.offsetHeight || 0;
+      const sumTitleH   = measureRoot.querySelector('[data-pdf-unit="sum-title"]')?.offsetHeight || 0;
+      const sumOverallH = measureRoot.querySelector('[data-pdf-unit="sum-overall"]')?.offsetHeight || 0;
+      const sumBarHs    = Array.from(measureRoot.querySelectorAll('[data-pdf-unit="sum-bar"]')).map((n) => n.offsetHeight || 1);
+      const sumNoteH    = measureRoot.querySelector('[data-pdf-unit="sum-note"]')?.offsetHeight || 0;
+      const legendH     = measureRoot.querySelector('[data-pdf="legend"]')?.offsetHeight || 0;
+      document.body.removeChild(measureRoot);
 
       // ---- テーブルページ: 行を「行境界で」チャンク化 (各ページ thead 分、先頭は header も確保) ----
       const tablePages = [];
       {
         let i = 0; let first = true;
-        while (i < bodyRows.length) {
+        while (i < rowHs.length) {
           const budget = pageContentPx - theadH - (first ? headerH : 0);
           let used = 0; const start = i;
-          while (i < bodyRows.length && (used === 0 || used + rowHs[i] <= budget)) { used += rowHs[i]; i += 1; }
+          while (i < rowHs.length && (used === 0 || used + rowHs[i] <= budget)) { used += rowHs[i]; i += 1; }
           tablePages.push({ start, end: i, showHeader: first });
           first = false;
         }
         if (tablePages.length === 0) tablePages.push({ start: 0, end: 0, showHeader: true });
       }
 
-      // ---- 末尾セクション (年間合計 + 消化サマリー + 凡例) を unit 単位でページ詰め ----
+      // ---- 末尾セクション (合成 年間合計 + 消化サマリー + 凡例) を unit 単位でページ詰め ----
+      // 修正②: grandtotal は DOM 依存 ([data-pdf="grandtotal"] node 検索) を廃止し、
+      //   measureRoot で測った合成 div の高さを使う。
       const tailUnits = [];
-      const pushUnit = (key, node) => { if (node) tailUnits.push({ key, h: node.offsetHeight || 1 }); };
-      pushUnit("grandtotal", el.querySelector('[data-pdf="grandtotal"]'));
-      pushUnit("sum-title", el.querySelector('[data-pdf-unit="sum-title"]'));
-      pushUnit("sum-overall", el.querySelector('[data-pdf-unit="sum-overall"]'));
-      Array.from(el.querySelectorAll('[data-pdf-unit="sum-bar"]')).forEach((n, idx) => pushUnit(`sum-bar:${idx}`, n));
-      pushUnit("sum-note", el.querySelector('[data-pdf-unit="sum-note"]'));
-      pushUnit("legend", el.querySelector('[data-pdf="legend"]'));
+      if (synthGrandH > 0) tailUnits.push({ key: "grandtotal", h: synthGrandH });
+      if (sumTitleH > 0)   tailUnits.push({ key: "sum-title",  h: sumTitleH });
+      if (sumOverallH > 0) tailUnits.push({ key: "sum-overall", h: sumOverallH });
+      sumBarHs.forEach((h, idx) => tailUnits.push({ key: `sum-bar:${idx}`, h }));
+      if (sumNoteH > 0)    tailUnits.push({ key: "sum-note",   h: sumNoteH });
+      if (legendH > 0)     tailUnits.push({ key: "legend",     h: legendH });
       const tailPages = [];
       {
         let used = 0; let cur = [];
@@ -287,22 +381,18 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         if (cur.length > 0) tailPages.push(cur);
       }
 
-      // 共通 onclone: 幅展開・クリップ解除・カテゴリ列の sticky 解除 (左端ずれ防止)。
-      const baseClone = (clonedDoc) => {
-        const root = clonedDoc.querySelector(".annual-pdf-root");
-        if (root) { root.style.width = `${captureW}px`; root.style.maxWidth = "none"; root.style.overflow = "visible"; }
-        clonedDoc.querySelectorAll(".annual-pdf-scroll").forEach((n) => { n.style.overflow = "visible"; n.style.width = "auto"; });
-        clonedDoc.querySelectorAll(".annual-pdf-root table").forEach((t) => { t.style.minWidth = "0"; t.style.width = "100%"; });
-        clonedDoc.querySelectorAll(".annual-pdf-root th, .annual-pdf-root td").forEach((c) => {
-          if (c.style.position === "sticky") { c.style.position = "static"; c.style.left = "auto"; }
-        });
-      };
       const setDisp = (cd, sel, show) => { const n = cd.querySelector(sel); if (n) n.style.display = show ? "" : "none"; };
+      // 共通 onclone: 幅展開・列幅明示・sticky 解除 + 合成 年間合計 div を挿入。
       const capture = (configure) => html2canvas(el, {
         scale, backgroundColor: CARD_BG, useCORS: true,
         width: captureW, windowWidth: captureW + 40,
         ignoreElements: (node) => node.classList?.contains?.("no-print"),
-        onclone: (clonedDoc) => { baseClone(clonedDoc); configure(clonedDoc); },
+        onclone: (clonedDoc) => {
+          const root = clonedDoc.querySelector(".annual-pdf-root");
+          applyPdfLayout(root, clonedDoc);
+          injectSynthGrand(root, clonedDoc);
+          configure(clonedDoc);
+        },
       });
 
       // 各ページ canvas を A4 横に貼付 (左右に marginMm、横中央寄せ、高さは念のため clamp)。
@@ -434,6 +524,34 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     committedSettledMonths.includes(m) || committedSettledMonths.includes(String(m));
   const hasSettled = committedSettledMonths.length > 0;
 
+  // 本部準拠: 行ごとの年間「実測」算出 (rowYearSpent 相当)。
+  // - カテゴリ/特殊行: 本部が反映時に焼いた monthly_spent (実支出シリーズ) を 12 月合算。
+  //   旧 committed (monthly_spent 無し) は 0 にフォールバック (エラーにしない)。
+  // - 固定費 (committed に monthly_spent 無し): Σ (monthly_amounts[m] ?? monthly_amount)。
+  //   classifyMonth が future の月は不算入 (#1 修正・現在進捗で進む挙動を維持)。
+  // 明細テーブルの「実測」列と消化サマリーの実測の両方から参照する。
+  const sumLineSpent = (l) => {
+    const s = l?.monthly_spent;
+    if (!s || typeof s !== "object") return 0;
+    let sum = 0;
+    for (const k of Object.keys(s)) sum += Number(s[k]) || 0;
+    return sum;
+  };
+  const lineYearSpent = (l) => {
+    if (l?.row_type === "fixed_cost") {
+      const ma = l.monthly_amounts;
+      const base = Number(l.monthly_amount) || 0;
+      let s = 0;
+      for (let m = 1; m <= 12; m++) {
+        if (classifyMonth(fyYear, m, msd, todayStr, startMonth) === "future") continue;
+        const v = ma ? (ma[m] ?? ma[String(m)]) : null;
+        s += (v != null ? Number(v) : base) || 0;
+      }
+      return s;
+    }
+    return sumLineSpent(l);
+  };
+
   // 横画面では横方向 padding を詰めて 12ヶ月 + カテゴリ列が横スクロール無しで収まるようにする。
   // fontSize は可読下限 11px 維持。
   const cellPadX = isLandscape ? 5 : 8;
@@ -451,7 +569,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // 縦・横とも auto layout + 親 div overflowX:auto による横スクロールに統一。
   // 目標列(+1)を見込み minWidth を 640→720 に拡張 (各列が読める幅を保つ)。
   // 横画面で tableLayout:fixed をやめたため iOS Safari の sticky×fixed ゴーストバグは発生しない。
-  const tableStyle = { borderCollapse: "collapse", width: "100%", minWidth: 720 };
+  // 本部準拠: 15列化 (項目+12月+実測+目標) で minWidth 720→800 に拡張。
+  const tableStyle = { borderCollapse: "collapse", width: "100%", minWidth: 800 };
   // isLandscape は PDF 全画面化 (横画面 breakout) で引き続き使用するため残置。
   void isLandscape;
 
@@ -521,7 +640,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   >{m}月</th>
                 );
               })}
-              <th style={{ ...headCellStyle }}>目標</th>
+              {/* 本部準拠: 「実測」(GOLD見出し) と「目標」(GREEN見出し) を月セル群の後に */}
+              <th style={{ ...headCellStyle }}>実測</th>
+              <th style={{ ...headCellStyle, color: TARGET_GREEN }}>目標</th>
             </tr>
           </thead>
           <tbody>
@@ -560,18 +681,23 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                     >{fmtCell(cell.value)}</td>
                   );
                 })}
-                <td style={{ ...cellStyle, fontWeight: 700, color: line?.target_value == null ? TEXT_MUTED : GOLD }}>
+                {/* 本部準拠: 行の年間「実測」(rowYearSpent 相当) */}
+                <td style={{ ...cellStyle, fontWeight: 700, color: GOLD }}>
+                  {fmtCell(lineYearSpent(line))}
+                </td>
+                <td style={{ ...cellStyle, fontWeight: 700, color: line?.target_value == null ? TEXT_MUTED : TARGET_GREEN }}>
                   {fmtCell(line?.target_value)}
                 </td>
               </tr>
               );
             })}
+            {/* 本部準拠: 合計行① 支出合計 (月別 + 年間実測 grand + 目標 grand) */}
             <tr>
               <td style={{
                 ...cellStyle, ...stickyBase, background: NAVY2,
                 fontWeight: 700, color: GOLD,
               }}>
-                月合計
+                支出合計
               </td>
               {monthOrder.map((m) => {
                 const sel = m === selectedMonth;
@@ -584,24 +710,38 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   </td>
                 );
               })}
-              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: GOLD }}>
+              {/* 年間実測 grand (data.committed_totals.grandTotal)。表外の「年間合計」div は廃止し、ここに統合。 */}
+              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: grandTotal == null ? TEXT_MUTED : GOLD }}>
+                {fmtCell(grandTotal)}
+              </td>
+              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: (targetGrandTotal || 0) > 0 ? TARGET_GREEN : TEXT_MUTED }}>
                 {fmtCell(targetGrandTotal || null)}
               </td>
+            </tr>
+            {/* 本部準拠: 合計行② 累計支出 (data.committed_totals.cumulative、無ければ空) */}
+            <tr>
+              <td style={{
+                ...cellStyle, ...stickyBase, background: NAVY2,
+                fontWeight: 700, color: TEXT_SECONDARY,
+              }}>
+                累計支出
+              </td>
+              {monthOrder.map((m) => {
+                const cum = data.committed_totals?.cumulative;
+                const v = cum ? pickMonth(cum, m) : null;
+                return (
+                  <td key={m} style={{ ...cellStyle, background: NAVY2, fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY }}>
+                    {fmtCell(v)}
+                  </td>
+                );
+              })}
+              {/* 実測 / 目標 セルは admin 準拠で空白 */}
+              <td style={{ ...cellStyle, background: NAVY2, color: TEXT_MUTED }} />
+              <td style={{ ...cellStyle, background: NAVY2, color: TEXT_MUTED }} />
             </tr>
           </tbody>
         </table>
       </div>
-      {grandTotal != null && (
-        <div data-pdf="grandtotal" style={{
-          padding: "10px 16px", borderTop: `1px solid ${BORDER}`,
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-        }}>
-          <span style={{ fontSize: 11, color: TEXT_MUTED }}>年間合計</span>
-          <span style={{ fontSize: 14, fontWeight: 700, color: GOLD }}>
-            {Number(grandTotal).toLocaleString()}円
-          </span>
-        </div>
-      )}
 
       {/* Phase 2: カテゴリ別 目標消化率 (進捗バー) */}
       {sortedLines.filter((l) => l.row_type === "category" && !l.archived).length > 0 && (
@@ -613,32 +753,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           {(() => {
             const cats = sortedLines.filter((l) => l.row_type === "category" && !l.archived);
             // 消化(実支出)= 本部が焼いた実支出シリーズ monthly_spent の合計。
-            // 将来月の予算配分は含まない (確定実測+経過月/当月ライブ実支出のみ)。
-            // 旧 committed データ (monthly_spent 無し) は消化 0 にフォールバック (エラーにしない)。
-            const sumLineSpent = (l) => {
-              const s = l?.monthly_spent;
-              if (!s || typeof s !== "object") return 0;
-              let sum = 0;
-              for (const k of Object.keys(s)) sum += Number(s[k]) || 0;
-              return sum;
-            };
-            // 固定費行 (committed に monthly_spent 無し) の年間実測 = Σ(monthly_amounts[m] ?? monthly_amount)。
-            // 本部 rowYearSpent の固定費分岐と同等。
-            // #1 修正: 12ヶ月全合算 (常に満額) をやめ、classifyMonth が past/current の月だけ合算
-            //   (将来月は不算入)。カテゴリ行 (monthly_spent ベース) と同じ「現在の進捗で進む」挙動に揃える。
-            const lineYearSpent = (l) => {
-              if (l?.row_type === "fixed_cost") {
-                const ma = l.monthly_amounts; const base = Number(l.monthly_amount) || 0;
-                let s = 0;
-                for (let m = 1; m <= 12; m++) {
-                  if (classifyMonth(fyYear, m, msd, todayStr, startMonth) === "future") continue;
-                  const v = ma ? (ma[m] ?? ma[String(m)]) : null;
-                  s += (v != null ? Number(v) : base) || 0;
-                }
-                return s;
-              }
-              return sumLineSpent(l);
-            };
+            // sumLineSpent / lineYearSpent は本部準拠で viewer スコープに引き上げ済み (上 L443/L450)。
+            // ここからは両関数を直接参照する (重複定義を削除)。
             // 方針A: 消化サマリーのカテゴリ予算 = 全12ヶ月 week_cat_budgets 合計 (実際に設定した月予算)。
             //   固定費・特殊行は従来どおり target_value。本部 AnnualBudgetTab.summaryBudget と同一。
             const summaryBudget = (l) => (
