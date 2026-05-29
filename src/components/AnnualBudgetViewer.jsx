@@ -6,7 +6,7 @@ import { listFiscalYearsByClient } from "../lib/api/annualBudgets";
 import { useLoans } from "../hooks/useLoans";
 import { useBudgets } from "../hooks/useBudgets";
 import { PopoverDial } from "./MonthDialPicker";
-import { cycleStart, cycleEnd, getManagementStartDay } from "../utils/cycle";
+import { cycleStart, cycleEnd, findCycleOfDate, getManagementStartDay } from "../utils/cycle";
 import { toDateStr } from "@shared/format";
 import {
   GOLD, NAVY, NAVY2, NAVY3, CARD_BG, BORDER, RED, TEAL,
@@ -625,6 +625,77 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           width={110}
         />
       </div>
+      {/* #5 年間累計プログレスバー (msd 基準会計年度の月軸付き、テーブル直前に挿入)。
+          - 累計確定 = data.committed_totals.grandTotal (snapshot)
+          - 年間予算 = targetGrandTotal (= Σ line.target_value)
+          - 月軸    = monthOrder (msd/fiscal_year_start_month で並べ替えた 1-12)
+          - 現在サイクル = findCycleOfDate(new Date(), msd).month + 1 (calendar 月、1-12)
+          - 0 除算回避: 年間予算 0 → pct=0、バー塗りは描画しない (背景のみ)
+      */}
+      {(() => {
+        const cum = Number(grandTotal) || 0;
+        const budget = Number(targetGrandTotal) || 0;
+        const pct = budget > 0 ? Math.min((cum / budget) * 100, 100) : 0;
+        const currentCycleMonth = findCycleOfDate(new Date(), msd).month + 1;
+        return (
+          <div style={{
+            padding: '16px 12px',
+            margin: '12px 16px 20px',
+            background: NAVY2,
+            borderRadius: 8,
+            border: `1px solid ${GOLD}45`,
+          }}>
+            {/* タイトル */}
+            <div style={{ fontSize: 14, fontWeight: 600, color: GOLD, marginBottom: 8 }}>
+              年間累計
+            </div>
+            {/* 金額: ¥累計 / ¥年間予算 */}
+            <div style={{ marginBottom: 10, lineHeight: 1.2, fontWeight: 700 }}>
+              <span style={{ color: TEXT_PRIMARY, fontSize: 20 }}>¥{cum.toLocaleString()}</span>
+              <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400, fontSize: 14 }}>/</span>
+              <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{budget.toLocaleString()}</span>
+            </div>
+            {/* 横長バー: 14px 高 / 7px 角丸 / NAVY3 背景 / GOLD グラデ塗り */}
+            <div style={{
+              width: '100%', height: 14, borderRadius: 7,
+              background: NAVY3, overflow: 'hidden', marginBottom: 4,
+            }}>
+              {budget > 0 && (
+                <div style={{
+                  width: `${pct}%`, height: '100%', borderRadius: 7,
+                  background: 'linear-gradient(90deg, #D4A843 0%, #B88E33 100%)',
+                  transition: 'width 0.3s',
+                }} />
+              )}
+            </div>
+            {/* 月軸: monthOrder の順、刻み線 GOLD 25% 透過 (=`${GOLD}40`)、
+                現在サイクルのみ GOLD 強調 + 上に ▼ マーカー */}
+            <div style={{ display: 'flex', paddingTop: 12, position: 'relative' }}>
+              {monthOrder.map((m, i) => {
+                const isCurrent = m === currentCycleMonth;
+                return (
+                  <div key={m} style={{
+                    position: 'relative', flex: 1, textAlign: 'center',
+                    fontSize: 10,
+                    color: isCurrent ? GOLD : TEXT_SECONDARY,
+                    fontWeight: isCurrent ? 700 : 400,
+                    borderLeft: i === 0 ? 'none' : `1px solid ${GOLD}40`,
+                  }}>
+                    {isCurrent && (
+                      <div style={{
+                        position: 'absolute', top: -10, left: '50%',
+                        transform: 'translateX(-50%)',
+                        fontSize: 9, color: GOLD, lineHeight: 1,
+                      }}>▼</div>
+                    )}
+                    {m}月
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
       <div className="annual-pdf-scroll" style={{ overflowX: "auto" }}>
         <table style={tableStyle}>
           <thead>
