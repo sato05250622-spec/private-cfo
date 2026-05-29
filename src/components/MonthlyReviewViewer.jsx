@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 import { getPublishedByMonth } from "../lib/api/monthlyReviews";
 import {
-  GOLD, TEAL, RED, NAVY2, NAVY3, CARD_BG, BORDER, SHADOW,
+  GOLD, NAVY, TEAL, RED, NAVY2, NAVY3, CARD_BG, BORDER, SHADOW,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 } from "@shared/theme";
 
@@ -164,6 +166,10 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
   const [sortMode, setSortMode] = useState("manual");
   // ⑥: 旧フォーマット (振り返り/アドバイス/プラン) アコーディオン開閉 (本部準拠、既定 閉)。
   const [legacyOpen, setLegacyOpen] = useState(false);
+  // PDF 出力: 繰越票 (AnnualBudgetViewer.handlePrint) と同方式 (jsPDF + html2canvas)。
+  // pdfRef = ルート div、pdfBusy = 二重押下防止。
+  const pdfRef = useRef(null);
+  const pdfBusy = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -196,10 +202,201 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
   // 修正1: 「項目」列の右に縦罫線 (項目↔予算の区切り)。
   const itemColStyle = { ...cellStyle, borderRight: `1px solid ${BORDER}` };
 
+  // PDF 出力 (繰越票 AnnualBudgetViewer.handlePrint と同方式: jsPDF + html2canvas)。
+  // 本部 pdf.jsx (window.print) は iOS PWA で不安定 → 採用せず。
+  // multi-page 分割は繰越票準拠: 明細表=行単位 (tablePages)、コメント section=section 単位 (tailPages)。
+  // 月次レビューは縦長 → A4 portrait。
+  const handlePrint = async () => {
+    const el = pdfRef.current;
+    if (!el || pdfBusy.current) return;
+    pdfBusy.current = true;
+    try {
+      const scale = 2;
+      const marginMm = 8;
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();   // 210mm
+      const pageH = doc.internal.pageSize.getHeight();  // 297mm
+      const contentWmm = pageW - marginMm * 2;          // 194mm
+      const contentHmm = pageH - marginMm * 2;          // 281mm
+
+      // 横幅: ルートの自然幅 (>=480px)。月次レビューは横スクロール不要なので繰越票より単純。
+      const captureW = Math.max(el.scrollWidth || 0, el.offsetWidth || 0, 480);
+      const pageContentPx = (contentHmm * captureW) / contentWmm;
+
+      // 繰越票 applyPdfLayout の簡略版: 幅展開 + 横スクロールラッパ解除。
+      // colgroup 列幅固定 / sticky 解除は不要 (月次レビュー table は 5 列・sticky なし)。
+      const applyPdfLayout = (rootEl) => {
+        if (!rootEl) return;
+        rootEl.style.width = `${captureW}px`;
+        rootEl.style.maxWidth = "none";
+        rootEl.style.overflow = "visible";
+        rootEl.querySelectorAll(".review-pdf-scroll").forEach((n) => {
+          n.style.overflow = "visible";
+          n.style.width = "auto";
+        });
+      };
+
+      // 繰越票同様、clone を offscreen に置いて行高/セクション高を再測定。
+      // live DOM (モバイル overflowX:auto) と cloneDoc (展開後 captureW) で
+      // 行高がズレるのを吸収する。
+      const measureRoot = el.cloneNode(true);
+      measureRoot.style.position = "absolute";
+      measureRoot.style.left = "-99999px";
+      measureRoot.style.top = "0";
+      measureRoot.style.visibility = "hidden";
+      measureRoot.style.pointerEvents = "none";
+      document.body.appendChild(measureRoot);
+      applyPdfLayout(measureRoot);
+
+      const headerH = measureRoot.querySelector('[data-pdf="header"]')?.offsetHeight || 0;
+      const diagH = measureRoot.querySelector('[data-pdf-unit="diag-badge"]')?.offsetHeight || 0;
+      const tableTitleH = measureRoot.querySelector('[data-pdf-unit="table-title"]')?.offsetHeight || 0;
+      const tableEl = measureRoot.querySelector('[data-pdf="table-block"] table');
+      const theadH = tableEl?.querySelector("thead")?.offsetHeight || 0;
+      const rowHs = tableEl ? Array.from(tableEl.querySelectorAll("tbody tr")).map((r) => r.offsetHeight || 1) : [];
+
+      const unitH = (sel) => measureRoot.querySelector(sel)?.offsetHeight || 0;
+      const mgmtH         = unitH('[data-pdf-unit="mgmt-summary"]');
+      const nextActionH   = unitH('[data-pdf-unit="next-action"]');
+      const staffCommentH = unitH('[data-pdf-unit="staff-comment"]');
+      const legacySummH   = unitH('[data-pdf-unit="legacy-summary"]');
+      const legacyAdvH    = unitH('[data-pdf-unit="legacy-advice"]');
+      const legacyPlanH   = unitH('[data-pdf-unit="legacy-plan"]');
+
+      document.body.removeChild(measureRoot);
+
+      // ---- table pages: 行を「行境界で」チャンク化。
+      //   1ページ目は header + diag + table-title + thead を上に置き、残りで rows 詰め。
+      //   2ページ目以降は thead だけ。
+      const tablePages = [];
+      if (rowHs.length > 0) {
+        let i = 0; let first = true;
+        while (i < rowHs.length) {
+          const overhead = first ? (headerH + diagH + tableTitleH) : 0;
+          const budget = pageContentPx - theadH - overhead;
+          let used = 0; const start = i;
+          while (i < rowHs.length && (used === 0 || used + rowHs[i] <= budget)) {
+            used += rowHs[i]; i += 1;
+          }
+          tablePages.push({ start, end: i, isFirst: first });
+          first = false;
+        }
+      }
+
+      // ---- tail pages: 末尾セクションを unit 単位でページ詰め (繰越票 tailPages 準拠)。
+      //   table がない場合は最初の tail page にも header + diag を載せる。
+      const tailFirstNeedsHeader = tablePages.length === 0;
+      const firstTailOverhead = tailFirstNeedsHeader ? (headerH + diagH) : 0;
+      const tailUnits = [];
+      if (mgmtH > 0)         tailUnits.push({ key: 'mgmt-summary',   h: mgmtH });
+      if (nextActionH > 0)   tailUnits.push({ key: 'next-action',    h: nextActionH });
+      if (staffCommentH > 0) tailUnits.push({ key: 'staff-comment',  h: staffCommentH });
+      if (legacySummH > 0)   tailUnits.push({ key: 'legacy-summary', h: legacySummH });
+      if (legacyAdvH > 0)    tailUnits.push({ key: 'legacy-advice',  h: legacyAdvH });
+      if (legacyPlanH > 0)   tailUnits.push({ key: 'legacy-plan',    h: legacyPlanH });
+      const tailPages = [];
+      {
+        let used = 0; let cur = [];
+        for (const u of tailUnits) {
+          const pageBudget = pageContentPx - (tailPages.length === 0 ? firstTailOverhead : 0);
+          if (cur.length > 0 && used + u.h > pageBudget) {
+            tailPages.push(cur); cur = []; used = 0;
+          }
+          cur.push(u.key); used += u.h;
+        }
+        if (cur.length > 0) tailPages.push(cur);
+      }
+
+      const setDisp = (cd, sel, show) => {
+        const n = cd.querySelector(sel);
+        if (n) n.style.display = show ? "" : "none";
+      };
+      // 共通 onclone: applyPdfLayout 適用 + ページごとの表示/非表示は configure で差分指定。
+      const capture = (configure) => html2canvas(el, {
+        scale, backgroundColor: CARD_BG, useCORS: true,
+        width: captureW, windowWidth: captureW + 40,
+        ignoreElements: (node) => node.classList?.contains?.("no-print"),
+        onclone: (clonedDoc) => {
+          const root = clonedDoc.querySelector(".review-pdf-root");
+          applyPdfLayout(root);
+          configure(clonedDoc);
+        },
+      });
+
+      // 各ページの canvas を A4 縦に貼付 (左右に marginMm、横中央寄せ、縦 clamp)。
+      let pageIndex = 0;
+      const addCanvasPage = (canvas) => {
+        if (pageIndex > 0) doc.addPage();
+        pageIndex += 1;
+        let w = contentWmm;
+        let h = (canvas.height * w) / canvas.width;
+        if (h > contentHmm) { h = contentHmm; w = (canvas.width * h) / canvas.height; }
+        doc.addImage(canvas.toDataURL("image/png"), "PNG", (pageW - w) / 2, marginMm, w, h);
+      };
+
+      // テーブルページ (thead は table 内に常にあるので各ページ自動的に含まれる)。
+      for (const tp of tablePages) {
+        // eslint-disable-next-line no-await-in-loop
+        const canvas = await capture((cd) => {
+          setDisp(cd, '[data-pdf="header"]',            tp.isFirst);
+          setDisp(cd, '[data-pdf-unit="diag-badge"]',   tp.isFirst);
+          setDisp(cd, '[data-pdf-unit="table-title"]',  tp.isFirst);
+          setDisp(cd, '[data-pdf="table-block"]',       true);
+          setDisp(cd, '[data-pdf-unit="mgmt-summary"]',  false);
+          setDisp(cd, '[data-pdf-unit="next-action"]',   false);
+          setDisp(cd, '[data-pdf-unit="staff-comment"]', false);
+          setDisp(cd, '[data-pdf-unit="legacy-summary"]', false);
+          setDisp(cd, '[data-pdf-unit="legacy-advice"]',  false);
+          setDisp(cd, '[data-pdf-unit="legacy-plan"]',    false);
+          cd.querySelectorAll('[data-pdf="table-block"] tbody tr').forEach((tr, i) => {
+            tr.style.display = (i >= tp.start && i < tp.end) ? "" : "none";
+          });
+        });
+        addCanvasPage(canvas);
+      }
+
+      // 末尾ページ (管理サマリー / コメント / 旧フォーマット)。
+      for (let pi = 0; pi < tailPages.length; pi++) {
+        const units = tailPages[pi];
+        const set = new Set(units);
+        const isFirstTail = pi === 0 && tailFirstNeedsHeader;
+        // eslint-disable-next-line no-await-in-loop
+        const canvas = await capture((cd) => {
+          setDisp(cd, '[data-pdf="header"]',          isFirstTail);
+          setDisp(cd, '[data-pdf-unit="diag-badge"]', isFirstTail);
+          setDisp(cd, '[data-pdf="table-block"]',     false);
+          setDisp(cd, '[data-pdf-unit="mgmt-summary"]',   set.has('mgmt-summary'));
+          setDisp(cd, '[data-pdf-unit="next-action"]',    set.has('next-action'));
+          setDisp(cd, '[data-pdf-unit="staff-comment"]',  set.has('staff-comment'));
+          setDisp(cd, '[data-pdf-unit="legacy-summary"]', set.has('legacy-summary'));
+          setDisp(cd, '[data-pdf-unit="legacy-advice"]',  set.has('legacy-advice'));
+          setDisp(cd, '[data-pdf-unit="legacy-plan"]',    set.has('legacy-plan'));
+        });
+        addCanvasPage(canvas);
+      }
+
+      // フォールバック: テーブルもセクションも何も無い場合は素のキャプチャを 1 枚だけ。
+      if (pageIndex === 0) {
+        const canvas = await capture(() => {});
+        addCanvasPage(canvas);
+      }
+
+      doc.save(`月次レビュー_${year}年${String(month).padStart(2, '0')}月.pdf`);
+    } catch (err) {
+      console.error('[MonthlyReviewViewer.handlePrint]', err);
+      // eslint-disable-next-line no-alert
+      window.alert('PDF 出力に失敗しました: ' + (err?.message ?? err));
+    } finally {
+      pdfBusy.current = false;
+    }
+  };
+
   return (
-    <div style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden", boxShadow: SHADOW }}>
-      {/* ヘッダ (繰越票・StatusCard と統一感: 44px TEAL アイコンボックス + GOLD タイトル) */}
-      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${BORDER}`, display: "flex", alignItems: "center", gap: 12 }}>
+    <div ref={pdfRef} className="review-pdf-root" style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden", boxShadow: SHADOW }}>
+      {/* ヘッダ (繰越票・StatusCard と統一感: 44px TEAL アイコンボックス + GOLD タイトル)
+          data-pdf="header" は handlePrint 内で 1 ページ目のみ表示するためのマーカ。
+          📄 PDF ボタンは className="no-print" で html2canvas キャプチャ時に除外される。 */}
+      <div data-pdf="header" style={{ padding: "14px 18px", borderBottom: `1px solid ${BORDER}`, display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ width: 44, height: 44, borderRadius: 12, background: `${TEAL}22`, border: `1px solid ${TEAL}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>📝</div>
         <div>
           <div style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>
@@ -210,11 +407,23 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
             {data.published_at && <span>公開: {fmtDateTime(data.published_at)}</span>}
           </div>
         </div>
+        <button
+          className="no-print"
+          onClick={handlePrint}
+          style={{
+            marginLeft: "auto",
+            background: GOLD, color: NAVY, border: "none", borderRadius: 8,
+            padding: "6px 12px", fontSize: 12, fontWeight: 700,
+            cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+          }}
+        >
+          📄 PDF
+        </button>
       </div>
 
       <div style={{ padding: "14px 16px" }}>
-        {/* 診断バッジ (常に表示: 手動 or 達成率自動) */}
-        <div style={{
+        {/* 診断バッジ (常に表示: 手動 or 達成率自動) — data-pdf-unit でユニット管理。 */}
+        <div data-pdf-unit="diag-badge" style={{
           display: "inline-block", fontSize: 11, fontWeight: 700, color: diag.color,
           background: `${diag.color}22`, border: `1px solid ${diag.color}44`,
           borderRadius: 8, padding: "4px 10px", marginBottom: 12,
@@ -223,13 +432,17 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
         </div>
 
         {/* ⑥: 明細テーブル — 本部 LineRow と同じ 5 列 (項目/予算/当月金額/予算比/差異理由)。
-            ツリー(#5) + 表示専用ソート(#6) + 合計行(TotalsRow 相当)。閲覧専用 (編集列なし)。 */}
+            ツリー(#5) + 表示専用ソート(#6) + 合計行(TotalsRow 相当)。閲覧専用 (編集列なし)。
+            data-pdf="table-block" は handlePrint 内で table page 時にのみ表示。
+            data-pdf-unit="table-title" は table 1 ページ目のみ表示。
+            ソートトグルは className="no-print" で PDF には含めない。
+            .review-pdf-scroll は overflow:auto を PDF キャプチャ時に解除する用。 */}
         {lines.length > 0 && (
-          <div style={{ marginTop: 4 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+          <div data-pdf="table-block" style={{ marginTop: 4 }}>
+            <div data-pdf-unit="table-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
               <div style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 700 }}>📊 明細</div>
-              {/* #6: 並び替えトグル (表示専用、手動/予算超過%順/金額順) */}
-              <div style={{ display: "inline-flex", background: NAVY2, border: `1px solid ${BORDER}`, borderRadius: 999, padding: 2 }}>
+              {/* #6: 並び替えトグル (表示専用、手動/予算超過%順/金額順)。PDF 出力時は no-print で除外。 */}
+              <div className="no-print" style={{ display: "inline-flex", background: NAVY2, border: `1px solid ${BORDER}`, borderRadius: 999, padding: 2 }}>
                 {[["manual", "手動"], ["overpct", "超過%"], ["amount", "金額"]].map(([mode, label]) => {
                   const active = sortMode === mode;
                   return (
@@ -244,7 +457,7 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
                 })}
               </div>
             </div>
-            <div style={{ overflowX: "auto" }}>
+            <div className="review-pdf-scroll" style={{ overflowX: "auto" }}>
               <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 450 }}>
                 <thead>
                   <tr>
@@ -311,22 +524,34 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
           </div>
         )}
 
-        {/* ⑥: 管理サマリー (本部 ManagementSummary と同じ MetricCard 3枚) */}
-        {(totals.total_budget != null || totals.total_actual != null || totals.achievement_ratio != null) && (
-          <ManagementSummaryView totals={totals} />
-        )}
+        {/* ⑥: 管理サマリー (本部 ManagementSummary と同じ MetricCard 3枚)。
+            data-pdf-unit="mgmt-summary" は handlePrint の tailPages 用マーカ。
+            条件 false 時は wrapper は空で h=0、tailUnits からは自動除外される。 */}
+        <div data-pdf-unit="mgmt-summary">
+          {(totals.total_budget != null || totals.total_actual != null || totals.achievement_ratio != null) && (
+            <ManagementSummaryView totals={totals} />
+          )}
+        </div>
 
-        {/* ⑥: コメント類 (明細・サマリーの下、本部と同じ並び: 次回対策 → 担当者) */}
+        {/* ⑥: コメント類 (明細・サマリーの下、本部と同じ並び: 次回対策 → 担当者)。
+            各 Section を data-pdf-unit でラップ (Section は value 空時 null を返すので wrapper 空=h=0)。 */}
         <div style={{ marginTop: 14 }}>
-          <Section label="🎯 次回対策コメント" value={data.next_action_comment} />
-          <Section label="💬 担当者コメント" value={data.staff_comment} />
+          <div data-pdf-unit="next-action">
+            <Section label="🎯 次回対策コメント" value={data.next_action_comment} />
+          </div>
+          <div data-pdf-unit="staff-comment">
+            <Section label="💬 担当者コメント" value={data.staff_comment} />
+          </div>
         </div>
 
         {/* ⑥: 旧フォーマット (参考) アコーディオン — 本部 ReviewCard と同じく下部に格納。
-            今月の振り返り / CFOからのアドバイス / 来月のアクションプラン。 */}
+            今月の振り返り / CFOからのアドバイス / 来月のアクションプラン。
+            開閉ボタンは className="no-print" で PDF 出力時は除外。
+            legacy section は accordion 開時のみ DOM 描画 → 閉じてる場合は PDF にも出ない (UI と一貫)。 */}
         {(data.summary || data.advice || data.next_month_plan) && (
           <div style={{ marginTop: 8, borderTop: `1px solid ${BORDER}`, paddingTop: 10 }}>
             <button
+              className="no-print"
               onClick={() => setLegacyOpen((o) => !o)}
               style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "4px 0", background: "transparent", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, color: TEXT_MUTED, textAlign: "left" }}
             >
@@ -335,9 +560,15 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
             </button>
             {legacyOpen && (
               <div style={{ marginTop: 8 }}>
-                <Section label="📝 今月の振り返り" value={data.summary} />
-                <Section label="💡 CFOからのアドバイス" value={data.advice} />
-                <Section label="🚀 来月のアクションプラン" value={data.next_month_plan} />
+                <div data-pdf-unit="legacy-summary">
+                  <Section label="📝 今月の振り返り" value={data.summary} />
+                </div>
+                <div data-pdf-unit="legacy-advice">
+                  <Section label="💡 CFOからのアドバイス" value={data.advice} />
+                </div>
+                <div data-pdf-unit="legacy-plan">
+                  <Section label="🚀 来月のアクションプラン" value={data.next_month_plan} />
+                </div>
               </div>
             )}
           </div>
