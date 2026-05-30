@@ -791,8 +791,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400, fontSize: 14 }}>/</span>
               <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{yearBudgetTotal.toLocaleString()}</span>
             </div>
-            {/* 横長バー: 14px 高 / 7px 角丸 / NAVY3 背景 / GOLD or RED グラデ塗り */}
+            {/* 横長バー: 14px 高 / 7px 角丸 / NAVY3 背景 / GOLD or RED グラデ塗り
+                + 月境界 dashed 線 11 本 (1/12, 2/12, ..., 11/12 位置に縦点線、fill の上に重ねる)。 */}
             <div style={{
+              position: 'relative',
               width: '100%', height: 14, borderRadius: 7,
               background: NAVY3, overflow: 'hidden', marginBottom: 4,
             }}>
@@ -803,6 +805,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   transition: 'width 0.3s, background 0.3s',
                 }} />
               )}
+              {Array.from({ length: 11 }, (_, i) => (
+                <div key={i} style={{
+                  position: 'absolute', top: 0, bottom: 0,
+                  left: `${((i + 1) / 12) * 100}%`, width: 0,
+                  borderLeft: `1px dashed ${GOLD}66`,
+                  pointerEvents: 'none',
+                }} />
+              ))}
             </div>
             {/* 月軸: monthOrder の順、刻み線 GOLD 25% 透過 (=`${GOLD}40`)、
                 現在サイクルのみ GOLD 強調 + 上に ▼ マーカー */}
@@ -1113,6 +1123,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         overflow: "auto", padding: 8, boxSizing: "border-box",
         paddingTop: "calc(8px + env(safe-area-inset-top))",
         paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
+        paddingLeft: "calc(8px + env(safe-area-inset-left))",
+        paddingRight: "calc(8px + env(safe-area-inset-right))",
       }}>
         {card}
       </div>
