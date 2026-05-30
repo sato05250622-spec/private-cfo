@@ -523,7 +523,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     ? data.committedSettledMonths : [];
   const isMonthSettled = (m) =>
     committedSettledMonths.includes(m) || committedSettledMonths.includes(String(m));
-  const hasSettled = committedSettledMonths.length > 0;
+  // C-2: hasSettled は凡例の表示条件を撤去 (常時表示化) したため不要 → 削除。
+  // C-2: 未確定月判定 (確定済の補集合)。色分けで「青=未確定 (予算扱い)」を全箇所に適用するため、
+  //   committedSettledMonths の対称で 1 行ヘルパ化。テーブル th / 各セル / 合計行 / 累計バー /
+  //   凡例 で参照する (確定済の赤と対称化される位置に BUDGET_BLUE 系を入れる)。
+  const isUnsettledMonth = (m) => !isMonthSettled(m);
 
   // 本部準拠: 行ごとの年間「実測」算出 (rowYearSpent 相当)。
   // - カテゴリ/特殊行: 本部が反映時に焼いた monthly_spent (実支出シリーズ) を 12 月合算。
@@ -736,6 +740,33 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         // data.committed_totals.grandTotal は予算込みの年間見込み合計として
         // 支出合計 grand cell で引き続き使用するため変更しない。
         const cum = displayLines.reduce((s, l) => s + (lineYearSpent(l) || 0), 0);
+        // C-2: 累計バー 2 セグメント分割用「確定済月の lineYearSpent 合計」(settledCum)。
+        //   lineYearSpent は 12 月合算なので、settled 月だけにフィルタした版を別途定義。
+        //   - 固定費行: monthly_amounts[m] ?? monthly_amount を settled 月だけ合算 (future は admin と同じく除外)
+        //   - その他行: monthly_spent[m] を settled 月だけ合算 (admin 焼きの実支出シリーズ)
+        const settledLineSpent = (l) => {
+          if (l?.row_type === "fixed_cost") {
+            const ma = l.monthly_amounts;
+            const base = Number(l.monthly_amount) || 0;
+            let s = 0;
+            for (let m = 1; m <= 12; m++) {
+              if (!isMonthSettled(m)) continue;
+              if (classifyMonth(fyYear, m, msd, todayStr, startMonth) === "future") continue;
+              const v = ma ? (ma[m] ?? ma[String(m)]) : null;
+              s += (v != null ? Number(v) : base) || 0;
+            }
+            return s;
+          }
+          const ms = l?.monthly_spent;
+          if (!ms || typeof ms !== "object") return 0;
+          let sum = 0;
+          for (const k of Object.keys(ms)) {
+            if (!isMonthSettled(Number(k))) continue;
+            sum += Number(ms[k]) || 0;
+          }
+          return sum;
+        };
+        const settledCum = displayLines.reduce((s, l) => s + (settledLineSpent(l) || 0), 0);
         // 消化サマリー L836-842 と同一ロジックを inline 再定義 (スコープ独立で安全)。
         // #5 修正: 固定費行で annual_target 未設定のとき monthly_amount × 12 をフォールバック
         //   採用 (cum=snapshot.grandTotal は admin computeTotalsRow で fixed_cost の monthly_amounts
@@ -773,6 +804,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         const barGrad = isRed
           ? 'linear-gradient(90deg, #FF5252 0%, #C62828 100%)'
           : 'linear-gradient(90deg, #D4A843 0%, #B88E33 100%)';
+        // C-2: 2 セグメント分割の各幅 (%)。
+        //   - s1Pct (確定済) = settledCum / yearBudgetTotal × 100 (pct 上限でクランプ → 全体 pct% を越えない)
+        //   - s2Pct (未確定) = pct - s1Pct (残りの cum 分。BUDGET_BLUE グラデで描画)
+        //   合計 = pct% (= cum / yearBudgetTotal、100% でクランプ済)。背景の残り (100-pct)% は未消化。
+        const s1Pct = yearBudgetTotal > 0
+          ? Math.min((settledCum / yearBudgetTotal) * 100, pct)
+          : 0;
+        const s2Pct = Math.max(0, pct - s1Pct);
+        const budgetBlueGrad = 'linear-gradient(90deg, #5BA8FF 0%, #2E7BD9 100%)';
         return (
           <div style={{
             padding: '16px 12px',
@@ -791,18 +831,27 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400, fontSize: 14 }}>/</span>
               <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{yearBudgetTotal.toLocaleString()}</span>
             </div>
-            {/* 横長バー: 14px 高 / 7px 角丸 / NAVY3 背景 / GOLD or RED グラデ塗り
+            {/* 横長バー: 14px 高 / 7px 角丸 / NAVY3 背景。
+                C-2: 単一 fill を 2 セグメントに分割 (確定済=GOLD/RED, 未確定=BUDGET_BLUE)。
+                左から s1Pct (確定済) → s2Pct (未確定) の順に絶対配置で並べ、両者合計 = pct%。
                 + 月境界 dashed 線 11 本 (1/12, 2/12, ..., 11/12 位置に縦点線、fill の上に重ねる)。 */}
             <div style={{
               position: 'relative',
               width: '100%', height: 14, borderRadius: 7,
               background: NAVY3, overflow: 'hidden', marginBottom: 4,
             }}>
-              {yearBudgetTotal > 0 && (
+              {yearBudgetTotal > 0 && s1Pct > 0 && (
                 <div style={{
-                  width: `${pct}%`, height: '100%', borderRadius: 7,
-                  background: barGrad,
+                  position: 'absolute', left: 0, top: 0, bottom: 0,
+                  width: `${s1Pct}%`, background: barGrad,
                   transition: 'width 0.3s, background 0.3s',
+                }} />
+              )}
+              {yearBudgetTotal > 0 && s2Pct > 0 && (
+                <div style={{
+                  position: 'absolute', left: `${s1Pct}%`, top: 0, bottom: 0,
+                  width: `${s2Pct}%`, background: budgetBlueGrad,
+                  transition: 'left 0.3s, width 0.3s, background 0.3s',
                 }} />
               )}
               {Array.from({ length: 11 }, (_, i) => (
@@ -849,12 +898,17 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3 }}>カテゴリ</th>
               {monthOrder.map((m) => {
                 const sel = m === selectedMonth;
+                // C-2: 確定月=赤 (RED) / 未確定月=青 (BUDGET_BLUE) で月見出しを対称化。
+                //   isUnsettledMonth は isMonthSettled の補集合 (網羅的) なので 2 分岐で十分。
+                //   選択ハイライト (GOLD背景) は確定/未確定どちらでも上から重ねる。
                 const thStyle = isMonthSettled(m)
-                  ? { ...headCellStyle, border: `1px solid ${RED}`, color: RED }
-                  : (sel ? { ...headCellStyle, background: `${GOLD}22`, color: GOLD } : headCellStyle);
+                  ? { ...headCellStyle, border: `1px solid ${RED}`, color: RED,
+                      background: sel ? `${GOLD}22` : NAVY3 }
+                  : { ...headCellStyle, border: `1px solid ${BUDGET_BLUE}`, color: BUDGET_BLUE,
+                      background: sel ? `${GOLD}22` : NAVY3 };
                 return (
                   <th key={m} ref={(el) => { monthThRefs.current[m] = el; }} style={thStyle}
-                    title={isMonthSettled(m) ? "この月は確定済 (凍結実測)" : (sel ? "選択中の月" : undefined)}
+                    title={isMonthSettled(m) ? "この月は確定済 (凍結実測)" : "この月は未確定 (予算扱い)"}
                   >{m}月</th>
                 );
               })}
@@ -890,13 +944,21 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                     : cell.kind === "budget" ? BUDGET_BLUE
                     : TEXT_PRIMARY;
                   // 修正2(b): 選択月の列を GOLD 系の控えめなティントでハイライト (確定の赤が優先)。
+                  // C-2: 確定月以外 (=未確定) のセルに BUDGET_BLUE 系の薄背景を追加。固定費行は対象外。
+                  //   優先度: settled (赤) > unsettled (青、!isFixed のみ) > 選択月 GOLD ティント > 素のセル。
+                  const unsettledCell = !settledCell && !isFixed && isUnsettledMonth(m);
                   const tdStyle = settledCell
                     ? { ...cellStyle, color: numColor, background: `${RED}1A`, border: `1px solid ${RED}` }
-                    : (sel ? { ...cellStyle, color: numColor, background: `${GOLD}14` } : { ...cellStyle, color: numColor });
+                    : unsettledCell
+                      ? { ...cellStyle, color: numColor,
+                          background: sel ? `${GOLD}14` : `${BUDGET_BLUE}1A`,
+                          border: `1px solid ${BUDGET_BLUE}66` }
+                      : (sel ? { ...cellStyle, color: numColor, background: `${GOLD}14` } : { ...cellStyle, color: numColor });
                   return (
                     <td key={m}
                       style={tdStyle}
                       title={settledCell ? "この月は確定済 (凍結実測)"
+                        : unsettledCell ? "この月は未確定 (予算扱い)"
                         : cell.kind === "budget" ? "予算 (予算VS実績の週予算合計)"
                         : undefined}
                     >{fmtCell(cell.value)}</td>
@@ -930,18 +992,31 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               </td>
               {monthOrder.map((m) => {
                 const sel = m === selectedMonth;
+                // C-2: 支出合計行の月セルにも未確定月の青背景を適用 (確定月赤と対称化)。
                 const tdStyle = isMonthSettled(m)
                   ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}`, fontWeight: 700, color: TEXT_PRIMARY }
-                  : { ...cellStyle, background: sel ? `${GOLD}22` : NAVY2, fontWeight: 700, color: TEXT_PRIMARY };
+                  : isUnsettledMonth(m)
+                    ? { ...cellStyle,
+                        background: sel ? `${GOLD}22` : `${BUDGET_BLUE}1A`,
+                        border: `1px solid ${BUDGET_BLUE}66`,
+                        fontWeight: 700, color: TEXT_PRIMARY }
+                    : { ...cellStyle, background: sel ? `${GOLD}22` : NAVY2, fontWeight: 700, color: TEXT_PRIMARY };
+                // C-3 案A: 月別「支出合計」も local 再計算 (固定費+変動費 subtotal の和) に統一。
+                //   snapshot の data.committed_totals.monthly は loans が commit 後に編集されると
+                //   subtotal とズレるため、各月セルを fixedSubtotals + variableSubtotals に差替。
+                const gMonth = (fixedSubtotals?.monthly?.[m] ?? 0) + (variableSubtotals?.monthly?.[m] ?? 0);
                 return (
                   <td key={m} style={tdStyle}>
-                    {fmtCell(pickMonth(totalsMonthly, m))}
+                    {fmtCell(gMonth)}
                   </td>
                 );
               })}
-              {/* 年間実測 grand (data.committed_totals.grandTotal)。表外の「年間合計」div は廃止し、ここに統合。 */}
-              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: grandTotal == null ? TEXT_MUTED : TEXT_PRIMARY }}>
-                {fmtCell(grandTotal)}
+              {/* 年間実測 grand: C-3 案A で snapshot 由来 grandTotal → local subtotal の和に差替。
+                  loans の commit 後編集 / fixed_cost の monthly_amounts 更新で snapshot と
+                  subtotal がズレる問題を断つ (3 つの数字 = 固定費合計+変動費合計=支出合計 が常に整合)。
+                  既存 data.committed_totals.grandTotal カラム自体は据置 (履歴用)。 */}
+              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: TEXT_PRIMARY }}>
+                {fmtCell((fixedSubtotals?.grand ?? 0) + (variableSubtotals?.grand ?? 0))}
               </td>
               <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: (targetGrandTotal || 0) > 0 ? BUDGET_BLUE : TEXT_MUTED }}>
                 {fmtCell(targetGrandTotal || null)}
@@ -959,8 +1034,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               {monthOrder.map((m) => {
                 const cum = data.committed_totals?.cumulative;
                 const v = cum ? pickMonth(cum, m) : null;
+                // C-2: 累計支出行の月セルも未確定月の青背景を適用 (確定月の赤背景を新規追加、対称化)。
+                //   この行は元々色分け無しだったため、確定月赤・未確定月青を同時に新規導入。
+                const tdStyle = isMonthSettled(m)
+                  ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}`,
+                      fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY }
+                  : { ...cellStyle, background: `${BUDGET_BLUE}1A`, border: `1px solid ${BUDGET_BLUE}66`,
+                      fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY };
                 return (
-                  <td key={m} style={{ ...cellStyle, background: NAVY2, fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY }}>
+                  <td key={m} style={tdStyle}>
                     {fmtCell(v)}
                   </td>
                 );
@@ -1105,12 +1187,17 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         </div>
       )}
 
-      {hasSettled && (
-        <div data-pdf="legend" style={{ padding: "8px 16px", borderTop: `1px solid ${BORDER}`, fontSize: 10, color: TEXT_MUTED }}>
+      {/* C-2: 凡例 hasSettled 条件撤去 → 常時表示。赤 (確定月) と 青 (未確定月=予算扱い) を併記。 */}
+      <div data-pdf="legend" style={{ padding: "8px 16px", borderTop: `1px solid ${BORDER}`, fontSize: 10, color: TEXT_MUTED, display: "flex", gap: 16, flexWrap: "wrap" }}>
+        <span>
           <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: `${RED}1A`, border: `1px solid ${RED}`, marginRight: 6, verticalAlign: "middle" }} />
           赤背景 = 確定月 (凍結実測)
-        </div>
-      )}
+        </span>
+        <span>
+          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: `${BUDGET_BLUE}1A`, border: `1px solid ${BUDGET_BLUE}66`, marginRight: 6, verticalAlign: "middle" }} />
+          青背景 = 未確定月 (予算扱い)
+        </span>
+      </div>
     </div>
   );
 
