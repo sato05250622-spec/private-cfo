@@ -628,12 +628,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
 
   // P4-横画面全列フィット: landscape 時は padding/fontSize/minWidth を圧縮して
   //   15 列 (カテゴリ + 12月 + 実測 + 目標) を画面幅内に横スクロール無しで収める。
-  //   - cellPadX: 8 → 3 (landscape)
-  //   - fontSize: 11 → 10 (landscape、可読下限)
-  //   - tableStyle.minWidth: 800 → 0 (landscape) ← これが iPhone 横画面で溢れる主因
+  //   - cellPadX: 8 → 2 (landscape、合計行の大桁数字が隣セルに被るのを防ぐ最終調整)
+  //   - fontSize: 11 → 8 (landscape、可読下限。10px だと月合計 8 文字が 6%列を溢れて被る)
+  //   - tableStyle.minWidth: 800 → 0 (landscape) ← iPhone 横画面で溢れる主因
   //   portrait は従来通り (padding 8 / fontSize 11 / minWidth 800)。
-  const cellPadX = isLandscape ? 3 : 8;
-  const cellFontSize = isLandscape ? 10 : 11;
+  const cellPadX = isLandscape ? 2 : 8;
+  const cellFontSize = isLandscape ? 8 : 11;
   const cellStyle = {
     padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: cellFontSize,
     color: TEXT_PRIMARY, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
@@ -657,10 +657,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     minWidth: isLandscape ? 0 : 800,
     tableLayout: isLandscape ? "fixed" : "auto",
   };
-  // P4-横画面 colgroup: カテゴリ列 16% + 残り 14 列均等 (各 6%)。
-  //   iPhone 横 ~798px 利用幅で カテゴリ ~128px / 数字列 ~48px。
+  // P4-横画面 colgroup: 3 領域分配。
+  //   カテゴリ 12% + 12月 各 5.5% + 実測 11% + 目標 11% = 100%。
+  //   iPhone 横 ~798px 利用幅で カテゴリ ~96px / 月列 ~44px / 実測・目標 ~88px。
+  //   合計行 (年間実測・目標 grand) で 9-10 文字 (1,254,382〜99,999,999) が出るため
+  //   実測・目標列を月列の 2 倍幅にして大桁数字の被りを根絶。
   //   landscape 時のみ挿入。portrait は colgroup 無しで従来挙動を維持。
-  const landscapeColRest = (100 - 16) / 14; // 14 = 12月 + 実測 + 目標
+  const lsColCategory = 12;
+  const lsColMonth = 5.5;
+  const lsColEdge = 11;
   // landscape 時、カテゴリ列ラベルが ~128px に収まらないとき折り返し可とする
   //   (sticky 列のクリップ防止、portrait は nowrap 据え置き)。
   const labelWrapStyle = isLandscape
@@ -978,10 +983,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         <table style={tableStyle}>
           {isLandscape && (
             <colgroup>
-              <col style={{ width: "16%" }} />
-              {Array.from({ length: 14 }, (_, i) => (
-                <col key={i} style={{ width: `${landscapeColRest}%` }} />
+              <col style={{ width: `${lsColCategory}%` }} />
+              {Array.from({ length: 12 }, (_, i) => (
+                <col key={`m${i}`} style={{ width: `${lsColMonth}%` }} />
               ))}
+              <col style={{ width: `${lsColEdge}%` }} />
+              <col style={{ width: `${lsColEdge}%` }} />
             </colgroup>
           )}
           <thead>
