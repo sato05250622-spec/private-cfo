@@ -602,6 +602,30 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   const fixedSubtotals    = computeSubtotalsForType((l) => l.row_type === "fixed_cost");
   const variableSubtotals = computeSubtotalsForType((l) => l.row_type !== "fixed_cost");
 
+  // P4-C: 累計支出を local 再計算 (snapshot 直読みを撤去)。
+  //   - 月別「支出合計」(= fixedSubtotals.monthly + variableSubtotals.monthly) を
+  //     monthOrder (msd-fiscal 順) で累積し、累計支出[m] を導出。
+  //   - started フラグ: 支出が出始めた月以降は 0 でも数値表示、未着月は null (「—」表示)。
+  //   - これで「支出合計」「固定費合計」「変動費合計」「累計支出」の 4 表が
+  //     loans / monthly_overrides 編集後も常に整合 (snapshot 凍結の影響を断つ)。
+  const localCumByMonth = (() => {
+    const out = {};
+    let running = 0;
+    let started = false;
+    for (let i = 0; i < monthOrder.length; i++) {
+      const m = monthOrder[i];
+      const f = fixedSubtotals?.monthly?.[m];
+      const v = variableSubtotals?.monthly?.[m];
+      const hasAny = (f != null) || (v != null);
+      if (hasAny) {
+        started = true;
+        running += (f ?? 0) + (v ?? 0);
+      }
+      out[m] = started ? running : null;
+    }
+    return out;
+  })();
+
   // 横画面では横方向 padding を詰めて 12ヶ月 + カテゴリ列が横スクロール無しで収まるようにする。
   // fontSize は可読下限 11px 維持。
   const cellPadX = isLandscape ? 5 : 8;
@@ -792,24 +816,66 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               })()
         );
         const yearBudgetTotal = displayLines.reduce((s, l) => s + (summaryBudget(l) || 0), 0);
-        const pct = yearBudgetTotal > 0 ? Math.min((cum / yearBudgetTotal) * 100, 100) : 0;
         const currentCycleMonth = findCycleOfDate(new Date(), msd).month + 1;
-        // expectedPct = 今月末時点で消化されているべき割合 (calendar 月ベース)。
-        const expectedPct = (currentCycleMonth / 12) * 100;
-        // overflow: 累計が年間予算を超過 (fill は 100% にクランプ済だが色判定で必要)。
-        const overflow = yearBudgetTotal > 0 && cum > yearBudgetTotal;
-        // isOverPace: 期待消化率より速いペース → RED に切替。overflow も RED 維持。
-        const isOverPace = yearBudgetTotal > 0 && pct > expectedPct;
-        const isRed = isOverPace || overflow;
+        // P4-B (α): 「現在月までの予算累計」を 100% の基準とする (案 I)。
+        //   バー全幅 = 12ヶ月維持、fill 終端が現在月マーカー (▼) 位置に到達したら 100%。
+        //   月境界 dashed line 11 本は 12 等分のまま (案 II と違い C-1 の意味を保持)。
+        //
+        // monthlyBudget[m]: 行ごと summaryBudget を月単位に分解した {1..12: Σ全行 for month m}。
+        //   - 固定費行: monthly_amounts[m] ?? monthly_amount (基準月額)
+        //   - カテゴリ行: weekCatBudgets を月別にパース＆Σ
+        //   - その他特殊行: target_value / 12 で按分 (fallback)
+        const currentMonthIdx = Math.max(0, monthOrder.indexOf(currentCycleMonth));
+        const monthlyBudget = {};
+        for (let m = 1; m <= 12; m++) monthlyBudget[m] = 0;
+        for (const l of displayLines) {
+          if (l?.row_type === "fixed_cost") {
+            const ma = l.monthly_amounts;
+            const base = Number(l.monthly_amount) || 0;
+            for (let m = 1; m <= 12; m++) {
+              const v = ma ? (ma[m] ?? ma[String(m)]) : null;
+              monthlyBudget[m] += (v != null ? Number(v) : base) || 0;
+            }
+          } else if (l?.row_type === "category" && l?.category_id) {
+            for (const key of Object.keys(weekCatBudgets || {})) {
+              const mt = key.match(/^(\d+)-(\d+)-w(\d+)_(.+)$/);
+              if (!mt) continue;
+              if (String(mt[4]) !== String(l.category_id)) continue;
+              const cm = Number(mt[2]);
+              if (!(cm >= 1 && cm <= 12)) continue;
+              if (Number(mt[1]) !== fiscalMonthCalendarYear(fyYear, startMonth, cm)) continue;
+              monthlyBudget[cm] += Number(weekCatBudgets[key]) || 0;
+            }
+          } else {
+            const tv = Number(l?.target_value);
+            if (Number.isFinite(tv) && tv > 0) {
+              const per = tv / 12;
+              for (let m = 1; m <= 12; m++) monthlyBudget[m] += per;
+            }
+          }
+        }
+        // 現在月までの予算累計: msd-fiscal 順 (monthOrder) で 0..currentMonthIdx を累積。
+        let currentMonthBudgetCumulative = 0;
+        for (let i = 0; i <= currentMonthIdx; i++) {
+          currentMonthBudgetCumulative += monthlyBudget[monthOrder[i]] || 0;
+        }
+        // pct: 「現在月までの予算」を 100% とする。100% で頭打ち、overflow は色変化で示す。
+        const pct = currentMonthBudgetCumulative > 0
+          ? Math.min((cum / currentMonthBudgetCumulative) * 100, 100)
+          : 0;
+        // overflow: 累計が「現在月までの予算」を超過 → RED グラデに切替 (旧 expectedPct 比較は撤去)。
+        //   新スケールでは「現在月までの予算 = 期待消化額」と一致するため、超過 = overpace そのもの。
+        const overflow = currentMonthBudgetCumulative > 0 && cum > currentMonthBudgetCumulative;
+        const isRed = overflow;
         const barGrad = isRed
           ? 'linear-gradient(90deg, #FF5252 0%, #C62828 100%)'
           : 'linear-gradient(90deg, #D4A843 0%, #B88E33 100%)';
-        // C-2: 2 セグメント分割の各幅 (%)。
-        //   - s1Pct (確定済) = settledCum / yearBudgetTotal × 100 (pct 上限でクランプ → 全体 pct% を越えない)
+        // C-2 + P4-B: 2 セグメント分割の各幅 (%)。分母は currentMonthBudgetCumulative に統一。
+        //   - s1Pct (確定済) = settledCum / currentMonthBudgetCumulative × 100 (pct 上限でクランプ)
         //   - s2Pct (未確定) = pct - s1Pct (残りの cum 分。BUDGET_BLUE グラデで描画)
-        //   合計 = pct% (= cum / yearBudgetTotal、100% でクランプ済)。背景の残り (100-pct)% は未消化。
-        const s1Pct = yearBudgetTotal > 0
-          ? Math.min((settledCum / yearBudgetTotal) * 100, pct)
+        //   合計 = pct%。背景の残り (100-pct)% は「現在月までの予算」に対する未消化分。
+        const s1Pct = currentMonthBudgetCumulative > 0
+          ? Math.min((settledCum / currentMonthBudgetCumulative) * 100, pct)
           : 0;
         const s2Pct = Math.max(0, pct - s1Pct);
         const budgetBlueGrad = 'linear-gradient(90deg, #5BA8FF 0%, #2E7BD9 100%)';
@@ -825,11 +891,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             <div style={{ fontSize: 14, fontWeight: 600, color: GOLD, marginBottom: 8 }}>
               年間累計
             </div>
-            {/* 金額: ¥累計 / ¥年間予算 (= yearBudgetTotal) */}
+            {/* P4-B (α): 金額表示も分母を「現在月までの予算累計」に統一。
+                ¥累計 / ¥現在月までの予算 (= currentMonthBudgetCumulative)。 */}
             <div style={{ marginBottom: 10, lineHeight: 1.2, fontWeight: 700 }}>
               <span style={{ color: TEXT_PRIMARY, fontSize: 20 }}>¥{cum.toLocaleString()}</span>
               <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400, fontSize: 14 }}>/</span>
-              <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{yearBudgetTotal.toLocaleString()}</span>
+              <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{currentMonthBudgetCumulative.toLocaleString()}</span>
             </div>
             {/* 横長バー: 14px 高 / 7px 角丸 / NAVY3 背景。
                 C-2: 単一 fill を 2 セグメントに分割 (確定済=GOLD/RED, 未確定=BUDGET_BLUE)。
@@ -944,9 +1011,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                     : cell.kind === "budget" ? BUDGET_BLUE
                     : TEXT_PRIMARY;
                   // 修正2(b): 選択月の列を GOLD 系の控えめなティントでハイライト (確定の赤が優先)。
-                  // C-2: 確定月以外 (=未確定) のセルに BUDGET_BLUE 系の薄背景を追加。固定費行は対象外。
-                  //   優先度: settled (赤) > unsettled (青、!isFixed のみ) > 選択月 GOLD ティント > 素のセル。
-                  const unsettledCell = !settledCell && !isFixed && isUnsettledMonth(m);
+                  // C-2 + P4-A: 確定月以外 (=未確定) のセルに BUDGET_BLUE 系の薄背景を追加。
+                  //   優先度: settled (赤) > unsettled (青、固定費含む) > 選択月 GOLD ティント > 素のセル。
+                  //   固定費は確定/未確定の値差がない (loans live のみ、snapshot に焼かれない) ため
+                  //   確定月は素のセル (settledCell は L939 で isFixed 除外維持)。未確定月だけ青背景。
+                  const unsettledCell = !settledCell && isUnsettledMonth(m);
                   const tdStyle = settledCell
                     ? { ...cellStyle, color: numColor, background: `${RED}1A`, border: `1px solid ${RED}` }
                     : unsettledCell
@@ -1022,7 +1091,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 {fmtCell(targetGrandTotal || null)}
               </td>
             </tr>
-            {/* 本部準拠: 合計行② 累計支出 (data.committed_totals.cumulative、無ければ空)
+            {/* P4-C: 合計行② 累計支出 を local 再計算で再構築 (snapshot 直読みを撤去)。
+                旧: data.committed_totals.cumulative (snapshot 焼き) → loans 編集後に支出合計とズレる
+                新: fixed/variable subtotals.monthly を monthOrder 順に累積 (localCumByMonth、body 側で計算)
+                    → 「累計支出[m] = 累計支出[m-1] + 支出合計[m]」が常に成立
+                    → 「累計支出[最終月] = 支出合計.grand = 固定費合計.grand + 変動費合計.grand」も常に成立
                 #4 色テーマ: 累計支出=確定系=白 (ラベルも TEXT_PRIMARY 化、TEXT_SECONDARY 廃止)。 */}
             <tr>
               <td style={{
@@ -1032,8 +1105,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 累計支出
               </td>
               {monthOrder.map((m) => {
-                const cum = data.committed_totals?.cumulative;
-                const v = cum ? pickMonth(cum, m) : null;
+                const v = localCumByMonth[m];
                 // C-2: 累計支出行の月セルも未確定月の青背景を適用 (確定月の赤背景を新規追加、対称化)。
                 //   この行は元々色分け無しだったため、確定月赤・未確定月青を同時に新規導入。
                 const tdStyle = isMonthSettled(m)
