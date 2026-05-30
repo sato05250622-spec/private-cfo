@@ -989,13 +989,13 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3, ...labelWrapStyle }}>カテゴリ</th>
               {monthOrder.map((m) => {
                 const sel = m === selectedMonth;
-                // C-2: 確定月=赤 (RED) / 未確定月=青 (BUDGET_BLUE) で月見出しを対称化。
-                //   isUnsettledMonth は isMonthSettled の補集合 (網羅的) なので 2 分岐で十分。
+                // P4-赤青枠撤去: 月見出しの border (赤/青) を撤去。文字色は確定=RED/未確定=BLUE で
+                //   識別性を残しつつ、外枠は headCellStyle の borderBottom (BORDER グレー) に統一。
                 //   選択ハイライト (GOLD背景) は確定/未確定どちらでも上から重ねる。
                 const thStyle = isMonthSettled(m)
-                  ? { ...headCellStyle, border: `1px solid ${RED}`, color: RED,
+                  ? { ...headCellStyle, color: RED,
                       background: sel ? `${GOLD}22` : NAVY3 }
-                  : { ...headCellStyle, border: `1px solid ${BUDGET_BLUE}`, color: BUDGET_BLUE,
+                  : { ...headCellStyle, color: BUDGET_BLUE,
                       background: sel ? `${GOLD}22` : NAVY3 };
                 return (
                   <th key={m} ref={(el) => { monthThRefs.current[m] = el; }} style={thStyle}
@@ -1088,15 +1088,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               </td>
               {monthOrder.map((m) => {
                 const sel = m === selectedMonth;
-                // C-2: 支出合計行の月セルにも未確定月の青背景を適用 (確定月赤と対称化)。
-                const tdStyle = isMonthSettled(m)
-                  ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}`, fontWeight: 700, color: TEXT_PRIMARY }
-                  : isUnsettledMonth(m)
-                    ? { ...cellStyle,
-                        background: sel ? `${GOLD}22` : `${BUDGET_BLUE}1A`,
-                        border: `1px solid ${BUDGET_BLUE}66`,
-                        fontWeight: 700, color: TEXT_PRIMARY }
-                    : { ...cellStyle, background: sel ? `${GOLD}22` : NAVY2, fontWeight: 700, color: TEXT_PRIMARY };
+                // P4-赤青枠撤去: 支出合計行の月セルから赤背景・青背景・赤枠・青枠を撤去。
+                //   NAVY2 をベースに選択月のみ GOLD 22 ハイライト。
+                //   cellStyle.borderBottom (BORDER グレー) で行下罫線は維持。
+                const tdStyle = {
+                  ...cellStyle,
+                  background: sel ? `${GOLD}22` : NAVY2,
+                  fontWeight: 700, color: TEXT_PRIMARY,
+                };
                 // C-3 案A: 月別「支出合計」も local 再計算 (固定費+変動費 subtotal の和) に統一。
                 //   snapshot の data.committed_totals.monthly は loans が commit 後に編集されると
                 //   subtotal とズレるため、各月セルを fixedSubtotals + variableSubtotals に差替。
@@ -1133,13 +1132,13 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               </td>
               {monthOrder.map((m) => {
                 const v = localCumByMonth[m];
-                // C-2: 累計支出行の月セルも未確定月の青背景を適用 (確定月の赤背景を新規追加、対称化)。
-                //   この行は元々色分け無しだったため、確定月赤・未確定月青を同時に新規導入。
-                const tdStyle = isMonthSettled(m)
-                  ? { ...cellStyle, background: `${RED}1A`, border: `1px solid ${RED}`,
-                      fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY }
-                  : { ...cellStyle, background: `${BUDGET_BLUE}1A`, border: `1px solid ${BUDGET_BLUE}66`,
-                      fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY };
+                // P4-赤青枠撤去: 累計支出行の月セルから赤背景・青背景・赤枠・青枠を撤去。
+                //   他の合計セル (実測/目標 L1149-1150) と同様 NAVY2 ベースに統一。
+                //   cellStyle.borderBottom (BORDER グレー) で行下罫線は維持。
+                const tdStyle = {
+                  ...cellStyle, background: NAVY2,
+                  fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY,
+                };
                 return (
                   <td key={m} style={tdStyle}>
                     {fmtCell(v)}
