@@ -25,7 +25,7 @@
 //
 // テーマ: NAVY/GOLD (@shared/theme)。入金=青 (BUDGET_BLUE)、経費=赤 (RED)。
 // =============================================================
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   GOLD, NAVY2, NAVY3, CARD_BG, BORDER, RED,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
@@ -112,18 +112,9 @@ export default function InvestmentRecoveryViewer({ clientId }) {
     return targets.filter((t) => (t?.name || '').includes(q));
   }, [targets, query]);
 
-  // アコーディオン: 展開中の target.id を Set で保持。初期は全閉じ (Set 空)。
-  //   畳んだ TargetBlock は氏名・経費合計・回収率% の 1 行ヘッダだけ表示、
-  //   展開すると SalesBox + 内訳テーブル + フッターを描画。
-  const [expanded, setExpanded] = useState(() => new Set());
-  const toggleExpanded = useCallback((id) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  // アコーディオン: 撤去済 (A 確定で全展開固定)。前回の expanded Set / toggleExpanded /
+  //   isOpen / onToggle / ▼/▶ ヘッダ / {isOpen && <>} Fragment ガードは全て撤去。
+  //   各 TargetBlock は SalesBox + 内訳テーブル + フッターを常に表示。
 
   if (!clientId) {
     return (
@@ -194,8 +185,6 @@ export default function InvestmentRecoveryViewer({ clientId }) {
             expensesLoading={expLoading}
             categoryMap={categoryMap}
             msd={msd}
-            isOpen={expanded.has(t.id)}
-            onToggle={() => toggleExpanded(t.id)}
           />
         ))}
         {!targetsLoading && !targetsError && targets.length > 0 && filteredTargets.length === 0 && (
@@ -211,7 +200,7 @@ export default function InvestmentRecoveryViewer({ clientId }) {
 // =============================================================
 // TargetBlock — 1 対象者の写真2準拠 viewer
 // =============================================================
-function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryMap, msd, isOpen, onToggle }) {
+function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryMap, msd }) {
   void msd; // FY 化により buildPeriodLabel から msd 引数を撤去 (本ブロックでは未使用)。
   const { incomes, loading: inLoading, error: inError } = useInvestmentIncomes(clientId, target.id);
 
@@ -295,25 +284,15 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
 
   return (
     <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${BORDER}`, borderRadius: 10, padding: 10 }}>
-      {/* アコーディオン親ヘッダ: 常時表示。タップでトグル (▼=展開中/▶=畳み)。
-          左=▼/▶ + 氏名 + 期間 / 右上=経費合計 + 回収率%。
-          畳んだ時はこの 1 行だけ。展開時はこの下に SalesBox + 内訳テーブル + フッターを描画。 */}
-      <div
-        role="button" tabIndex={0}
-        onClick={onToggle}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle?.(); } }}
-        style={{
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-          gap: 10, marginBottom: isOpen ? 10 : 0, flexWrap: 'wrap',
-          cursor: 'pointer', userSelect: 'none',
-        }}
-      >
+      {/* ヘッダ (常時表示・クリック不可): 左=氏名+期間 / 右=経費合計+回収率%。
+          アコーディオン化撤去 (A 確定で全展開固定)。クリック・キーボード操作は除去。 */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+        gap: 10, marginBottom: 10, flexWrap: 'wrap',
+      }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: GOLD, lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 11, color: TEXT_SECONDARY, lineHeight: 1 }}>{isOpen ? '▼' : '▶'}</span>
-            <span>{target.name || '(無題)'}</span>
-          </div>
-          <div style={{ fontSize: 10, color: TEXT_SECONDARY, marginLeft: 17 }}>対象年: <span style={{ color: TEXT_PRIMARY, fontWeight: 600 }}>{periodLabel || '—'}</span></div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: GOLD, lineHeight: 1.2 }}>{target.name || '(無題)'}</div>
+          <div style={{ fontSize: 10, color: TEXT_SECONDARY }}>対象年: <span style={{ color: TEXT_PRIMARY, fontWeight: 600 }}>{periodLabel || '—'}</span></div>
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexShrink: 0 }}>
           <div style={{ textAlign: 'right' }}>
@@ -327,9 +306,6 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
         </div>
       </div>
 
-      {/* 展開時のみ: SalesBox + 内訳テーブル + フッター。畳んでる時は完全に非表示で縦伸び解消。 */}
-      {isOpen && (<>
-
       {/* 売上金 box (写真2 中央のメイン KPI) */}
       <SalesBox
         totalIncome={Number(target.total_income) || 0}
@@ -340,30 +316,44 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
       {inError && <div style={{ color: '#ff6b6b', fontSize: 10, marginTop: 6 }}>入金取得エラー: {String(inError?.message ?? inError)}</div>}
       {(inLoading || expensesLoading) && <div style={{ color: TEXT_MUTED, fontSize: 10, marginTop: 6 }}>読込中…</div>}
 
-      {/* 内訳テーブル: 4列 (日付 / 項目 / メモ / 入出金) — 細め、横スクロール許容 */}
-      {/* 内部スクロール: maxHeight 240 + overflowY:auto で「人別」ブロックだけ縦スクロール
-          (顧客は4列・行高低めなので admin の 320 ではなく 240)。thead は sticky でヘッダ追従。 */}
+      {/* 内訳テーブル: 4 列 (日付 / 項目 / メモ / 入出金)。
+          横スクロール + 両端固定: 日付列 (左) と 入出金列 (右) を position:sticky で常時表示、
+          中央 (項目・メモ) のみ横スクロールで動く。縦の maxHeight/overflowY は撤去。 */}
       <div style={{
-        marginTop: 10, overflowX: 'auto', overflowY: 'auto', maxHeight: 240,
+        marginTop: 10, overflowX: 'auto',
         border: `1px solid ${GRID}`, borderRadius: 6,
       }}>
-        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 480, border: `1px solid ${GRID}` }}>
+        <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', minWidth: 480, border: `1px solid ${GRID}` }}>
           <thead>
             <tr style={{ background: NAVY3 }}>
-              {[
-                { h: '日付',  align: 'left' },
-                { h: '項目',  align: 'left' },
-                { h: 'メモ',  align: 'left' },
-                { h: '入出金', align: 'right' },
-              ].map((col, i) => (
-                <th key={i} style={{
-                  padding: '5px 6px', fontSize: 9, fontWeight: 700, color: GOLD, letterSpacing: '0.04em',
-                  textAlign: col.align,
-                  borderBottom: `1px solid ${BORDER}`, borderRight: `1px solid ${GRID}`,
-                  whiteSpace: 'nowrap',
-                  position: 'sticky', top: 0, background: NAVY3, zIndex: 1,
-                }}>{col.h}</th>
-              ))}
+              {/* 日付 (sticky left): 細幅 56px。Excel 風縦罫線 + 下罫線。 */}
+              <th style={{
+                padding: '5px 6px', fontSize: 9, fontWeight: 700, color: GOLD, letterSpacing: '0.04em',
+                textAlign: 'left', whiteSpace: 'nowrap',
+                borderBottom: `1px solid ${BORDER}`, borderRight: `1px solid ${GRID}`,
+                position: 'sticky', left: 0, background: NAVY3, zIndex: 2,
+                width: 56, minWidth: 56,
+              }}>日付</th>
+              {/* 項目 (通常列、横スクロールで動く) */}
+              <th style={{
+                padding: '5px 6px', fontSize: 9, fontWeight: 700, color: GOLD, letterSpacing: '0.04em',
+                textAlign: 'left', whiteSpace: 'nowrap',
+                borderBottom: `1px solid ${BORDER}`, borderRight: `1px solid ${GRID}`,
+              }}>項目</th>
+              {/* メモ (通常列、横スクロールで動く、広め) */}
+              <th style={{
+                padding: '5px 6px', fontSize: 9, fontWeight: 700, color: GOLD, letterSpacing: '0.04em',
+                textAlign: 'left', whiteSpace: 'nowrap',
+                borderBottom: `1px solid ${BORDER}`, borderRight: `1px solid ${GRID}`,
+              }}>メモ</th>
+              {/* 入出金 (sticky right): 常時右端表示。背景色でスクロール下を隠す。 */}
+              <th style={{
+                padding: '5px 6px', fontSize: 9, fontWeight: 700, color: GOLD, letterSpacing: '0.04em',
+                textAlign: 'right', whiteSpace: 'nowrap',
+                borderBottom: `1px solid ${BORDER}`,
+                position: 'sticky', right: 0, background: NAVY3, zIndex: 2,
+                borderLeft: `1px solid ${GRID}`,
+              }}>入出金</th>
             </tr>
           </thead>
           <tbody>
@@ -374,9 +364,16 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
             )}
           </tbody>
           <tfoot>
+            {/* フッター: 日付/項目/メモは空、入出金 (sticky right) に差し引き純額のみ。 */}
             <tr style={{ background: NAVY2 }}>
-              <td colSpan={3} style={footCell(true)}>差し引き</td>
-              <td style={{ ...footCell(false), textAlign: 'right', color: finalDiff >= 0 ? BUDGET_BLUE : RED }}>
+              <td style={{ ...footCell(false), position: 'sticky', left: 0, background: NAVY2, zIndex: 2 }} />
+              <td style={footCell(false)} />
+              <td style={footCell(false)} />
+              <td style={{
+                ...footCell(true), textAlign: 'right', color: finalDiff >= 0 ? BUDGET_BLUE : RED,
+                position: 'sticky', right: 0, background: NAVY2, zIndex: 2,
+                borderLeft: `1px solid ${GRID}`,
+              }}>
                 {/* finalDiff>=0 は青 + プレフィクス、<0 は赤 − プレフィクス。fmtY はマイナスを − で出す。 */}
                 {finalDiff >= 0 ? fmtY(finalDiff, { plus: true }) : fmtY(finalDiff)}
               </td>
@@ -384,7 +381,6 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
           </tfoot>
         </table>
       </div>
-      </>)}
     </div>
   );
 }
@@ -403,8 +399,10 @@ function SalesBox({ totalIncome, grandIncome, expensesTotal }) {
   const leftNum  = pctNum(totalIncome, expensesTotal);
   const rightNum = pctNum(grandIncome, expensesTotal);
   const cellStyle = { display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 2, flex: '1 1 0', minWidth: 0 };
-  // 達成率バー (横棒): 全幅 100% で fill = Math.min(pctNum, 100)%、GOLD。
-  //   分母 0 (pctNum == null) のとき非表示。「再定義しない」原則で pctNum をそのまま使う。
+  // 達成率バー (横棒): 全幅 100% で fill = Math.min(pctNum, 100)%。
+  //   色は %で動的: >=100% (回収済み) → BUDGET_BLUE / <100% (未達) → RED。
+  //   数字ラベルは本当の値 (233%/300% もそのまま) を別表示、バーは 100% 頭打ち。
+  //   分母 0 (pctNum == null) のとき非表示。
   const Bar = ({ pct }) => (
     pct == null ? null : (
       <div style={{
@@ -413,7 +411,8 @@ function SalesBox({ totalIncome, grandIncome, expensesTotal }) {
       }}>
         <div style={{
           width: `${Math.min(pct, 100)}%`, height: '100%',
-          background: GOLD, transition: 'width 0.3s',
+          background: pct >= 100 ? BUDGET_BLUE : RED,
+          transition: 'width 0.3s, background 0.3s',
         }} />
       </div>
     )
@@ -453,7 +452,10 @@ function SalesBox({ totalIncome, grandIncome, expensesTotal }) {
 // =============================================================
 function DetailRow({ row }) {
   const isIncome = row.kind === 'income';
+  // 横スクロール sticky 両端のため、行 background は <td> 個別に塗る (sticky 列は親 <tr>
+  //   の背景を継承せず透過するため、入金行のティント色を sticky 側にも明示適用)。
   const rowBg = isIncome ? `${BUDGET_BLUE}12` : 'transparent';
+  const stickyBg = isIncome ? '#0B1A2E' : NAVY3; // sticky 列のスクロール下を隠す不透明背景
   const td = (right = false, color = TEXT_PRIMARY) => ({
     padding: '4px 6px', fontSize: 10, color,
     borderBottom: `1px solid ${BORDER}`,
@@ -462,10 +464,20 @@ function DetailRow({ row }) {
   });
   return (
     <tr style={{ background: rowBg }}>
-      <td style={td()}>{fmtMD(row.date)}</td>
+      {/* 日付 (sticky left): MM/DD 表示で sticky 56px 幅に収まる。 */}
+      <td style={{
+        ...td(),
+        position: 'sticky', left: 0, background: stickyBg, zIndex: 1,
+        width: 56, minWidth: 56,
+      }}>{fmtMD(row.date)}</td>
       <td style={td(false, isIncome ? BUDGET_BLUE : TEXT_PRIMARY)}>{row.label || '—'}</td>
       <td style={{ ...td(), whiteSpace: 'normal', maxWidth: 220 }}>{row.memo || '—'}</td>
-      <td style={{ ...td(true), color: isIncome ? BUDGET_BLUE : RED, fontWeight: 700 }}>
+      {/* 入出金 (sticky right): 常に右端表示。 */}
+      <td style={{
+        ...td(true), color: isIncome ? BUDGET_BLUE : RED, fontWeight: 700,
+        position: 'sticky', right: 0, background: stickyBg, zIndex: 1,
+        borderLeft: `1px solid ${GRID}`, borderRight: 'none',
+      }}>
         {isIncome ? fmtY(row.amount, { plus: true }) : fmtY(-row.amount)}
       </td>
     </tr>
