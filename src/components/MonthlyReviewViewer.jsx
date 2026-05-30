@@ -181,6 +181,19 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
   const [sortMode, setSortMode] = useState("manual");
   // ⑥: 旧フォーマット (振り返り/アドバイス/プラン) アコーディオン開閉 (本部準拠、既定 閉)。
   const [legacyOpen, setLegacyOpen] = useState(false);
+  // B-2: 横画面では root の maxWidth を解除して幅一杯に拡げる (App.jsx 側 wrapper と協調)。
+  //   縦画面では undefined にして従来通り親 (430px) のクランプを受ける。
+  const [isLandscape, setIsLandscape] = useState(
+    () => typeof window !== "undefined"
+      && window.matchMedia("(orientation: landscape)").matches,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const mq = window.matchMedia("(orientation: landscape)");
+    const handler = (e) => setIsLandscape(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
   // PDF 出力: 繰越票 (AnnualBudgetViewer.handlePrint) と同方式 (jsPDF + html2canvas)。
   // pdfRef = ルート div、pdfBusy = 二重押下防止。
   const pdfRef = useRef(null);
@@ -407,7 +420,13 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
   };
 
   return (
-    <div ref={pdfRef} className="review-pdf-root" style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden", boxShadow: SHADOW }}>
+    <div ref={pdfRef} className="review-pdf-root" style={{
+      background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`,
+      overflow: "hidden", boxShadow: SHADOW,
+      // B-2: 横画面では親 (430px wrapper) のクランプを上書きして全幅利用。
+      width: "100%",
+      ...(isLandscape ? { maxWidth: "none" } : null),
+    }}>
       {/* ヘッダ (繰越票・StatusCard と統一感: 44px TEAL アイコンボックス + GOLD タイトル)
           data-pdf="header" は handlePrint 内で 1 ページ目のみ表示するためのマーカ。
           📄 PDF ボタンは className="no-print" で html2canvas キャプチャ時に除外される。 */}

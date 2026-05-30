@@ -228,6 +228,19 @@ function useLocalStorage(key, initialValue) {
 }
 
 export default function App() {
+  // B-2: 月次レビュー overlay を横画面で局所拡幅するため orientation を購読 (他 overlay は触らない)。
+  //   App shell (S.app maxWidth:430) はそのまま、currentMonthReport 配下 wrapper だけ広げる。
+  const [isLandscape, setIsLandscape] = useState(
+    () => typeof window !== "undefined"
+      && window.matchMedia("(orientation: landscape)").matches,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const mq = window.matchMedia("(orientation: landscape)");
+    const handler = (e) => setIsLandscape(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
   const [tab, setTab] = useState("daily");
   // #11: 月間サマリーで固定費(loans)を合算するか。'split'(分ける=既定/カテゴリのみ) / 'incl'(込み)。
   //   localStorage 'monthly_fixedCostMode' で永続 (本部アプリとは別キー)。
@@ -2372,7 +2385,11 @@ export default function App() {
             <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>レポート</span>
             <span style={{width:40}}/>
           </div>
-          <div style={{margin:"16px 16px 0"}}>
+          {/* B-2: landscape では月次レビューを 430px 枠の外へ拡幅 (maxWidth:"none")。
+              他 overlay (S.overlay) は触らず、この wrapper だけ広げて月次レビュー本体に余白を渡す。 */}
+          <div style={isLandscape
+            ? {margin:"8px 16px 0", maxWidth:"none"}
+            : {margin:"16px 16px 0"}}>
             <ReportTabs
               viewer={<AnnualBudgetViewer clientId={authUserId} />}
               review={(
