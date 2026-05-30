@@ -35,6 +35,7 @@ import { useInvestmentIncomes } from '../hooks/useInvestmentIncomes';
 import { useExpenses } from '../hooks/useExpenses';
 import { useCategories } from '../hooks/useCategories';
 import { getManagementStartDay } from '../utils/cycle';
+import { PopoverDial } from '../components/MonthDialPicker';
 
 // #3-B: 予算系=青 (本部 BLUE / 顧客 BUDGET_BLUE と統一)。入金・繰越色として使用。
 const BUDGET_BLUE = '#5BA8FF';
@@ -73,6 +74,18 @@ function fmtMD(iso) {
   return m ? `${m[1]}/${m[2]}` : iso;
 }
 
+// 日付 (ISO) を FY 開始年に変換 (4 月開始)。
+//   2026-04-01 → 2026  /  2026-03-31 → 2025  /  2027-03-31 → 2026
+//   不正値は null (caller 側で除外)。
+function expFY(date) {
+  if (!date || typeof date !== 'string') return null;
+  const m = date.match(/^(\d{4})-(\d{2})-/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mm = Number(m[2]);
+  return mm >= 4 ? y : y - 1;
+}
+
 // 期間ラベル: target_year を FY (4 月開始) の開始年として扱い、
 //   「YYYY 年 4 月〜翌年 3 月」を組み立てる。
 //   admin の target_year=FY 開始年と意味を揃える。msd 補正は本機能スコープ外
@@ -104,13 +117,27 @@ export default function InvestmentRecoveryViewer({ clientId }) {
   // 未設定なら 1 にフォールバック (calendar 年と等価表示)。
   const msd = getManagementStartDay() ?? 1;
 
-  // 人名検索 query。空文字なら全件、それ以外は name.includes(query) でフィルタ (admin と同パターン)。
+  // 年度ダイヤル: targets から年度候補を動的算出 (降順)、selectedYear=null は最新年度。
+  //   PopoverDial (繰越票で実績あり) を流用。空配列のとき UI 非表示で安全。
+  const fiscalYears = useMemo(
+    () => [...new Set((targets || []).map((t) => t.target_year).filter((y) => Number.isFinite(Number(y))))]
+      .sort((a, b) => b - a),
+    [targets],
+  );
+  const [selectedYear, setSelectedYear] = useState(null);
+  const currentYear = selectedYear ?? (fiscalYears[0] ?? null);
+  const yearFilteredTargets = useMemo(
+    () => (currentYear == null ? targets : targets.filter((t) => t.target_year === currentYear)),
+    [targets, currentYear],
+  );
+
+  // 人名検索 query。空文字なら年度フィルタ後の全件、それ以外は name.includes(query) でフィルタ。
   const [query, setQuery] = useState('');
   const filteredTargets = useMemo(() => {
     const q = query.trim();
-    if (!q) return targets;
-    return targets.filter((t) => (t?.name || '').includes(q));
-  }, [targets, query]);
+    if (!q) return yearFilteredTargets;
+    return yearFilteredTargets.filter((t) => (t?.name || '').includes(q));
+  }, [yearFilteredTargets, query]);
 
   // アコーディオン: 撤去済 (A 確定で全展開固定)。前回の expanded Set / toggleExpanded /
   //   isOpen / onToggle / ▼/▶ ヘッダ / {isOpen && <>} Fragment ガードは全て撤去。
@@ -145,12 +172,23 @@ export default function InvestmentRecoveryViewer({ clientId }) {
           </div>
         )}
 
-        {/* 人名検索: 対象者 1 名以上のときだけ表示。空 query は全件 (filteredTargets = targets)。 */}
+        {/* 検索 + 年度ダイヤル: 対象者 1 名以上のときだけ表示。空 query は年度フィルタ後の全件。
+            PopoverDial (繰越票で実績あり) を流用、選択肢は targets から動的算出した fiscalYears。 */}
         {!targetsLoading && targets.length > 0 && (
           <div style={{
             background: 'rgba(255,255,255,0.03)', border: `1px solid ${BORDER}`, borderRadius: 8,
-            padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8,
+            padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
           }}>
+            {/* 年度ダイヤル: fiscalYears が 1 件以上のときだけ出す。 */}
+            {fiscalYears.length > 0 && (
+              <PopoverDial
+                items={fiscalYears.map((y) => ({ key: y, label: `${y}年度` }))}
+                value={currentYear}
+                onChange={(y) => setSelectedYear(Number(y))}
+                placeholder="年度"
+                width={120}
+              />
+            )}
             <span style={{ fontSize: 11, color: TEXT_MUTED, fontWeight: 700, whiteSpace: 'nowrap' }}>🔍</span>
             <input
               type="text" placeholder="氏名で検索" value={query}
@@ -170,8 +208,9 @@ export default function InvestmentRecoveryViewer({ clientId }) {
                 }}
               >クリア</button>
             )}
+            {/* カウンタ: フィルタ後 / 年度内 (年度フィルタなしのとき年度内=全件) */}
             <span style={{ fontSize: 9, color: TEXT_MUTED, whiteSpace: 'nowrap' }}>
-              {filteredTargets.length} / {targets.length} 人
+              {filteredTargets.length} / {yearFilteredTargets.length} 人
             </span>
           </div>
         )}
@@ -189,7 +228,9 @@ export default function InvestmentRecoveryViewer({ clientId }) {
         ))}
         {!targetsLoading && !targetsError && targets.length > 0 && filteredTargets.length === 0 && (
           <div style={{ color: TEXT_MUTED, padding: 12, textAlign: 'center', fontSize: 11 }}>
-            「{query}」に一致する人はいません
+            {query
+              ? `「${query}」に一致する人はいません`
+              : `${currentYear ?? ''}年度の対象者はいません`}
           </div>
         )}
       </div>
@@ -206,25 +247,35 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
 
   // この対象者に紐づく支出 (useExpenses の toApp で target_id / createdAt が乗っている。
   // soft-delete 済み expense は API 側で除外済み)。
-  // Task #4: 明示タグ (target_id) と memo 部分一致の OR で引き取る。
-  //   - byId : expense.target_id === target.id (既存の明示タグ)
-  //   - byMemo: target.name.trim() が非空 AND memo が非nullで target.name を substring 含む
-  // target.name が空白のみのときは byMemo を発火させない (全支出引き込み事故防止)。
-  // 両ヒット時は id で 1 件に重複排除して 1 回だけ集計する。本部と完全一致のロジック。
+  // 年度ダイヤル対応の二重カウント対策版:
+  //   - byId : expense.target_id === target.id (明示タグ、年度判定不要)
+  //   - byMemo: target_id == null かつ memo に target.name 含み、
+  //             かつ expFY(date) === target.target_year のときだけ拾う。
+  //             ← 同名人物の複数年度 target が並んでも同一 expense が両方の target に紐づくのを防ぐ。
+  //   target.name が空白のみのときは byMemo を発火させない (全支出引き込み事故防止)。
+  //   両ヒット時は id で 1 件に重複排除。
   const expensesForTarget = useMemo(() => {
     const list = allExpenses || [];
     const targetName = (target.name || '').trim();
+    const ty = Number(target.target_year);
     const map = new Map();
     for (const e of list) {
       if (!e) continue;
       const byId = e.target_id === target.id;
-      const byMemo = targetName !== '' && e.memo != null && String(e.memo).includes(targetName);
+      const byMemo = (
+        e.target_id == null
+        && targetName !== ''
+        && e.memo != null
+        && String(e.memo).includes(targetName)
+        && Number.isFinite(ty)
+        && expFY(e.date) === ty
+      );
       if (byId || byMemo) {
         if (!map.has(e.id)) map.set(e.id, e);
       }
     }
     return Array.from(map.values());
-  }, [allExpenses, target.id, target.name]);
+  }, [allExpenses, target.id, target.name, target.target_year]);
 
   // 経費合計 / 入金合計 / 総入金 (= total_income + Σ入金) / 差し引き — 本部と同式。
   const expensesTotal = useMemo(
