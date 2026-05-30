@@ -896,7 +896,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             <div style={{ marginBottom: 10, lineHeight: 1.2, fontWeight: 700 }}>
               <span style={{ color: TEXT_PRIMARY, fontSize: 20 }}>¥{cum.toLocaleString()}</span>
               <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400, fontSize: 14 }}>/</span>
-              <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{currentMonthBudgetCumulative.toLocaleString()}</span>
+              <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{Math.round(currentMonthBudgetCumulative).toLocaleString()}</span>
             </div>
             {/* 横長バー: 14px 高 / 7px 角丸 / NAVY3 背景。
                 C-2: 単一 fill を 2 セグメントに分割 (確定済=GOLD/RED, 未確定=BUDGET_BLUE)。
@@ -1007,8 +1007,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   const sel = m === selectedMonth;
                   // #2修正 数字色: 予算=青 (BUDGET_BLUE)、実測=白系 (TEXT_PRIMARY)。
                   //   確定月は赤背景を維持し、文字は実測扱い(白)。値なしは TEXT_MUTED。
+                  // P4-A 再修正 (admin と整合): isMonthSettled 最優先で実績扱いに統一。
+                  //   - 確定月 → TEXT_PRIMARY (白): 固定費もカテゴリも凍結実測扱い。
+                  //   - 未確定 かつ (kind='budget' or 固定費) → BUDGET_BLUE: 予算枠 or 固定費は予算扱い。
+                  //   - それ以外 → TEXT_PRIMARY。
+                  //   resolveCellDisplay は固定費に対し常に kind:"actual" を返すが、
+                  //   isFixed フラグを直接見ることで「未確定月の固定費 = 予算扱いで青」を表現。
                   const numColor = cell.value == null ? TEXT_MUTED
-                    : cell.kind === "budget" ? BUDGET_BLUE
+                    : isMonthSettled(m) ? TEXT_PRIMARY
+                    : (cell.kind === "budget" || isFixed) ? BUDGET_BLUE
                     : TEXT_PRIMARY;
                   // 修正2(b): 選択月の列を GOLD 系の控えめなティントでハイライト (確定の赤が優先)。
                   // C-2 + P4-A: 確定月以外 (=未確定) のセルに BUDGET_BLUE 系の薄背景を追加。
