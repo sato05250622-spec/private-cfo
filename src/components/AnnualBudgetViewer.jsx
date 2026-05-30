@@ -649,11 +649,23 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // 目標列(+1)を見込み minWidth を 640→720 に拡張 (各列が読める幅を保つ)。
   // 横画面で tableLayout:fixed をやめたため iOS Safari の sticky×fixed ゴーストバグは発生しない。
   // 本部準拠: 15列化 (項目+12月+実測+目標) で minWidth 720→800 に拡張。
-  // P4-横画面: landscape では minWidth=0 で「画面幅にフィット」させ全列を表示。
+  // P4-横画面: landscape では minWidth=0 + tableLayout:fixed + colgroup で
+  //   全 15 列を画面幅に強制配分する (auto-layout だと中身幅で伸びてスクロール残存)。
+  //   portrait は従来通り (tableLayout:auto / minWidth:800)。
   const tableStyle = {
     borderCollapse: "collapse", width: "100%",
     minWidth: isLandscape ? 0 : 800,
+    tableLayout: isLandscape ? "fixed" : "auto",
   };
+  // P4-横画面 colgroup: カテゴリ列 16% + 残り 14 列均等 (各 6%)。
+  //   iPhone 横 ~798px 利用幅で カテゴリ ~128px / 数字列 ~48px。
+  //   landscape 時のみ挿入。portrait は colgroup 無しで従来挙動を維持。
+  const landscapeColRest = (100 - 16) / 14; // 14 = 12月 + 実測 + 目標
+  // landscape 時、カテゴリ列ラベルが ~128px に収まらないとき折り返し可とする
+  //   (sticky 列のクリップ防止、portrait は nowrap 据え置き)。
+  const labelWrapStyle = isLandscape
+    ? { whiteSpace: "normal", wordBreak: "break-all", lineHeight: 1.2 }
+    : null;
 
   // #2 subtotal 行 (固定/変動 で形は同一、ラベルと値だけ切替)。
   //   - 月別セル: 確定系=TEXT_PRIMARY (#4 色テーマ準拠)
@@ -964,9 +976,17 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       })()}
       <div className="annual-pdf-scroll" style={{ overflowX: "auto" }}>
         <table style={tableStyle}>
+          {isLandscape && (
+            <colgroup>
+              <col style={{ width: "16%" }} />
+              {Array.from({ length: 14 }, (_, i) => (
+                <col key={i} style={{ width: `${landscapeColRest}%` }} />
+              ))}
+            </colgroup>
+          )}
           <thead>
             <tr>
-              <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3 }}>カテゴリ</th>
+              <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3, ...labelWrapStyle }}>カテゴリ</th>
               {monthOrder.map((m) => {
                 const sel = m === selectedMonth;
                 // C-2: 確定月=赤 (RED) / 未確定月=青 (BUDGET_BLUE) で月見出しを対称化。
@@ -1000,6 +1020,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 <td style={{
                   ...cellStyle, ...stickyBase, background: CARD_BG,
                   fontWeight: 600, color: line?.archived ? TEXT_MUTED : TEXT_SECONDARY,
+                  ...labelWrapStyle,
                 }}
                   title={line?.category_name || undefined}
                 >
@@ -1019,19 +1040,16 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   const numColor = cell.value == null ? TEXT_MUTED
                     : isMonthSettled(m) ? TEXT_PRIMARY
                     : BUDGET_BLUE;
-                  // 修正2(b): 選択月の列を GOLD 系の控えめなティントでハイライト (確定の赤が優先)。
-                  // C-2 + P4-A: 確定月以外 (=未確定) のセルに BUDGET_BLUE 系の薄背景を追加。
-                  //   優先度: settled (赤) > unsettled (青、固定費含む) > 選択月 GOLD ティント > 素のセル。
-                  //   固定費は確定/未確定の値差がない (loans live のみ、snapshot に焼かれない) ため
-                  //   確定月は素のセル (settledCell は L939 で isFixed 除外維持)。未確定月だけ青背景。
+                  // P4-赤青背景撤去: tdStyle から確定セルの赤背景/赤枠、未確定セルの青背景/青枠を撤去。
+                  //   残すのは:
+                  //     - 数字色 (numColor: 確定=白 / 未確定=青)
+                  //     - グレー行区切り (cellStyle.borderBottom = BORDER)
+                  //     - 選択月の薄い GOLD ハイライト (background ${GOLD}14)
+                  //   確定/未確定の判定 (settledCell / unsettledCell) は title (下) で引き続き使うため保持。
                   const unsettledCell = !settledCell && isUnsettledMonth(m);
-                  const tdStyle = settledCell
-                    ? { ...cellStyle, color: numColor, background: `${RED}1A`, border: `1px solid ${RED}` }
-                    : unsettledCell
-                      ? { ...cellStyle, color: numColor,
-                          background: sel ? `${GOLD}14` : `${BUDGET_BLUE}1A`,
-                          border: `1px solid ${BUDGET_BLUE}66` }
-                      : (sel ? { ...cellStyle, color: numColor, background: `${GOLD}14` } : { ...cellStyle, color: numColor });
+                  const tdStyle = sel
+                    ? { ...cellStyle, color: numColor, background: `${GOLD}14` }
+                    : { ...cellStyle, color: numColor };
                   return (
                     <td key={m}
                       style={tdStyle}
