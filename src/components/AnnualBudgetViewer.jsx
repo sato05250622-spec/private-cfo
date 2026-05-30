@@ -626,15 +626,20 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     return out;
   })();
 
-  // 横画面では横方向 padding を詰めて 12ヶ月 + カテゴリ列が横スクロール無しで収まるようにする。
-  // fontSize は可読下限 11px 維持。
-  const cellPadX = isLandscape ? 5 : 8;
+  // P4-横画面全列フィット: landscape 時は padding/fontSize/minWidth を圧縮して
+  //   15 列 (カテゴリ + 12月 + 実測 + 目標) を画面幅内に横スクロール無しで収める。
+  //   - cellPadX: 8 → 3 (landscape)
+  //   - fontSize: 11 → 10 (landscape、可読下限)
+  //   - tableStyle.minWidth: 800 → 0 (landscape) ← これが iPhone 横画面で溢れる主因
+  //   portrait は従来通り (padding 8 / fontSize 11 / minWidth 800)。
+  const cellPadX = isLandscape ? 3 : 8;
+  const cellFontSize = isLandscape ? 10 : 11;
   const cellStyle = {
-    padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: 11,
+    padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: cellFontSize,
     color: TEXT_PRIMARY, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
   };
   const headCellStyle = {
-    padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: 11, fontWeight: 700,
+    padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: cellFontSize, fontWeight: 700,
     color: GOLD, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
     background: NAVY3,
   };
@@ -644,9 +649,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // 目標列(+1)を見込み minWidth を 640→720 に拡張 (各列が読める幅を保つ)。
   // 横画面で tableLayout:fixed をやめたため iOS Safari の sticky×fixed ゴーストバグは発生しない。
   // 本部準拠: 15列化 (項目+12月+実測+目標) で minWidth 720→800 に拡張。
-  const tableStyle = { borderCollapse: "collapse", width: "100%", minWidth: 800 };
-  // isLandscape は PDF 全画面化 (横画面 breakout) で引き続き使用するため残置。
-  void isLandscape;
+  // P4-横画面: landscape では minWidth=0 で「画面幅にフィット」させ全列を表示。
+  const tableStyle = {
+    borderCollapse: "collapse", width: "100%",
+    minWidth: isLandscape ? 0 : 800,
+  };
 
   // #2 subtotal 行 (固定/変動 で形は同一、ラベルと値だけ切替)。
   //   - 月別セル: 確定系=TEXT_PRIMARY (#4 色テーマ準拠)
