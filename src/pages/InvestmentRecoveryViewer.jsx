@@ -317,42 +317,44 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
       {(inLoading || expensesLoading) && <div style={{ color: TEXT_MUTED, fontSize: 10, marginTop: 6 }}>読込中…</div>}
 
       {/* 内訳テーブル: 4 列 (日付 / 項目 / メモ / 入出金)。
-          横スクロール + 両端固定: 日付列 (左) と 入出金列 (右) を position:sticky で常時表示、
-          中央 (項目・メモ) のみ横スクロールで動く。縦の maxHeight/overflowY は撤去。 */}
+          tableLayout:fixed + colgroup で 4 列が 1 画面に収まる。
+          メモ列だけセル内部で横スクロールし、日付・項目・入出金は固定で常時表示。
+          (横スクロール + sticky 両端の方式は撤去) */}
       <div style={{
-        marginTop: 10, overflowX: 'auto',
-        border: `1px solid ${GRID}`, borderRadius: 6,
+        marginTop: 10, border: `1px solid ${GRID}`, borderRadius: 6, overflow: 'hidden',
       }}>
-        <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', minWidth: 480, border: `1px solid ${GRID}` }}>
+        <table style={{
+          borderCollapse: 'separate', borderSpacing: 0,
+          width: '100%', tableLayout: 'fixed',
+          border: `1px solid ${GRID}`,
+        }}>
+          <colgroup>
+            <col style={{ width: 52 }} />             {/* 日付: 細め */}
+            <col />                                    {/* 項目: 通常 (fixed-layout の残幅で固定) */}
+            <col />                                    {/* メモ: 同上、内部 overflow で長文を吸収 */}
+            <col style={{ width: 84 }} />             {/* 入出金: 80-90px 範囲で 84 */}
+          </colgroup>
           <thead>
             <tr style={{ background: NAVY3 }}>
-              {/* 日付 (sticky left): 細幅 56px。Excel 風縦罫線 + 下罫線。 */}
               <th style={{
                 padding: '5px 6px', fontSize: 9, fontWeight: 700, color: GOLD, letterSpacing: '0.04em',
                 textAlign: 'left', whiteSpace: 'nowrap',
                 borderBottom: `1px solid ${BORDER}`, borderRight: `1px solid ${GRID}`,
-                position: 'sticky', left: 0, background: NAVY3, zIndex: 2,
-                width: 56, minWidth: 56,
               }}>日付</th>
-              {/* 項目 (通常列、横スクロールで動く) */}
               <th style={{
                 padding: '5px 6px', fontSize: 9, fontWeight: 700, color: GOLD, letterSpacing: '0.04em',
                 textAlign: 'left', whiteSpace: 'nowrap',
                 borderBottom: `1px solid ${BORDER}`, borderRight: `1px solid ${GRID}`,
               }}>項目</th>
-              {/* メモ (通常列、横スクロールで動く、広め) */}
               <th style={{
                 padding: '5px 6px', fontSize: 9, fontWeight: 700, color: GOLD, letterSpacing: '0.04em',
                 textAlign: 'left', whiteSpace: 'nowrap',
                 borderBottom: `1px solid ${BORDER}`, borderRight: `1px solid ${GRID}`,
               }}>メモ</th>
-              {/* 入出金 (sticky right): 常時右端表示。背景色でスクロール下を隠す。 */}
               <th style={{
                 padding: '5px 6px', fontSize: 9, fontWeight: 700, color: GOLD, letterSpacing: '0.04em',
                 textAlign: 'right', whiteSpace: 'nowrap',
                 borderBottom: `1px solid ${BORDER}`,
-                position: 'sticky', right: 0, background: NAVY3, zIndex: 2,
-                borderLeft: `1px solid ${GRID}`,
               }}>入出金</th>
             </tr>
           </thead>
@@ -364,15 +366,14 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
             )}
           </tbody>
           <tfoot>
-            {/* フッター: 日付/項目/メモは空、入出金 (sticky right) に差し引き純額のみ。 */}
+            {/* フッター: 日付/項目/メモは空、入出金列に差し引き純額のみ。 */}
             <tr style={{ background: NAVY2 }}>
-              <td style={{ ...footCell(false), position: 'sticky', left: 0, background: NAVY2, zIndex: 2 }} />
+              <td style={footCell(false)} />
               <td style={footCell(false)} />
               <td style={footCell(false)} />
               <td style={{
-                ...footCell(true), textAlign: 'right', color: finalDiff >= 0 ? BUDGET_BLUE : RED,
-                position: 'sticky', right: 0, background: NAVY2, zIndex: 2,
-                borderLeft: `1px solid ${GRID}`,
+                ...footCell(true), textAlign: 'right',
+                color: finalDiff >= 0 ? BUDGET_BLUE : RED,
               }}>
                 {/* finalDiff>=0 は青 + プレフィクス、<0 は赤 − プレフィクス。fmtY はマイナスを − で出す。 */}
                 {finalDiff >= 0 ? fmtY(finalDiff, { plus: true }) : fmtY(finalDiff)}
@@ -386,63 +387,47 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
 }
 
 // =============================================================
-// SalesBox — 写真2 の「売上金」KPI ブロック
-//   左: total_income (赤) と 回収率% (= total_income / expensesTotal × 100)
-//   区切り: 「/」
-//   右: grandIncome (青) と 回収率% (= grandIncome / expensesTotal × 100)
-//   expensesTotal=0 のとき rate は「—」表示。
+// SalesBox — 売上金 KPI (1 値 + 1 バー)。
+//   表示: 「売上金 ¥{grandIncome}」+ 「回収率 {pct}% (経費比)」+ 横棒 1 本。
+//   pct  = grandIncome / expensesTotal × 100 (100% 超もラベルはそのまま)。
+//   バー = 幅 Math.min(pct, 100)%、色は pct>=100 → BUDGET_BLUE (回収済) / <100 → RED (未達)。
+//   分母 0 (経費 0) のときバー非表示、回収率ラベルは "—"。
+//   totalIncome / leftPct / rightPct / 「/」セパレータの 2 セル分割 UI は撤去。
 // =============================================================
 function SalesBox({ totalIncome, grandIncome, expensesTotal }) {
-  const leftPct  = fmtPct(totalIncome, expensesTotal);
-  const rightPct = fmtPct(grandIncome, expensesTotal);
-  // 達成率バーの幅算出用 (fmtPct と同じ判定の数値版)。null のときバー非表示 (分母 0)。
-  const leftNum  = pctNum(totalIncome, expensesTotal);
-  const rightNum = pctNum(grandIncome, expensesTotal);
-  const cellStyle = { display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 2, flex: '1 1 0', minWidth: 0 };
-  // 達成率バー (横棒): 全幅 100% で fill = Math.min(pctNum, 100)%。
-  //   色は %で動的: >=100% (回収済み) → BUDGET_BLUE / <100% (未達) → RED。
-  //   数字ラベルは本当の値 (233%/300% もそのまま) を別表示、バーは 100% 頭打ち。
-  //   分母 0 (pctNum == null) のとき非表示。
-  const Bar = ({ pct }) => (
-    pct == null ? null : (
-      <div style={{
-        width: '100%', height: 4, background: 'rgba(255,255,255,0.08)',
-        borderRadius: 2, overflow: 'hidden', marginTop: 2,
-      }}>
-        <div style={{
-          width: `${Math.min(pct, 100)}%`, height: '100%',
-          background: pct >= 100 ? BUDGET_BLUE : RED,
-          transition: 'width 0.3s, background 0.3s',
-        }} />
-      </div>
-    )
-  );
+  void totalIncome; // 1 本化により未使用。signature 互換のため引数据置き。
+  const pctLabel = fmtPct(grandIncome, expensesTotal);
+  const pctVal   = pctNum(grandIncome, expensesTotal); // null = バー非表示 (分母 0)
+  const barColor = pctVal != null && pctVal >= 100 ? BUDGET_BLUE : RED;
   return (
     <div style={{
       background: NAVY2, border: `1px solid ${BORDER}`, borderRadius: 8,
-      padding: '8px 10px',
+      padding: '10px 12px',
     }}>
       <div style={{ fontSize: 9, color: TEXT_MUTED, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 4, textAlign: 'center' }}>売上金</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        {/* 左: total_income (RED) */}
-        <div style={cellStyle}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: RED, lineHeight: 1.1, whiteSpace: 'nowrap', textAlign: 'center' }}>
-            {fmtY(totalIncome)}
-          </div>
-          <div style={{ fontSize: 9, color: RED, fontWeight: 700, textAlign: 'center' }}>回収率 {leftPct}</div>
-          <Bar pct={leftNum} />
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+        {/* 売上金 ¥grandIncome (バー色と同期: >=100 青 / <100 赤) */}
+        <div style={{ fontSize: 18, fontWeight: 700, color: barColor, lineHeight: 1.1, whiteSpace: 'nowrap' }}>
+          {fmtY(grandIncome)}
         </div>
-        {/* 区切り */}
-        <div style={{ fontSize: 14, color: TEXT_MUTED, fontWeight: 400, flexShrink: 0 }}>/</div>
-        {/* 右: grandIncome (BUDGET_BLUE) */}
-        <div style={cellStyle}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: BUDGET_BLUE, lineHeight: 1.1, whiteSpace: 'nowrap', textAlign: 'center' }}>
-            {fmtY(grandIncome)}
-          </div>
-          <div style={{ fontSize: 9, color: BUDGET_BLUE, fontWeight: 700, textAlign: 'center' }}>回収率 {rightPct}</div>
-          <Bar pct={rightNum} />
+        {/* 回収率 (経費比) */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: barColor, whiteSpace: 'nowrap' }}>
+          回収率 {pctLabel} <span style={{ fontSize: 9, color: TEXT_MUTED, fontWeight: 400 }}>(経費比)</span>
         </div>
       </div>
+      {/* 横棒 1 本: 幅 = min(pct, 100)%、色 = pct>=100 ? 青 : 赤。分母 0 のとき非表示。 */}
+      {pctVal != null && (
+        <div style={{
+          width: '100%', height: 6, background: 'rgba(255,255,255,0.08)',
+          borderRadius: 3, overflow: 'hidden', marginTop: 8,
+        }}>
+          <div style={{
+            width: `${Math.min(pctVal, 100)}%`, height: '100%',
+            background: barColor,
+            transition: 'width 0.3s, background 0.3s',
+          }} />
+        </div>
+      )}
     </div>
   );
 }
@@ -452,10 +437,7 @@ function SalesBox({ totalIncome, grandIncome, expensesTotal }) {
 // =============================================================
 function DetailRow({ row }) {
   const isIncome = row.kind === 'income';
-  // 横スクロール sticky 両端のため、行 background は <td> 個別に塗る (sticky 列は親 <tr>
-  //   の背景を継承せず透過するため、入金行のティント色を sticky 側にも明示適用)。
   const rowBg = isIncome ? `${BUDGET_BLUE}12` : 'transparent';
-  const stickyBg = isIncome ? '#0B1A2E' : NAVY3; // sticky 列のスクロール下を隠す不透明背景
   const td = (right = false, color = TEXT_PRIMARY) => ({
     padding: '4px 6px', fontSize: 10, color,
     borderBottom: `1px solid ${BORDER}`,
@@ -464,20 +446,22 @@ function DetailRow({ row }) {
   });
   return (
     <tr style={{ background: rowBg }}>
-      {/* 日付 (sticky left): MM/DD 表示で sticky 56px 幅に収まる。 */}
-      <td style={{
-        ...td(),
-        position: 'sticky', left: 0, background: stickyBg, zIndex: 1,
-        width: 56, minWidth: 56,
-      }}>{fmtMD(row.date)}</td>
-      <td style={td(false, isIncome ? BUDGET_BLUE : TEXT_PRIMARY)}>{row.label || '—'}</td>
-      <td style={{ ...td(), whiteSpace: 'normal', maxWidth: 220 }}>{row.memo || '—'}</td>
-      {/* 入出金 (sticky right): 常に右端表示。 */}
-      <td style={{
-        ...td(true), color: isIncome ? BUDGET_BLUE : RED, fontWeight: 700,
-        position: 'sticky', right: 0, background: stickyBg, zIndex: 1,
-        borderLeft: `1px solid ${GRID}`, borderRight: 'none',
-      }}>
+      {/* 日付: 52px (colgroup) に MM/DD で収容。 */}
+      <td style={td()}>{fmtMD(row.date)}</td>
+      {/* 項目: 固定列。長文は ellipsis でクリップ (スクロール無し)。 */}
+      <td style={{ ...td(false, isIncome ? BUDGET_BLUE : TEXT_PRIMARY), overflow: 'hidden', textOverflow: 'ellipsis' }}
+        title={row.label || ''}
+      >{row.label || '—'}</td>
+      {/* メモ: セル内部だけ横スクロール (overflowX:auto)。長文は中身が動く。
+          中身 <span> を whiteSpace:nowrap で 1 行固定し、td の overflowX で横スクロール。 */}
+      <td style={{ ...td(), overflowX: 'auto', whiteSpace: 'nowrap', padding: 0 }}>
+        <span style={{
+          display: 'inline-block', whiteSpace: 'nowrap',
+          padding: '4px 6px',
+        }}>{row.memo || '—'}</span>
+      </td>
+      {/* 入出金: 84px (colgroup) に常時表示。 */}
+      <td style={{ ...td(true), color: isIncome ? BUDGET_BLUE : RED, fontWeight: 700, borderRight: 'none' }}>
         {isIncome ? fmtY(row.amount, { plus: true }) : fmtY(-row.amount)}
       </td>
     </tr>
