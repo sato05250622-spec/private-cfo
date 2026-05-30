@@ -1002,18 +1002,16 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   const cell = resolveCellDisplay(line, m);
                   const settledCell = isMonthSettled(m) && !isFixed;
                   const sel = m === selectedMonth;
-                  // #2修正 数字色: 予算=青 (BUDGET_BLUE)、実測=白系 (TEXT_PRIMARY)。
-                  //   確定月は赤背景を維持し、文字は実測扱い(白)。値なしは TEXT_MUTED。
-                  // P4-A 再修正 (admin と整合): isMonthSettled 最優先で実績扱いに統一。
-                  //   - 確定月 → TEXT_PRIMARY (白): 固定費もカテゴリも凍結実測扱い。
-                  //   - 未確定 かつ (kind='budget' or 固定費) → BUDGET_BLUE: 予算枠 or 固定費は予算扱い。
-                  //   - それ以外 → TEXT_PRIMARY。
-                  //   resolveCellDisplay は固定費に対し常に kind:"actual" を返すが、
-                  //   isFixed フラグを直接見ることで「未確定月の固定費 = 予算扱いで青」を表現。
+                  // P4-A 再仕様 (未確定→全青): 数字の色を「確定月=白/未確定月=青」の 2 値に統一。
+                  //   - 値なし → TEXT_MUTED
+                  //   - 確定月 (isMonthSettled(m)=true) → TEXT_PRIMARY (白): 凍結実測扱い。
+                  //   - 未確定月 → BUDGET_BLUE (青): 固定費・カテゴリ・kind 問わず予算扱いで統一。
+                  //   旧仕様 (cell.kind === "budget" || isFixed ? BLUE : TEXT_PRIMARY) では
+                  //   未確定月のカテゴリ kind='actual' (当月実支出あり) が白に落ちて
+                  //   「未確定なのに白」が混在していた。背景・border・ティントは未変更。
                   const numColor = cell.value == null ? TEXT_MUTED
                     : isMonthSettled(m) ? TEXT_PRIMARY
-                    : (cell.kind === "budget" || isFixed) ? BUDGET_BLUE
-                    : TEXT_PRIMARY;
+                    : BUDGET_BLUE;
                   // 修正2(b): 選択月の列を GOLD 系の控えめなティントでハイライト (確定の赤が優先)。
                   // C-2 + P4-A: 確定月以外 (=未確定) のセルに BUDGET_BLUE 系の薄背景を追加。
                   //   優先度: settled (赤) > unsettled (青、固定費含む) > 選択月 GOLD ティント > 素のセル。
