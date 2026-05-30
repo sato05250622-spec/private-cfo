@@ -854,28 +854,25 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             }
           }
         }
-        // 現在月までの予算累計: msd-fiscal 順 (monthOrder) で 0..currentMonthIdx を累積。
-        let currentMonthBudgetCumulative = 0;
-        for (let i = 0; i <= currentMonthIdx; i++) {
-          currentMonthBudgetCumulative += monthlyBudget[monthOrder[i]] || 0;
-        }
-        // pct: 「現在月までの予算」を 100% とする。100% で頭打ち、overflow は色変化で示す。
-        const pct = currentMonthBudgetCumulative > 0
-          ? Math.min((cum / currentMonthBudgetCumulative) * 100, 100)
+        // P4-B 再仕様: 分母を「年間予算合計 (12 ヶ月)」= annualBudgetTotal に変更。
+        //   バー全幅 = 年間予算。fill が ▼ (currentMonthIdx) より右に伸びれば「年度進捗より先行」、
+        //   左で止まれば「年度進捗より遅行」が一目で分かる。
+        //   100% 到達 = 年間予算ぴったり。超過時のみ RED に切替 (12 ヶ月超過の警告)。
+        const annualBudgetTotal = monthOrder.reduce((s, m) => s + (monthlyBudget[m] || 0), 0);
+        const pct = annualBudgetTotal > 0
+          ? Math.min((cum / annualBudgetTotal) * 100, 100)
           : 0;
-        // overflow: 累計が「現在月までの予算」を超過 → RED グラデに切替 (旧 expectedPct 比較は撤去)。
-        //   新スケールでは「現在月までの予算 = 期待消化額」と一致するため、超過 = overpace そのもの。
-        const overflow = currentMonthBudgetCumulative > 0 && cum > currentMonthBudgetCumulative;
+        const overflow = annualBudgetTotal > 0 && cum > annualBudgetTotal;
         const isRed = overflow;
         const barGrad = isRed
           ? 'linear-gradient(90deg, #FF5252 0%, #C62828 100%)'
           : 'linear-gradient(90deg, #D4A843 0%, #B88E33 100%)';
-        // C-2 + P4-B: 2 セグメント分割の各幅 (%)。分母は currentMonthBudgetCumulative に統一。
-        //   - s1Pct (確定済) = settledCum / currentMonthBudgetCumulative × 100 (pct 上限でクランプ)
+        // C-2 + P4-B 再仕様: 2 セグメント分割の各幅 (%)。分母は annualBudgetTotal に統一。
+        //   - s1Pct (確定済) = settledCum / annualBudgetTotal × 100 (pct 上限でクランプ)
         //   - s2Pct (未確定) = pct - s1Pct (残りの cum 分。BUDGET_BLUE グラデで描画)
-        //   合計 = pct%。背景の残り (100-pct)% は「現在月までの予算」に対する未消化分。
-        const s1Pct = currentMonthBudgetCumulative > 0
-          ? Math.min((settledCum / currentMonthBudgetCumulative) * 100, pct)
+        //   合計 = pct%。背景の残り (100-pct)% は「年間予算」に対する未消化分。
+        const s1Pct = annualBudgetTotal > 0
+          ? Math.min((settledCum / annualBudgetTotal) * 100, pct)
           : 0;
         const s2Pct = Math.max(0, pct - s1Pct);
         const budgetBlueGrad = 'linear-gradient(90deg, #5BA8FF 0%, #2E7BD9 100%)';
@@ -891,12 +888,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             <div style={{ fontSize: 14, fontWeight: 600, color: GOLD, marginBottom: 8 }}>
               年間累計
             </div>
-            {/* P4-B (α): 金額表示も分母を「現在月までの予算累計」に統一。
-                ¥累計 / ¥現在月までの予算 (= currentMonthBudgetCumulative)。 */}
+            {/* P4-B 再仕様: 金額表示も分母を「年間予算合計 (12 ヶ月)」に統一。
+                ¥累計実支出 / ¥年間予算合計 (= annualBudgetTotal、Math.round で整数表示)。 */}
             <div style={{ marginBottom: 10, lineHeight: 1.2, fontWeight: 700 }}>
               <span style={{ color: TEXT_PRIMARY, fontSize: 20 }}>¥{cum.toLocaleString()}</span>
               <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400, fontSize: 14 }}>/</span>
-              <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{Math.round(currentMonthBudgetCumulative).toLocaleString()}</span>
+              <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{Math.round(annualBudgetTotal).toLocaleString()}</span>
             </div>
             {/* 横長バー: 14px 高 / 7px 角丸 / NAVY3 背景。
                 C-2: 単一 fill を 2 セグメントに分割 (確定済=GOLD/RED, 未確定=BUDGET_BLUE)。
@@ -907,14 +904,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               width: '100%', height: 14, borderRadius: 7,
               background: NAVY3, overflow: 'hidden', marginBottom: 4,
             }}>
-              {yearBudgetTotal > 0 && s1Pct > 0 && (
+              {annualBudgetTotal > 0 && s1Pct > 0 && (
                 <div style={{
                   position: 'absolute', left: 0, top: 0, bottom: 0,
                   width: `${s1Pct}%`, background: barGrad,
                   transition: 'width 0.3s, background 0.3s',
                 }} />
               )}
-              {yearBudgetTotal > 0 && s2Pct > 0 && (
+              {annualBudgetTotal > 0 && s2Pct > 0 && (
                 <div style={{
                   position: 'absolute', left: `${s1Pct}%`, top: 0, bottom: 0,
                   width: `${s2Pct}%`, background: budgetBlueGrad,
