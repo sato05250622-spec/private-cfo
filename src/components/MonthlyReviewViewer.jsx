@@ -7,6 +7,14 @@ import {
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 } from "@shared/theme";
 
+// B-3 案A: 消化率の色分け用ローカル定数。@shared/theme には未収録のため、
+// 本ファイル内で定義 (BUDGET_BLUE をローカル定数化していた既存パターンと同方針)。
+//   GREEN  = 消化率 80-99% (ペース)
+//   YELLOW = 消化率 100-110% (超過警告)
+//   既存 TEAL / RED は formatVarianceRatio 内で「余裕」「大幅超過」として再利用。
+const RV_GREEN  = "#22c55e";
+const RV_YELLOW = "#F9A825";
+
 // 診断: 手動設定 (over/achieved/on_budget) を優先、null は achievement_ratio から
 // 自動算出する。本部 ClientFinancialDetail.jsx resolveDiagnosis 準拠
 // (achievement_ratio=(予算-当月)/予算 → r>0 予算達成 / r<0 超過 / 0 予算通り)。
@@ -20,16 +28,23 @@ function resolveDiagnosis(achievementRatio, diagnosis) {
   return { label: "⚪ 予算通り", color: TEXT_SECONDARY };
 }
 
-// 明細「予算比」: r=(当月-予算)/予算。超過(r>0)=RED "+12.3%"、節約(r<0)=TEAL "(9.2%)"、
-// 予算<=0 は "—"。本部 formatVarianceRatio 準拠。
+// B-3 案A: 消化率 (consumption ratio): actual / budget × 100。本部 formatVarianceRatio と同期。
+//   ≤79%       → 青 (TEAL)     余裕
+//   80-99%     → 緑 (RV_GREEN) ペース
+//   100-110%   → 黄 (RV_YELLOW) 超過警告
+//   >110%      → 赤 (RED)      大幅超過
+//   budget<=0  → 「ー」
+//   関数名は formatVarianceRatio で据置 (呼出側の影響を最小化、参照名不変)。
 function formatVarianceRatio(budget, actual) {
   const b = Number(budget) || 0;
   const a = Number(actual) || 0;
-  if (b <= 0) return { text: "—", color: TEXT_MUTED };
-  const r = (a - b) / b;
-  if (r === 0) return { text: "—", color: TEXT_MUTED };
-  if (r > 0) return { text: `+${(r * 100).toFixed(1)}%`, color: RED };
-  return { text: `(${(Math.abs(r) * 100).toFixed(1)}%)`, color: TEAL };
+  if (b <= 0) return { text: "ー", color: TEXT_MUTED };
+  const pct = (a / b) * 100;
+  const text = `${pct.toFixed(1)}%`;
+  if (pct >= 110) return { text, color: RED };
+  if (pct >= 100) return { text, color: RV_YELLOW };
+  if (pct >= 80)  return { text, color: RV_GREEN };
+  return { text, color: TEAL };
 }
 
 // #5: 本部 computeGroupSums 相当 (別リポのため再実装)。group ごとに配下 leaf の
@@ -464,7 +479,7 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
                     <th style={{ ...itemColStyle, textAlign: "left", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 96 }}>項目</th>
                     <th style={{ ...numCell, color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 62 }}>予算</th>
                     <th style={{ ...numCell, color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 62 }}>当月金額</th>
-                    <th style={{ ...numCell, color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 54 }}>予算比</th>
+                    <th style={{ ...numCell, color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 54 }}>消化率</th>
                     <th style={{ ...cellStyle, textAlign: "left", color: GOLD, fontWeight: 700, background: NAVY3, minWidth: 120 }}>差異理由</th>
                   </tr>
                 </thead>
@@ -600,7 +615,7 @@ function ManagementSummaryView({ totals }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
         <MetricCard label="予算達成率" value={ratioPct} color={ratioColor} />
         <MetricCard label="予算超過額" value={over > 0 ? `¥${over.toLocaleString("ja-JP")}` : "—"} color={over > 0 ? RED : TEXT_MUTED} />
-        <MetricCard label="予算節約額" value={save > 0 ? `¥${save.toLocaleString("ja-JP")}` : "—"} color={save > 0 ? TEAL : TEXT_MUTED} />
+        <MetricCard label="予算剰余金" value={save > 0 ? `¥${save.toLocaleString("ja-JP")}` : "—"} color={save > 0 ? TEAL : TEXT_MUTED} />
       </div>
     </div>
   );
