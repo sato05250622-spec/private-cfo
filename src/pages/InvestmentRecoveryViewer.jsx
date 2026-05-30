@@ -25,7 +25,7 @@
 //
 // テーマ: NAVY/GOLD (@shared/theme)。入金=青 (BUDGET_BLUE)、経費=赤 (RED)。
 // =============================================================
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   GOLD, NAVY2, NAVY3, CARD_BG, BORDER, RED,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
@@ -34,7 +34,7 @@ import { useInvestmentTargets } from '../hooks/useInvestmentTargets';
 import { useInvestmentIncomes } from '../hooks/useInvestmentIncomes';
 import { useExpenses } from '../hooks/useExpenses';
 import { useCategories } from '../hooks/useCategories';
-import { getManagementStartDay, cycleStart, cycleEnd } from '../utils/cycle';
+import { getManagementStartDay } from '../utils/cycle';
 
 // #3-B: 予算系=青 (本部 BLUE / 顧客 BUDGET_BLUE と統一)。入金・繰越色として使用。
 const BUDGET_BLUE = '#5BA8FF';
@@ -57,6 +57,14 @@ function fmtPct(numerator, denominator) {
   return `${Math.round((n / d) * 100)}%`;
 }
 
+// 数値 % (達成率バーの幅算出用)。fmtPct と同じ判定ロジックを数値で返す。
+//   expensesTotal<=0 のとき null → バーは描画しない。
+function pctNum(numerator, denominator) {
+  const d = Number(denominator);
+  if (!Number.isFinite(d) || d <= 0) return null;
+  return Math.round(((Number(numerator) || 0) / d) * 100);
+}
+
 // 日付短縮 (年度ブロック内のため YYYY 部を省略)。
 //   "2026-04-15" → "04/15"。空/不正値は "—"。admin と同じヘルパ。
 function fmtMD(iso) {
@@ -65,15 +73,14 @@ function fmtMD(iso) {
   return m ? `${m[1]}/${m[2]}` : iso;
 }
 
-// 「対象年 YYYY年MM月〜YYYY年MM月」を target.target_year + msd から組み立てる。
-// msd=null は 1 にフォールバック (calendar 年と等価)。
-function buildPeriodLabel(targetYear, msd) {
+// 期間ラベル: target_year を FY (4 月開始) の開始年として扱い、
+//   「YYYY 年 4 月〜翌年 3 月」を組み立てる。
+//   admin の target_year=FY 開始年と意味を揃える。msd 補正は本機能スコープ外
+//   (旧仕様は cycleStart/cycleEnd で暦年 1 月起点 + msd 補正だったが、FY 化により撤去)。
+function buildPeriodLabel(targetYear) {
   const ty = Number(targetYear);
   if (!Number.isFinite(ty)) return '';
-  const md = msd ?? 1;
-  const s = cycleStart(ty, 0, md);
-  const e = cycleEnd(ty, 11, md);
-  return `${s.getFullYear()}年${s.getMonth() + 1}月〜${e.getFullYear()}年${e.getMonth() + 1}月`;
+  return `${ty}年4月〜${ty + 1}年3月`;
 }
 
 // =============================================================
@@ -104,6 +111,19 @@ export default function InvestmentRecoveryViewer({ clientId }) {
     if (!q) return targets;
     return targets.filter((t) => (t?.name || '').includes(q));
   }, [targets, query]);
+
+  // アコーディオン: 展開中の target.id を Set で保持。初期は全閉じ (Set 空)。
+  //   畳んだ TargetBlock は氏名・経費合計・回収率% の 1 行ヘッダだけ表示、
+  //   展開すると SalesBox + 内訳テーブル + フッターを描画。
+  const [expanded, setExpanded] = useState(() => new Set());
+  const toggleExpanded = useCallback((id) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   if (!clientId) {
     return (
@@ -174,6 +194,8 @@ export default function InvestmentRecoveryViewer({ clientId }) {
             expensesLoading={expLoading}
             categoryMap={categoryMap}
             msd={msd}
+            isOpen={expanded.has(t.id)}
+            onToggle={() => toggleExpanded(t.id)}
           />
         ))}
         {!targetsLoading && !targetsError && targets.length > 0 && filteredTargets.length === 0 && (
@@ -189,7 +211,8 @@ export default function InvestmentRecoveryViewer({ clientId }) {
 // =============================================================
 // TargetBlock — 1 対象者の写真2準拠 viewer
 // =============================================================
-function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryMap, msd }) {
+function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryMap, msd, isOpen, onToggle }) {
+  void msd; // FY 化により buildPeriodLabel から msd 引数を撤去 (本ブロックでは未使用)。
   const { incomes, loading: inLoading, error: inError } = useInvestmentIncomes(clientId, target.id);
 
   // この対象者に紐づく支出 (useExpenses の toApp で target_id / createdAt が乗っている。
@@ -265,21 +288,47 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
     return rows;
   }, [expensesForTarget, incomes, categoryMap]);
 
-  const periodLabel = buildPeriodLabel(target.target_year, msd);
+  const periodLabel = buildPeriodLabel(target.target_year);
+  // アコーディオン用: 畳んだ時のヘッダで表示する回収率% (SalesBox の rightPct と同式)。
+  //   grandIncome / expensesTotal × 100。expensesTotal=0 のとき '—'。
+  const headerPct = fmtPct(grandIncome, expensesTotal);
 
   return (
     <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${BORDER}`, borderRadius: 10, padding: 10 }}>
-      {/* ヘッダ: 左=氏名+対象年期間 / 右上=経費合計 */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+      {/* アコーディオン親ヘッダ: 常時表示。タップでトグル (▼=展開中/▶=畳み)。
+          左=▼/▶ + 氏名 + 期間 / 右上=経費合計 + 回収率%。
+          畳んだ時はこの 1 行だけ。展開時はこの下に SalesBox + 内訳テーブル + フッターを描画。 */}
+      <div
+        role="button" tabIndex={0}
+        onClick={onToggle}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle?.(); } }}
+        style={{
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+          gap: 10, marginBottom: isOpen ? 10 : 0, flexWrap: 'wrap',
+          cursor: 'pointer', userSelect: 'none',
+        }}
+      >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: GOLD, lineHeight: 1.2 }}>{target.name || '(無題)'}</div>
-          <div style={{ fontSize: 10, color: TEXT_SECONDARY }}>対象年: <span style={{ color: TEXT_PRIMARY, fontWeight: 600 }}>{periodLabel || '—'}</span></div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: GOLD, lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: TEXT_SECONDARY, lineHeight: 1 }}>{isOpen ? '▼' : '▶'}</span>
+            <span>{target.name || '(無題)'}</span>
+          </div>
+          <div style={{ fontSize: 10, color: TEXT_SECONDARY, marginLeft: 17 }}>対象年: <span style={{ color: TEXT_PRIMARY, fontWeight: 600 }}>{periodLabel || '—'}</span></div>
         </div>
-        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-          <div style={{ fontSize: 9, color: TEXT_MUTED, fontWeight: 600, letterSpacing: '0.04em' }}>経費合計</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: RED, lineHeight: 1.1 }}>{fmtY(expensesTotal)}</div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexShrink: 0 }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 9, color: TEXT_MUTED, fontWeight: 600, letterSpacing: '0.04em' }}>経費合計</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: RED, lineHeight: 1.1 }}>{fmtY(expensesTotal)}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 9, color: TEXT_MUTED, fontWeight: 600, letterSpacing: '0.04em' }}>回収率</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: BUDGET_BLUE, lineHeight: 1.1 }}>{headerPct}</div>
+          </div>
         </div>
       </div>
+
+      {/* 展開時のみ: SalesBox + 内訳テーブル + フッター。畳んでる時は完全に非表示で縦伸び解消。 */}
+      {isOpen && (<>
 
       {/* 売上金 box (写真2 中央のメイン KPI) */}
       <SalesBox
@@ -335,6 +384,7 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
           </tfoot>
         </table>
       </div>
+      </>)}
     </div>
   );
 }
@@ -349,7 +399,25 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
 function SalesBox({ totalIncome, grandIncome, expensesTotal }) {
   const leftPct  = fmtPct(totalIncome, expensesTotal);
   const rightPct = fmtPct(grandIncome, expensesTotal);
-  const cellStyle = { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flex: '1 1 0', minWidth: 0 };
+  // 達成率バーの幅算出用 (fmtPct と同じ判定の数値版)。null のときバー非表示 (分母 0)。
+  const leftNum  = pctNum(totalIncome, expensesTotal);
+  const rightNum = pctNum(grandIncome, expensesTotal);
+  const cellStyle = { display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 2, flex: '1 1 0', minWidth: 0 };
+  // 達成率バー (横棒): 全幅 100% で fill = Math.min(pctNum, 100)%、GOLD。
+  //   分母 0 (pctNum == null) のとき非表示。「再定義しない」原則で pctNum をそのまま使う。
+  const Bar = ({ pct }) => (
+    pct == null ? null : (
+      <div style={{
+        width: '100%', height: 4, background: 'rgba(255,255,255,0.08)',
+        borderRadius: 2, overflow: 'hidden', marginTop: 2,
+      }}>
+        <div style={{
+          width: `${Math.min(pct, 100)}%`, height: '100%',
+          background: GOLD, transition: 'width 0.3s',
+        }} />
+      </div>
+    )
+  );
   return (
     <div style={{
       background: NAVY2, border: `1px solid ${BORDER}`, borderRadius: 8,
@@ -359,19 +427,21 @@ function SalesBox({ totalIncome, grandIncome, expensesTotal }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         {/* 左: total_income (RED) */}
         <div style={cellStyle}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: RED, lineHeight: 1.1, whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: RED, lineHeight: 1.1, whiteSpace: 'nowrap', textAlign: 'center' }}>
             {fmtY(totalIncome)}
           </div>
-          <div style={{ fontSize: 9, color: RED, fontWeight: 700 }}>回収率 {leftPct}</div>
+          <div style={{ fontSize: 9, color: RED, fontWeight: 700, textAlign: 'center' }}>回収率 {leftPct}</div>
+          <Bar pct={leftNum} />
         </div>
         {/* 区切り */}
         <div style={{ fontSize: 14, color: TEXT_MUTED, fontWeight: 400, flexShrink: 0 }}>/</div>
         {/* 右: grandIncome (BUDGET_BLUE) */}
         <div style={cellStyle}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: BUDGET_BLUE, lineHeight: 1.1, whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: BUDGET_BLUE, lineHeight: 1.1, whiteSpace: 'nowrap', textAlign: 'center' }}>
             {fmtY(grandIncome)}
           </div>
-          <div style={{ fontSize: 9, color: BUDGET_BLUE, fontWeight: 700 }}>回収率 {rightPct}</div>
+          <div style={{ fontSize: 9, color: BUDGET_BLUE, fontWeight: 700, textAlign: 'center' }}>回収率 {rightPct}</div>
+          <Bar pct={rightNum} />
         </div>
       </div>
     </div>
