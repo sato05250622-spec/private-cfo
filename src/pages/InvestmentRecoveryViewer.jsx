@@ -25,7 +25,7 @@
 //
 // テーマ: NAVY/GOLD (@shared/theme)。入金=青 (BUDGET_BLUE)、経費=赤 (RED)。
 // =============================================================
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   GOLD, NAVY2, NAVY3, CARD_BG, BORDER, RED,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
@@ -55,6 +55,14 @@ function fmtPct(numerator, denominator) {
   if (!Number.isFinite(d) || d <= 0) return '—';
   const n = Number(numerator) || 0;
   return `${Math.round((n / d) * 100)}%`;
+}
+
+// 日付短縮 (年度ブロック内のため YYYY 部を省略)。
+//   "2026-04-15" → "04/15"。空/不正値は "—"。admin と同じヘルパ。
+function fmtMD(iso) {
+  if (!iso || typeof iso !== 'string') return '—';
+  const m = iso.match(/^\d{4}-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}/${m[2]}` : iso;
 }
 
 // 「対象年 YYYY年MM月〜YYYY年MM月」を target.target_year + msd から組み立てる。
@@ -89,6 +97,14 @@ export default function InvestmentRecoveryViewer({ clientId }) {
   // 未設定なら 1 にフォールバック (calendar 年と等価表示)。
   const msd = getManagementStartDay() ?? 1;
 
+  // 人名検索 query。空文字なら全件、それ以外は name.includes(query) でフィルタ (admin と同パターン)。
+  const [query, setQuery] = useState('');
+  const filteredTargets = useMemo(() => {
+    const q = query.trim();
+    if (!q) return targets;
+    return targets.filter((t) => (t?.name || '').includes(q));
+  }, [targets, query]);
+
   if (!clientId) {
     return (
       <div style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, padding: 16, color: TEXT_MUTED, fontSize: 12 }}>
@@ -118,7 +134,38 @@ export default function InvestmentRecoveryViewer({ clientId }) {
           </div>
         )}
 
-        {targets.map((t) => (
+        {/* 人名検索: 対象者 1 名以上のときだけ表示。空 query は全件 (filteredTargets = targets)。 */}
+        {!targetsLoading && targets.length > 0 && (
+          <div style={{
+            background: 'rgba(255,255,255,0.03)', border: `1px solid ${BORDER}`, borderRadius: 8,
+            padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ fontSize: 11, color: TEXT_MUTED, fontWeight: 700, whiteSpace: 'nowrap' }}>🔍</span>
+            <input
+              type="text" placeholder="氏名で検索" value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={{
+                flex: '1 1 auto', minWidth: 100, background: NAVY2, color: TEXT_PRIMARY,
+                border: `1px solid ${BORDER}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, outline: 'none',
+              }}
+            />
+            {query && (
+              <button
+                onClick={() => setQuery('')}
+                style={{
+                  padding: '3px 8px', borderRadius: 5, background: 'transparent',
+                  border: `1px solid ${GOLD}55`, color: GOLD, fontSize: 10, fontWeight: 700,
+                  cursor: 'pointer', whiteSpace: 'nowrap',
+                }}
+              >クリア</button>
+            )}
+            <span style={{ fontSize: 9, color: TEXT_MUTED, whiteSpace: 'nowrap' }}>
+              {filteredTargets.length} / {targets.length} 人
+            </span>
+          </div>
+        )}
+
+        {filteredTargets.map((t) => (
           <TargetBlock
             key={t.id}
             clientId={clientId}
@@ -129,6 +176,11 @@ export default function InvestmentRecoveryViewer({ clientId }) {
             msd={msd}
           />
         ))}
+        {!targetsLoading && !targetsError && targets.length > 0 && filteredTargets.length === 0 && (
+          <div style={{ color: TEXT_MUTED, padding: 12, textAlign: 'center', fontSize: 11 }}>
+            「{query}」に一致する人はいません
+          </div>
+        )}
       </div>
     </div>
   );
@@ -240,7 +292,12 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
       {(inLoading || expensesLoading) && <div style={{ color: TEXT_MUTED, fontSize: 10, marginTop: 6 }}>読込中…</div>}
 
       {/* 内訳テーブル: 4列 (日付 / 項目 / メモ / 入出金) — 細め、横スクロール許容 */}
-      <div style={{ marginTop: 10, overflowX: 'auto', border: `1px solid ${GRID}`, borderRadius: 6 }}>
+      {/* 内部スクロール: maxHeight 240 + overflowY:auto で「人別」ブロックだけ縦スクロール
+          (顧客は4列・行高低めなので admin の 320 ではなく 240)。thead は sticky でヘッダ追従。 */}
+      <div style={{
+        marginTop: 10, overflowX: 'auto', overflowY: 'auto', maxHeight: 240,
+        border: `1px solid ${GRID}`, borderRadius: 6,
+      }}>
         <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 480, border: `1px solid ${GRID}` }}>
           <thead>
             <tr style={{ background: NAVY3 }}>
@@ -255,6 +312,7 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
                   textAlign: col.align,
                   borderBottom: `1px solid ${BORDER}`, borderRight: `1px solid ${GRID}`,
                   whiteSpace: 'nowrap',
+                  position: 'sticky', top: 0, background: NAVY3, zIndex: 1,
                 }}>{col.h}</th>
               ))}
             </tr>
@@ -334,7 +392,7 @@ function DetailRow({ row }) {
   });
   return (
     <tr style={{ background: rowBg }}>
-      <td style={td()}>{row.date || '—'}</td>
+      <td style={td()}>{fmtMD(row.date)}</td>
       <td style={td(false, isIncome ? BUDGET_BLUE : TEXT_PRIMARY)}>{row.label || '—'}</td>
       <td style={{ ...td(), whiteSpace: 'normal', maxWidth: 220 }}>{row.memo || '—'}</td>
       <td style={{ ...td(true), color: isIncome ? BUDGET_BLUE : RED, fontWeight: 700 }}>
