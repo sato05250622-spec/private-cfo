@@ -633,16 +633,30 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   //   - tableStyle.minWidth: 800 → 0 (landscape) ← iPhone 横画面で溢れる主因
   //   portrait は従来通り (padding 8 / fontSize 11 / minWidth 800)。
   const cellPadX = isLandscape ? 2 : 8;
-  const cellFontSize = isLandscape ? 8 : 11;
+  // 旧 cellFontSize 二値固定 (isLandscape ? 8 : 11) は項目名/ヘッダ/空白セル用に baseCellFontSize へ改名。
+  // 数字 td は下で定義する関数 cellFontSize(text, avail) を使って桁数から確定計算で縮小する。
+  const baseCellFontSize = isLandscape ? 8 : 11;
   const cellStyle = {
-    padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: cellFontSize,
+    padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: baseCellFontSize,
     color: TEXT_PRIMARY, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
   };
   const headCellStyle = {
-    padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: cellFontSize, fontWeight: 700,
+    padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: baseCellFontSize, fontWeight: 700,
     color: GOLD, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
     background: NAVY3,
   };
+  // 桁数から確定式でフォントサイズを返す (下限 5px / 上限 11px)。avail = 列幅 - 横padding。
+  //   landscape: 月列 avail=40 (5.5%×798 ≈44 − pad 4)、grand 列 avail=84 (11%×798 ≈88 − pad 4)。
+  //   portrait は tableLayout:auto のため avail を渡さずデフォルト 60 で控えめに動作。
+  //   下限 5px: 月 40px 列で 9〜11 文字 (1,254,382〜123,456,789) を先頭桁切れなく収めるため。
+  const cellFontSize = (text, avail = 60) => {
+    const len = String(text ?? '').length;
+    if (len <= 1) return 11;
+    return Math.max(5, Math.min(11, Math.floor(avail / (len * 0.85))));
+  };
+  // 数字 td 用の avail (landscape 列幅から横padding 4px 控除)。portrait は 60 / 100 で控えめ動作。
+  const monthAvail = isLandscape ? 40 : 60;
+  const grandAvail = isLandscape ? 84 : 100;
   // 行頭 (カテゴリ名) 列は縦・横ともスクロール時に固定 (sticky)。
   const stickyBase = { position: "sticky", left: 0, zIndex: 1, textAlign: "left" };
   // 縦・横とも auto layout + 親 div overflowX:auto による横スクロールに統一。
@@ -687,32 +701,46 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       </td>
       {monthOrder.map((m) => {
         const v = pickMonth(sub.monthly, m);
+        const txt = fmtCell(v);
         return (
           <td key={m} style={{
             ...cellStyle, background: NAVY2,
             fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY,
             borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
+            fontSize: cellFontSize(txt, monthAvail), overflow: 'hidden',
           }}>
-            {fmtCell(v)}
+            {txt}
           </td>
         );
       })}
       {/* 実測 grand (subtotal 内 partition の Σ resolveCell) */}
-      <td style={{
-        ...cellStyle, background: NAVY2,
-        fontWeight: 600, color: sub.grand == null ? TEXT_MUTED : TEXT_PRIMARY,
-        borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
-      }}>
-        {fmtCell(sub.grand)}
-      </td>
+      {(() => {
+        const txt = fmtCell(sub.grand);
+        return (
+          <td style={{
+            ...cellStyle, background: NAVY2,
+            fontWeight: 600, color: sub.grand == null ? TEXT_MUTED : TEXT_PRIMARY,
+            borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
+            fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden',
+          }}>
+            {txt}
+          </td>
+        );
+      })()}
       {/* 目標 grand (subtotal 内 Σ target_value) — 予算系=青 */}
-      <td style={{
-        ...cellStyle, background: NAVY2,
-        fontWeight: 600, color: (sub.target || 0) > 0 ? BUDGET_BLUE : TEXT_MUTED,
-        borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
-      }}>
-        {fmtCell((sub.target || 0) > 0 ? sub.target : null)}
-      </td>
+      {(() => {
+        const txt = fmtCell((sub.target || 0) > 0 ? sub.target : null);
+        return (
+          <td style={{
+            ...cellStyle, background: NAVY2,
+            fontWeight: 600, color: (sub.target || 0) > 0 ? BUDGET_BLUE : TEXT_MUTED,
+            borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
+            fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden',
+          }}>
+            {txt}
+          </td>
+        );
+      })()}
     </tr>
   );
 
@@ -1054,9 +1082,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   //     - 選択月の薄い GOLD ハイライト (background ${GOLD}14)
                   //   確定/未確定の判定 (settledCell / unsettledCell) は title (下) で引き続き使うため保持。
                   const unsettledCell = !settledCell && isUnsettledMonth(m);
+                  const cellText = fmtCell(cell.value);
                   const tdStyle = sel
-                    ? { ...cellStyle, color: numColor, background: `${GOLD}14` }
-                    : { ...cellStyle, color: numColor };
+                    ? { ...cellStyle, color: numColor, background: `${GOLD}14`,
+                        fontSize: cellFontSize(cellText, monthAvail), overflow: 'hidden' }
+                    : { ...cellStyle, color: numColor,
+                        fontSize: cellFontSize(cellText, monthAvail), overflow: 'hidden' };
                   return (
                     <td key={m}
                       style={tdStyle}
@@ -1064,16 +1095,29 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                         : unsettledCell ? "この月は未確定 (予算扱い)"
                         : cell.kind === "budget" ? "予算 (予算VS実績の週予算合計)"
                         : undefined}
-                    >{fmtCell(cell.value)}</td>
+                    >{cellText}</td>
                   );
                 })}
                 {/* #4 色テーマ: 行の年間「実測」=確定系=白 (TEXT_PRIMARY)、「目標」=予算系=青 (BUDGET_BLUE)。 */}
-                <td style={{ ...cellStyle, fontWeight: 700, color: TEXT_PRIMARY }}>
-                  {fmtCell(lineYearSpent(line))}
-                </td>
-                <td style={{ ...cellStyle, fontWeight: 700, color: line?.target_value == null ? TEXT_MUTED : BUDGET_BLUE }}>
-                  {fmtCell(line?.target_value)}
-                </td>
+                {(() => {
+                  const txt = fmtCell(lineYearSpent(line));
+                  return (
+                    <td style={{ ...cellStyle, fontWeight: 700, color: TEXT_PRIMARY,
+                      fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden' }}>
+                      {txt}
+                    </td>
+                  );
+                })()}
+                {(() => {
+                  const txt = fmtCell(line?.target_value);
+                  return (
+                    <td style={{ ...cellStyle, fontWeight: 700,
+                      color: line?.target_value == null ? TEXT_MUTED : BUDGET_BLUE,
+                      fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden' }}>
+                      {txt}
+                    </td>
+                  );
+                })()}
               </tr>
               {/* #2 各グループ末尾の直後に subtotal 行を 1 本挿入。
                   既存「支出合計」「累計支出」より前 = 月合計の手前で固定/変動の分解を提示。
@@ -1095,34 +1139,41 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               </td>
               {monthOrder.map((m) => {
                 const sel = m === selectedMonth;
-                // P4-赤青枠撤去: 支出合計行の月セルから赤背景・青背景・赤枠・青枠を撤去。
-                //   NAVY2 をベースに選択月のみ GOLD 22 ハイライト。
-                //   cellStyle.borderBottom (BORDER グレー) で行下罫線は維持。
+                // C-3 案A: 月別「支出合計」も local 再計算 (固定費+変動費 subtotal の和) に統一。
+                const gMonth = (fixedSubtotals?.monthly?.[m] ?? 0) + (variableSubtotals?.monthly?.[m] ?? 0);
+                const txt = fmtCell(gMonth);
                 const tdStyle = {
                   ...cellStyle,
                   background: sel ? `${GOLD}22` : NAVY2,
                   fontWeight: 700, color: TEXT_PRIMARY,
+                  fontSize: cellFontSize(txt, monthAvail), overflow: 'hidden',
                 };
-                // C-3 案A: 月別「支出合計」も local 再計算 (固定費+変動費 subtotal の和) に統一。
-                //   snapshot の data.committed_totals.monthly は loans が commit 後に編集されると
-                //   subtotal とズレるため、各月セルを fixedSubtotals + variableSubtotals に差替。
-                const gMonth = (fixedSubtotals?.monthly?.[m] ?? 0) + (variableSubtotals?.monthly?.[m] ?? 0);
                 return (
                   <td key={m} style={tdStyle}>
-                    {fmtCell(gMonth)}
+                    {txt}
                   </td>
                 );
               })}
-              {/* 年間実測 grand: C-3 案A で snapshot 由来 grandTotal → local subtotal の和に差替。
-                  loans の commit 後編集 / fixed_cost の monthly_amounts 更新で snapshot と
-                  subtotal がズレる問題を断つ (3 つの数字 = 固定費合計+変動費合計=支出合計 が常に整合)。
-                  既存 data.committed_totals.grandTotal カラム自体は据置 (履歴用)。 */}
-              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: TEXT_PRIMARY }}>
-                {fmtCell((fixedSubtotals?.grand ?? 0) + (variableSubtotals?.grand ?? 0))}
-              </td>
-              <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: (targetGrandTotal || 0) > 0 ? BUDGET_BLUE : TEXT_MUTED }}>
-                {fmtCell(targetGrandTotal || null)}
-              </td>
+              {/* 年間実測 grand: C-3 案A で snapshot 由来 grandTotal → local subtotal の和に差替。 */}
+              {(() => {
+                const txt = fmtCell((fixedSubtotals?.grand ?? 0) + (variableSubtotals?.grand ?? 0));
+                return (
+                  <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: TEXT_PRIMARY,
+                    fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden' }}>
+                    {txt}
+                  </td>
+                );
+              })()}
+              {(() => {
+                const txt = fmtCell(targetGrandTotal || null);
+                return (
+                  <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700,
+                    color: (targetGrandTotal || 0) > 0 ? BUDGET_BLUE : TEXT_MUTED,
+                    fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden' }}>
+                    {txt}
+                  </td>
+                );
+              })()}
             </tr>
             {/* P4-C: 合計行② 累計支出 を local 再計算で再構築 (snapshot 直読みを撤去)。
                 旧: data.committed_totals.cumulative (snapshot 焼き) → loans 編集後に支出合計とズレる
@@ -1139,16 +1190,18 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               </td>
               {monthOrder.map((m) => {
                 const v = localCumByMonth[m];
+                const txt = fmtCell(v);
                 // P4-赤青枠撤去: 累計支出行の月セルから赤背景・青背景・赤枠・青枠を撤去。
                 //   他の合計セル (実測/目標 L1149-1150) と同様 NAVY2 ベースに統一。
                 //   cellStyle.borderBottom (BORDER グレー) で行下罫線は維持。
                 const tdStyle = {
                   ...cellStyle, background: NAVY2,
                   fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY,
+                  fontSize: cellFontSize(txt, monthAvail), overflow: 'hidden',
                 };
                 return (
                   <td key={m} style={tdStyle}>
-                    {fmtCell(v)}
+                    {txt}
                   </td>
                 );
               })}
