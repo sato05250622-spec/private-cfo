@@ -557,6 +557,35 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     return sumLineSpent(l);
   };
 
+  // タスク⑭ (2026-06-02): 確定済み月の実績のみを合算 (本部 rowSettledActual 相当)。
+  //   旧仕様: 累計バー IIFE 内に同名関数があり消化サマリー IIFE から参照不可だったため、
+  //     行レベル (sumLineSpent / lineYearSpent と同スコープ) に hoist して両方から参照可能に。
+  //   - 固定費 → settled月の monthly_amounts[m] ?? base のみ合算 (admin と同じく future skip)
+  //   - その他行 → settled月の monthly_spent[m] のみ合算 (admin 焼きの実支出シリーズ)
+  //   外スコープ参照: isMonthSettled (L524), classifyMonth, fyYear, msd, todayStr, startMonth。
+  const settledLineSpent = (l) => {
+    if (l?.row_type === "fixed_cost") {
+      const ma = l.monthly_amounts;
+      const base = Number(l.monthly_amount) || 0;
+      let s = 0;
+      for (let m = 1; m <= 12; m++) {
+        if (!isMonthSettled(m)) continue;
+        if (classifyMonth(fyYear, m, msd, todayStr, startMonth) === "future") continue;
+        const v = ma ? (ma[m] ?? ma[String(m)]) : null;
+        s += (v != null ? Number(v) : base) || 0;
+      }
+      return s;
+    }
+    const ms = l?.monthly_spent;
+    if (!ms || typeof ms !== "object") return 0;
+    let sum = 0;
+    for (const k of Object.keys(ms)) {
+      if (!isMonthSettled(Number(k))) continue;
+      sum += Number(ms[k]) || 0;
+    }
+    return sum;
+  };
+
   // #2 固定費合計 / 変動費合計 subtotal の事前計算 (b4bcfa2 revert からの再導入、findLastIndex 排除版)。
   //   - 元実装 (916c1ce) は displayLines.findLastIndex(...) を使っていたが iOS Safari 15.4 未満で
   //     TypeError を投げるため、forward 1 パス for ループに置換 (pure ES2017)。
@@ -816,57 +845,28 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         // data.committed_totals.grandTotal は予算込みの年間見込み合計として
         // 支出合計 grand cell で引き続き使用するため変更しない。
         const cum = displayLines.reduce((s, l) => s + (lineYearSpent(l) || 0), 0);
-        // C-2: 累計バー 2 セグメント分割用「確定済月の lineYearSpent 合計」(settledCum)。
-        //   lineYearSpent は 12 月合算なので、settled 月だけにフィルタした版を別途定義。
-        //   - 固定費行: monthly_amounts[m] ?? monthly_amount を settled 月だけ合算 (future は admin と同じく除外)
-        //   - その他行: monthly_spent[m] を settled 月だけ合算 (admin 焼きの実支出シリーズ)
-        const settledLineSpent = (l) => {
+        // タスク⑭ (2026-06-02): settledLineSpent は L559 付近に hoist 済 (消化サマリー IIFE と共用)。
+        //   旧定義は削除し、上位スコープの関数を参照する。
+        const settledCum = displayLines.reduce((s, l) => s + (settledLineSpent(l) || 0), 0);
+        // タスク⑭ (2026-06-02): 本部準拠 (admin AnnualBudgetTab summaryBudget) に統一。
+        //   - カテゴリも target_value を採用 (旧: annualWeekBudgetForCategory による週Σ)
+        //     → 本部 annualTargetTotal (=Σ target_value) と完全一致、9,225 ズレを解消。
+        //   - 固定費は target_value (annual_target) 優先、未設定なら monthly_amounts ×12 で満額補填。
+        const summaryBudget = (l) => {
+          const tv = Number(l?.target_value);
+          if (Number.isFinite(tv) && tv > 0) return tv;
           if (l?.row_type === "fixed_cost") {
-            const ma = l.monthly_amounts;
-            const base = Number(l.monthly_amount) || 0;
+            const ma = l?.monthly_amounts;
+            const base = Number(l?.monthly_amount) || 0;
             let s = 0;
             for (let m = 1; m <= 12; m++) {
-              if (!isMonthSettled(m)) continue;
-              if (classifyMonth(fyYear, m, msd, todayStr, startMonth) === "future") continue;
               const v = ma ? (ma[m] ?? ma[String(m)]) : null;
               s += (v != null ? Number(v) : base) || 0;
             }
             return s;
           }
-          const ms = l?.monthly_spent;
-          if (!ms || typeof ms !== "object") return 0;
-          let sum = 0;
-          for (const k of Object.keys(ms)) {
-            if (!isMonthSettled(Number(k))) continue;
-            sum += Number(ms[k]) || 0;
-          }
-          return sum;
+          return 0;
         };
-        const settledCum = displayLines.reduce((s, l) => s + (settledLineSpent(l) || 0), 0);
-        // 消化サマリー L836-842 と同一ロジックを inline 再定義 (スコープ独立で安全)。
-        // #5 修正: 固定費行で annual_target 未設定のとき monthly_amount × 12 をフォールバック
-        //   採用 (cum=snapshot.grandTotal は admin computeTotalsRow で fixed_cost の monthly_amounts
-        //   を 12 ヶ月加算しているため、分母にも同額を当てて非対称を解消し、バーが常に MAX 化する
-        //   バグを修正)。消化サマリー側 (L958-) も同パッチで整合。
-        const summaryBudget = (l) => (
-          l?.row_type === "category" && l?.category_id
-            ? annualWeekBudgetForCategory(weekCatBudgets, l.category_id, { fiscalYear: fyYear, startMonth })
-            : (() => {
-                const tv = Number(l?.target_value);
-                if (Number.isFinite(tv) && tv > 0) return tv;
-                if (l?.row_type === "fixed_cost") {
-                  const ma = l?.monthly_amounts;
-                  const base = Number(l?.monthly_amount) || 0;
-                  let s = 0;
-                  for (let m = 1; m <= 12; m++) {
-                    const v = ma ? (ma[m] ?? ma[String(m)]) : null;
-                    s += (v != null ? Number(v) : base) || 0;
-                  }
-                  return s;
-                }
-                return 0;
-              })()
-        );
         const yearBudgetTotal = displayLines.reduce((s, l) => s + (summaryBudget(l) || 0), 0);
         const currentCycleMonth = findCycleOfDate(new Date(), msd).month + 1;
         // P4-B (α): 「現在月までの予算累計」を 100% の基準とする (案 I)。
@@ -906,27 +906,25 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             }
           }
         }
-        // P4-B 再仕様: 分母を「年間予算合計 (12 ヶ月)」= annualBudgetTotal に変更。
-        //   バー全幅 = 年間予算。fill が ▼ (currentMonthIdx) より右に伸びれば「年度進捗より先行」、
-        //   左で止まれば「年度進捗より遅行」が一目で分かる。
-        //   100% 到達 = 年間予算ぴったり。超過時のみ RED に切替 (12 ヶ月超過の警告)。
-        const annualBudgetTotal = monthOrder.reduce((s, m) => s + (monthlyBudget[m] || 0), 0);
-        const pct = annualBudgetTotal > 0
-          ? Math.min((cum / annualBudgetTotal) * 100, 100)
+        // タスク⑭ (2026-06-02): 分母を Σ summaryBudget (= 本部 annualTargetTotal、Σ target_value) に統一。
+        //   旧: monthlyBudget (固定費 monthly_amounts + カテゴリ週Σ + 特殊行 target/12) で 9,225 ズレ。
+        //   新: summaryBudget は target_value 一本化 (固定費フォールバック含む) → 本部と完全一致。
+        // タスク⑭: バー fill 計算 (pct/overflow/s1Pct) も白字 cum → settledCum に統一。
+        //   累計トップ表示と整合させ、確定月実績のみで進捗を計算する。
+        const annualTargetTotal = displayLines.reduce((s, l) => s + (summaryBudget(l) || 0), 0);
+        const pct = annualTargetTotal > 0
+          ? Math.min((settledCum / annualTargetTotal) * 100, 100)
           : 0;
-        const overflow = annualBudgetTotal > 0 && cum > annualBudgetTotal;
+        const overflow = annualTargetTotal > 0 && settledCum > annualTargetTotal;
         const isRed = overflow;
         const barGrad = isRed
           ? 'linear-gradient(90deg, #FF5252 0%, #C62828 100%)'
           : 'linear-gradient(90deg, #D4A843 0%, #B88E33 100%)';
-        // C-2 + P4-B 再仕様: 2 セグメント分割の各幅 (%)。分母は annualBudgetTotal に統一。
-        //   - s1Pct (確定済) = settledCum / annualBudgetTotal × 100 (pct 上限でクランプ)
-        //   - s2Pct (未確定) = pct - s1Pct (残りの cum 分。BUDGET_BLUE グラデで描画)
-        //   合計 = pct%。背景の残り (100-pct)% は「年間予算」に対する未消化分。
-        const s1Pct = annualBudgetTotal > 0
-          ? Math.min((settledCum / annualBudgetTotal) * 100, pct)
-          : 0;
-        const s2Pct = Math.max(0, pct - s1Pct);
+        // 2 セグメント: s1Pct (確定済=settledCum) と s2Pct (未確定分=なし、確定月限定方針で 0)。
+        //   確定月実績のみを白字で表示する新方針では未確定 cum 分を出さないため s2Pct=0 で固定。
+        //   背景の残り (100-pct)% は年間目標に対する未消化分として可視化。
+        const s1Pct = pct;
+        const s2Pct = 0;
         const budgetBlueGrad = 'linear-gradient(90deg, #5BA8FF 0%, #2E7BD9 100%)';
         return (
           <div style={{
@@ -940,12 +938,13 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             <div style={{ fontSize: 14, fontWeight: 600, color: GOLD, marginBottom: 8 }}>
               年間累計
             </div>
-            {/* P4-B 再仕様: 金額表示も分母を「年間予算合計 (12 ヶ月)」に統一。
-                ¥累計実支出 / ¥年間予算合計 (= annualBudgetTotal、Math.round で整数表示)。 */}
+            {/* タスク⑭ (2026-06-02): 累計表示を本部と完全一致させる。
+                白字 = settledCum (確定月実績のみ、admin rowSettledActual 相当)。
+                青字 = annualTargetTotal (Σ summaryBudget = Σ target_value)。 */}
             <div style={{ marginBottom: 10, lineHeight: 1.2, fontWeight: 700 }}>
-              <span style={{ color: TEXT_PRIMARY, fontSize: 20 }}>¥{cum.toLocaleString()}</span>
+              <span style={{ color: TEXT_PRIMARY, fontSize: 20 }}>¥{settledCum.toLocaleString()}</span>
               <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400, fontSize: 14 }}>/</span>
-              <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{Math.round(annualBudgetTotal).toLocaleString()}</span>
+              <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{Math.round(annualTargetTotal).toLocaleString()}</span>
             </div>
             {/* 横長バー: 14px 高 / 7px 角丸 / NAVY3 背景。
                 C-2: 単一 fill を 2 セグメントに分割 (確定済=GOLD/RED, 未確定=BUDGET_BLUE)。
@@ -956,14 +955,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               width: '100%', height: 14, borderRadius: 7,
               background: NAVY3, overflow: 'hidden', marginBottom: 4,
             }}>
-              {annualBudgetTotal > 0 && s1Pct > 0 && (
+              {annualTargetTotal > 0 && s1Pct > 0 && (
                 <div style={{
                   position: 'absolute', left: 0, top: 0, bottom: 0,
                   width: `${s1Pct}%`, background: barGrad,
                   transition: 'width 0.3s, background 0.3s',
                 }} />
               )}
-              {annualBudgetTotal > 0 && s2Pct > 0 && (
+              {annualTargetTotal > 0 && s2Pct > 0 && (
                 <div style={{
                   position: 'absolute', left: `${s1Pct}%`, top: 0, bottom: 0,
                   width: `${s2Pct}%`, background: budgetBlueGrad,
@@ -1225,32 +1224,28 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             // 消化(実支出)= 本部が焼いた実支出シリーズ monthly_spent の合計。
             // sumLineSpent / lineYearSpent は本部準拠で viewer スコープに引き上げ済み (上 L443/L450)。
             // ここからは両関数を直接参照する (重複定義を削除)。
-            // 方針A: 消化サマリーのカテゴリ予算 = 全12ヶ月 week_cat_budgets 合計 (実際に設定した月予算)。
-            //   固定費・特殊行は target_value を優先、固定費で annual_target 未設定なら
-            //   monthly_amount × 12 を fallback (#5 修正、年間累計バー L736- と同パッチ。
-            //   実測 totalActual との非対称を解消)。
-            const summaryBudget = (l) => (
-              l?.row_type === "category" && l?.category_id
-                ? annualWeekBudgetForCategory(weekCatBudgets, l.category_id, { fiscalYear: fyYear, startMonth })
-                : (() => {
-                    const tv = Number(l?.target_value);
-                    if (Number.isFinite(tv) && tv > 0) return tv;
-                    if (l?.row_type === "fixed_cost") {
-                      const ma = l?.monthly_amounts;
-                      const base = Number(l?.monthly_amount) || 0;
-                      let s = 0;
-                      for (let m = 1; m <= 12; m++) {
-                        const v = ma ? (ma[m] ?? ma[String(m)]) : null;
-                        s += (v != null ? Number(v) : base) || 0;
-                      }
-                      return s;
-                    }
-                    return 0;
-                  })()
-            );
-            // 総予算 = 全行 summaryBudget 合計、実測 = 全行 年間実測合計 (固定費込み)。
+            // タスク⑭ (2026-06-02): 本部準拠 summaryBudget に統一 (カテゴリも target_value)。
+            //   年間累計バー側 (L851-869) と完全同一定義。本部 annualTargetTotal と一致。
+            const summaryBudget = (l) => {
+              const tv = Number(l?.target_value);
+              if (Number.isFinite(tv) && tv > 0) return tv;
+              if (l?.row_type === "fixed_cost") {
+                const ma = l?.monthly_amounts;
+                const base = Number(l?.monthly_amount) || 0;
+                let s = 0;
+                for (let m = 1; m <= 12; m++) {
+                  const v = ma ? (ma[m] ?? ma[String(m)]) : null;
+                  s += (v != null ? Number(v) : base) || 0;
+                }
+                return s;
+              }
+              return 0;
+            };
+            // 総予算 = 全行 summaryBudget 合計、実績 = 全行 settledLineSpent 合計 (確定月のみ)。
+            // タスク⑭: lineYearSpent (着地見込み) → settledLineSpent (確定月実績のみ) に変更。
+            //   本部 admin の rowSettledActual と同方針。
             const totalBudget = displayLines.reduce((s, l) => s + (summaryBudget(l) || 0), 0);
-            const totalActual = displayLines.reduce((s, l) => s + (lineYearSpent(l) || 0), 0);
+            const totalActual = displayLines.reduce((s, l) => s + (settledLineSpent(l) || 0), 0);
             const tPct = totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0;
             const tColor = tPct >= 100 ? RED : tPct >= 80 ? GOLD : TEAL;
 
@@ -1318,7 +1313,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                         <div data-pdf-unit="sum-fixed-group" style={{ marginBottom: 12 }}>
                           <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_SECONDARY, marginBottom: 6 }}>固定費</div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                            {fixedCosts.map((line) => renderBar(line, lineYearSpent))}
+                            {/* タスク⑭ (2026-06-02): 固定費個別バーも確定月実績のみで進捗計算。 */}
+                            {fixedCosts.map((line) => renderBar(line, settledLineSpent))}
                           </div>
                         </div>
                       )}
@@ -1328,7 +1324,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                         <div data-pdf-unit="sum-cat-group">
                           <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_SECONDARY, marginBottom: 6 }}>カテゴリ</div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                            {cats.map((line) => renderBar(line, sumLineSpent))}
+                            {/* タスク⑭ (2026-06-02): カテゴリ個別バーも確定月実績のみで進捗計算。 */}
+                            {cats.map((line) => renderBar(line, settledLineSpent))}
                           </div>
                         </div>
                       )}
