@@ -533,7 +533,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // - カテゴリ/特殊行: 本部が反映時に焼いた monthly_spent (実支出シリーズ) を 12 月合算。
   //   旧 committed (monthly_spent 無し) は 0 にフォールバック (エラーにしない)。
   // - 固定費 (committed に monthly_spent 無し): Σ (monthly_amounts[m] ?? monthly_amount)。
-  //   classifyMonth が future の月は不算入 (#1 修正・現在進捗で進む挙動を維持)。
+  //   タスク⑮ (2026-06-02): 本部 admin の rowYearSpent + resolveCell 固定費分岐は
+  //     classifyMonth/settled を見ず全月 monthly_amounts[m] ?? base を返すため、
+  //     顧客側も同様に future skip を撤廃して年間満額 (着地見込み) で揃える。
+  //     これにより実測列の固定費合計 grand (computeSubtotalsForType=全12ヶ月Σ) と
+  //     個別行が完全一致する (合計 = 個別行の Σ が成立)。
   // 明細テーブルの「実測」列と消化サマリーの実測の両方から参照する。
   const sumLineSpent = (l) => {
     const s = l?.monthly_spent;
@@ -548,7 +552,6 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       const base = Number(l.monthly_amount) || 0;
       let s = 0;
       for (let m = 1; m <= 12; m++) {
-        if (classifyMonth(fyYear, m, msd, todayStr, startMonth) === "future") continue;
         const v = ma ? (ma[m] ?? ma[String(m)]) : null;
         s += (v != null ? Number(v) : base) || 0;
       }
