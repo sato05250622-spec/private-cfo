@@ -2609,7 +2609,18 @@ export default function App() {
   const tabs=[{id:"daily",label:"入力",icon:"✏️"},{id:"day",label:"日",icon:"📅"},{id:"weekly",label:"週",icon:"📊"},{id:"monthly",label:"月",icon:"📈"},{id:"menu",label:"メニュー",icon:"···"}];
 
   return (
-    <div style={S.app}>
+    // タスク㉕ (2026-06-03): 横画面 × レポート画面 (tab="menu" && menuScreen="currentMonthReport")
+    //   のときだけ .app の maxWidth を 430→1100 に上書き。レビュー/投資回収の本文が親 430 で
+    //   頭打ちになる真因を、.app 自体を局所拡大することで解消。
+    //   - S.app の他プロパティ (margin:"0 auto", overflowX:"hidden", display/flex/height/background)
+    //     は spread で完全維持。maxWidth だけ条件付き上書き。
+    //   - bottomNav は L957 で独自に position:"fixed" + maxWidth:430 を持つため .app 拡大の影響なし
+    //     (引き続き 430 中央維持)。
+    //   - 縦画面・他画面 (入力/カレンダー/他メニュー) は else 側で従来どおり S.app (430)。
+    //   - 繰越票は AnnualBudgetViewer L1391 の position:fixed 全画面化で .app 幅と無関係、不変。
+    <div style={(isLandscape && tab === "menu" && menuScreen === "currentMonthReport")
+      ? { ...S.app, maxWidth: 1100 }
+      : S.app}>
       {/* Phase E: 顧客側編集ロック中トースト。requestEdit() ロック分岐で発火、3.5s 自動消滅。
           telop / その他 fixed 要素より大きい z-index (10000) で前面に表示。 */}
       {editLockedToast && (

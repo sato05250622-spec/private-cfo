@@ -456,13 +456,15 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
       </div>
 
       {/* タスク㉑ (2026-06-02): 横画面で本文を読みやすい幅に制約＋中央寄せ (案A)。
-          isLandscape のときだけ maxWidth: 720 + marginInline: "auto" を当て、
+          isLandscape のときだけ maxWidth + marginInline: "auto" を当て、
           1 行が長くなりすぎるのを防ぎ可読性を改善する。縦画面 (portrait) は従来どおり。
           ※ L428 の外側 maxWidth:"none" は据置 (テーブル等の全幅利用は別途維持)。
-          ※ data-pdf-unit 構造・PDF 出力・各セクションの中身は不変。 */}
+          ※ data-pdf-unit 構造・PDF 出力・各セクションの中身は不変。
+          タスク㉕ (2026-06-03): App.jsx 側で .app が横画面×レポート時に 1100 まで広がるため、
+          本文 maxWidth も 720→1100 へ拡張。レポート画面のヘッダ・タブと幅を揃える。 */}
       <div style={{
         padding: "14px 16px",
-        ...(isLandscape ? { maxWidth: 720, marginInline: "auto" } : {}),
+        ...(isLandscape ? { maxWidth: 1100, marginInline: "auto" } : {}),
       }}>
         {/* 診断バッジ (常に表示: 手動 or 達成率自動) — data-pdf-unit でユニット管理。 */}
         <div data-pdf-unit="diag-badge" style={{
