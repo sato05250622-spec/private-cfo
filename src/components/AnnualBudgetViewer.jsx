@@ -734,10 +734,16 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       {monthOrder.map((m) => {
         const v = pickMonth(sub.monthly, m);
         const txt = fmtCell(v);
+        // タスク⑯ (2026-06-02): 本部 admin (AnnualBudgetTab L1200-1203) と一致。
+        //   確定月=白 (TEXT_PRIMARY)、未確定月で値あり=青 (BUDGET_BLUE)、null=灰 (TEXT_MUTED)。
+        const isActualCell = isMonthSettled(m);
+        const cellColor = isActualCell ? TEXT_PRIMARY
+          : v == null ? TEXT_MUTED
+          : BUDGET_BLUE;
         return (
           <td key={m} style={{
             ...cellStyle, background: NAVY2,
-            fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY,
+            fontWeight: 600, color: cellColor,
             borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
             fontSize: cellFontSize(txt, monthAvail), overflow: 'hidden',
           }}>
@@ -745,13 +751,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           </td>
         );
       })}
-      {/* 実測 grand (subtotal 内 partition の Σ resolveCell) */}
+      {/* 実測 grand (subtotal 内 partition の Σ resolveCell)。
+          タスク⑯ (2026-06-02): 着地見込み (確定実績+未確定予算) のため青字 (BUDGET_BLUE) に統一 (admin L1221 一致)。 */}
       {(() => {
         const txt = fmtCell(sub.grand);
         return (
           <td style={{
             ...cellStyle, background: NAVY2,
-            fontWeight: 600, color: sub.grand == null ? TEXT_MUTED : TEXT_PRIMARY,
+            fontWeight: 600, color: sub.grand == null ? TEXT_MUTED : BUDGET_BLUE,
             borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
             fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden',
           }}>
@@ -1144,10 +1151,19 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 // C-3 案A: 月別「支出合計」も local 再計算 (固定費+変動費 subtotal の和) に統一。
                 const gMonth = (fixedSubtotals?.monthly?.[m] ?? 0) + (variableSubtotals?.monthly?.[m] ?? 0);
                 const txt = fmtCell(gMonth);
+                // タスク⑯ (2026-06-02): 本部 admin (L1725-1728) と一致。
+                //   gMonth は ?? 0 で必ず数値になるため、null 判定は fixed/variable monthly が両方 null の場合で代替。
+                const fM = fixedSubtotals?.monthly?.[m];
+                const vM = variableSubtotals?.monthly?.[m];
+                const allNull = fM == null && vM == null;
+                const isActualCell = isMonthSettled(m);
+                const cellColor = isActualCell ? TEXT_PRIMARY
+                  : allNull ? TEXT_MUTED
+                  : BUDGET_BLUE;
                 const tdStyle = {
                   ...cellStyle,
                   background: sel ? `${GOLD}22` : NAVY2,
-                  fontWeight: 700, color: TEXT_PRIMARY,
+                  fontWeight: 700, color: cellColor,
                   fontSize: cellFontSize(txt, monthAvail), overflow: 'hidden',
                 };
                 return (
@@ -1156,11 +1172,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   </td>
                 );
               })}
-              {/* 年間実測 grand: C-3 案A で snapshot 由来 grandTotal → local subtotal の和に差替。 */}
+              {/* 年間実測 grand: タスク⑯ (2026-06-02) で本部 admin (L1744) と一致させ青字 (BUDGET_BLUE) に統一。
+                  着地見込み (確定実績+未確定予算) を表す。 */}
               {(() => {
                 const txt = fmtCell((fixedSubtotals?.grand ?? 0) + (variableSubtotals?.grand ?? 0));
                 return (
-                  <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: TEXT_PRIMARY,
+                  <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: BUDGET_BLUE,
                     fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden' }}>
                     {txt}
                   </td>
@@ -1196,9 +1213,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 // P4-赤青枠撤去: 累計支出行の月セルから赤背景・青背景・赤枠・青枠を撤去。
                 //   他の合計セル (実測/目標 L1149-1150) と同様 NAVY2 ベースに統一。
                 //   cellStyle.borderBottom (BORDER グレー) で行下罫線は維持。
+                // タスク⑯ (2026-06-02): 本部 admin (L1768-1771) と一致。
+                //   確定月=白 (TEXT_PRIMARY)、未確定月で値あり=青 (BUDGET_BLUE)、null=灰 (TEXT_MUTED)。
+                const isActualCell = isMonthSettled(m);
+                const cellColor = isActualCell ? TEXT_PRIMARY
+                  : v == null ? TEXT_MUTED
+                  : BUDGET_BLUE;
                 const tdStyle = {
                   ...cellStyle, background: NAVY2,
-                  fontWeight: 600, color: v == null ? TEXT_MUTED : TEXT_PRIMARY,
+                  fontWeight: 600, color: cellColor,
                   fontSize: cellFontSize(txt, monthAvail), overflow: 'hidden',
                 };
                 return (
