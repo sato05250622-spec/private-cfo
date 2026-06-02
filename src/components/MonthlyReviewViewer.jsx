@@ -455,7 +455,15 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
         </button>
       </div>
 
-      <div style={{ padding: "14px 16px" }}>
+      {/* タスク㉑ (2026-06-02): 横画面で本文を読みやすい幅に制約＋中央寄せ (案A)。
+          isLandscape のときだけ maxWidth: 720 + marginInline: "auto" を当て、
+          1 行が長くなりすぎるのを防ぎ可読性を改善する。縦画面 (portrait) は従来どおり。
+          ※ L428 の外側 maxWidth:"none" は据置 (テーブル等の全幅利用は別途維持)。
+          ※ data-pdf-unit 構造・PDF 出力・各セクションの中身は不変。 */}
+      <div style={{
+        padding: "14px 16px",
+        ...(isLandscape ? { maxWidth: 720, marginInline: "auto" } : {}),
+      }}>
         {/* 診断バッジ (常に表示: 手動 or 達成率自動) — data-pdf-unit でユニット管理。 */}
         <div data-pdf-unit="diag-badge" style={{
           display: "inline-block", fontSize: 11, fontWeight: 700, color: diag.color,
