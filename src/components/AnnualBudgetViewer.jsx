@@ -1107,11 +1107,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                     >{cellText}</td>
                   );
                 })}
-                {/* #4 色テーマ: 行の年間「実測」=確定系=白 (TEXT_PRIMARY)、「目標」=予算系=青 (BUDGET_BLUE)。 */}
+                {/* タスク⑰ (2026-06-02): 個別行の実測列 grand を本部 admin (タスク②/⑬で BLUE 統一済) と一致。
+                    実測列 grand は「着地見込み (確定実績+未確定予算)」のため青字 (BUDGET_BLUE)。
+                    null 時のみ TEXT_MUTED で「無し」表示 (admin renderSubtotalRow L1221 のパターン準拠)。 */}
                 {(() => {
-                  const txt = fmtCell(lineYearSpent(line));
+                  const grand = lineYearSpent(line);
+                  const txt = fmtCell(grand);
                   return (
-                    <td style={{ ...cellStyle, fontWeight: 700, color: TEXT_PRIMARY,
+                    <td style={{ ...cellStyle, fontWeight: 700,
+                      color: grand == null ? TEXT_MUTED : BUDGET_BLUE,
                       fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden' }}>
                       {txt}
                     </td>
