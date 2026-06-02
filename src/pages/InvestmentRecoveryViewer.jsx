@@ -131,13 +131,14 @@ export default function InvestmentRecoveryViewer({ clientId }) {
     [targets, currentYear],
   );
 
-  // 人名検索 query。空文字なら年度フィルタ後の全件、それ以外は name.includes(query) でフィルタ。
-  const [query, setQuery] = useState('');
-  const filteredTargets = useMemo(() => {
-    const q = query.trim();
-    if (!q) return yearFilteredTargets;
-    return yearFilteredTargets.filter((t) => (t?.name || '').includes(q));
-  }, [yearFilteredTargets, query]);
+  // タスク⑲ (2026-06-02): 氏名検索を廃止 (本部 admin と同仕様)。年度フィルタの結果をそのまま使う。
+  const filteredTargets = yearFilteredTargets;
+
+  // タスク⑲ (2026-06-02): 月絞り込み (案B = ブロック内 mergedRows のみ絞る、人物ブロックは全表示)。
+  //   - null = 全月 (既存挙動と完全同一)
+  //   - 1..12 = displayRows のみ絞り、サマリー (expensesTotal/grandIncome/finalDiff/headerPct) は
+  //     mergedRows 非依存 (expensesForTarget/incomes 直接ベース) のため全月通算のまま自動維持。
+  const [selectedMonth, setSelectedMonth] = useState(null);
 
   // アコーディオン: 撤去済 (A 確定で全展開固定)。前回の expanded Set / toggleExpanded /
   //   isOpen / onToggle / ▼/▶ ヘッダ / {isOpen && <>} Fragment ガードは全て撤去。
@@ -189,28 +190,21 @@ export default function InvestmentRecoveryViewer({ clientId }) {
                 width={120}
               />
             )}
-            <span style={{ fontSize: 11, color: TEXT_MUTED, fontWeight: 700, whiteSpace: 'nowrap' }}>🔍</span>
-            <input
-              type="text" placeholder="氏名で検索" value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              style={{
-                flex: '1 1 auto', minWidth: 100, background: NAVY2, color: TEXT_PRIMARY,
-                border: `1px solid ${BORDER}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, outline: 'none',
-              }}
+            {/* タスク⑲ (2026-06-02): 月ダイヤル (年度ダイヤルの隣に併設、本部 admin と同仕様)。
+                全月 (null) で既存挙動と同一、1..12 で displayRows のみ絞る (案B)。 */}
+            <PopoverDial
+              items={[
+                { key: null, label: '全月' },
+                ...Array.from({ length: 12 }, (_, i) => ({ key: i + 1, label: `${i + 1}月` })),
+              ]}
+              value={selectedMonth}
+              onChange={(m) => setSelectedMonth(m == null ? null : Number(m))}
+              placeholder="月"
+              width={100}
             />
-            {query && (
-              <button
-                onClick={() => setQuery('')}
-                style={{
-                  padding: '3px 8px', borderRadius: 5, background: 'transparent',
-                  border: `1px solid ${GOLD}55`, color: GOLD, fontSize: 10, fontWeight: 700,
-                  cursor: 'pointer', whiteSpace: 'nowrap',
-                }}
-              >クリア</button>
-            )}
-            {/* カウンタ: フィルタ後 / 年度内 (年度フィルタなしのとき年度内=全件) */}
+            {/* カウンタ: 氏名検索廃止に伴い X / Y → 単一値 N人 に簡素化。 */}
             <span style={{ fontSize: 9, color: TEXT_MUTED, whiteSpace: 'nowrap' }}>
-              {filteredTargets.length} / {yearFilteredTargets.length} 人
+              {filteredTargets.length} 人
             </span>
           </div>
         )}
@@ -222,15 +216,14 @@ export default function InvestmentRecoveryViewer({ clientId }) {
             target={t}
             allExpenses={expenses || []}
             expensesLoading={expLoading}
+            selectedMonth={selectedMonth}
             categoryMap={categoryMap}
             msd={msd}
           />
         ))}
         {!targetsLoading && !targetsError && targets.length > 0 && filteredTargets.length === 0 && (
           <div style={{ color: TEXT_MUTED, padding: 12, textAlign: 'center', fontSize: 11 }}>
-            {query
-              ? `「${query}」に一致する人はいません`
-              : `${currentYear ?? ''}年度の対象者はいません`}
+            {`${currentYear ?? ''}年度の対象者はいません`}
           </div>
         )}
       </div>
@@ -241,7 +234,7 @@ export default function InvestmentRecoveryViewer({ clientId }) {
 // =============================================================
 // TargetBlock — 1 対象者の写真2準拠 viewer
 // =============================================================
-function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryMap, msd }) {
+function TargetBlock({ clientId, target, allExpenses, expensesLoading, selectedMonth, categoryMap, msd }) {
   void msd; // FY 化により buildPeriodLabel から msd 引数を撤去 (本ブロックでは未使用)。
   const { incomes, loading: inLoading, error: inError } = useInvestmentIncomes(clientId, target.id);
 
@@ -328,6 +321,18 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
     return rows;
   }, [expensesForTarget, incomes, categoryMap]);
 
+  // タスク⑲ (2026-06-02, 案B): selectedMonth で mergedRows を絞った表示用配列。
+  //   - selectedMonth == null → mergedRows そのまま (全月、既存挙動と同一)
+  //   - 1..12 → date='YYYY-MM-DD' の MM 部分が一致する行のみ
+  //   ※ サマリー (expensesTotal/grandIncome/finalDiff/headerPct) は expensesForTarget/incomes
+  //     直接ベースで mergedRows 非依存のため、月で絞っても全月通算値を維持する (顧客版は
+  //     行単位の cum/diff/judge を持たない設計のため、案B の「累計を壊さない」配慮は自動成立)。
+  const displayRows = useMemo(() => {
+    if (selectedMonth == null) return mergedRows;
+    const mm = String(selectedMonth).padStart(2, '0');
+    return mergedRows.filter((r) => typeof r?.date === 'string' && r.date.substring(5, 7) === mm);
+  }, [mergedRows, selectedMonth]);
+
   const periodLabel = buildPeriodLabel(target.target_year);
   // アコーディオン用: 畳んだ時のヘッダで表示する回収率% (SalesBox の rightPct と同式)。
   //   grandIncome / expensesTotal × 100。expensesTotal=0 のとき '—'。
@@ -410,10 +415,12 @@ function TargetBlock({ clientId, target, allExpenses, expensesLoading, categoryM
             </tr>
           </thead>
           <tbody>
-            {mergedRows.length === 0 ? (
+            {/* タスク⑲ (2026-06-02): displayRows (selectedMonth で絞った行) を描画。
+                サマリー (売上金/差し引き/回収率) は mergedRows 非依存で全月通算維持。 */}
+            {displayRows.length === 0 ? (
               <tr><td colSpan={4} style={{ padding: '12px 6px', color: TEXT_MUTED, textAlign: 'center', fontSize: 10 }}>明細なし</td></tr>
             ) : (
-              mergedRows.map((r) => <DetailRow key={`${r.kind}-${r.id}`} row={r} />)
+              displayRows.map((r) => <DetailRow key={`${r.kind}-${r.id}`} row={r} />)
             )}
           </tbody>
           <tfoot>
