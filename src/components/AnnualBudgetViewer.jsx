@@ -967,34 +967,48 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400, fontSize: 14 }}>/</span>
               <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{Math.round(annualTargetTotal).toLocaleString()}</span>
             </div>
-            {/* 横長バー: 14px 高 / 7px 角丸 / NAVY3 背景。
-                #2 (2026-06-03): 3 層構成に統一。
-                  L1: NAVY3 背景 (本 div の background)
-                  L2: 薄ブルー全幅 100% 土台 (annualTargetTotal=年間予算満額の可視化)
-                  L3: GOLD/RED 確定実績 fill (s1Pct=settledCum / annualTargetTotal、L2 の上に重ねる)
-                死んでいた s2Pct (=0 ハードコード) の青セグメントは廃止し、薄ブルー土台 div に置換。
-                + 月境界 dashed 線 11 本 (1/12, 2/12, ..., 11/12 位置に縦点線、fill の上に重ねる)。 */}
+            {/* #2 (2026-06-03 後修正): 1 本構成 → 2 本構成へ。
+                理由: 「予算満額の可視化」と「確定実績の進捗」を 1 本に重ねると、
+                    予算が常時全幅で見えづらく、進捗 fill との重なりで色解釈が曖昧だった。
+                構造: position:relative の wrapper (高さ 6+3+6=15px) 内に縦並びで:
+                  - 上段「予算棒」: NAVY3 背景 / BUDGET_BLUE 全幅 100% fill (annualTargetTotal=年間予算満額)
+                  - gap 3px (空白)
+                  - 下段「実測棒」: NAVY3 背景 / GOLD or RED fill 幅 s1Pct% (settledCum/annualTargetTotal)
+                月境界 dashed 線 11 本は wrapper 全体に position:absolute で被せ、2 本バーを縦断する。
+                各棒 height 6px / borderRadius 3px (=高さ/2) で角丸感は維持。 */}
             <div style={{
               position: 'relative',
-              width: '100%', height: 14, borderRadius: 7,
-              background: NAVY3, overflow: 'hidden', marginBottom: 4,
+              width: '100%',
+              marginBottom: 4,
             }}>
-              {/* #2 L2: 薄ブルー全幅土台。annualTargetTotal>0 のときだけ表示 (予算未設定で全幅青を出さない)。
-                  ${BUDGET_BLUE}22 = #5BA8FF + alpha 0x22 = 半透明、NAVY3 の上で予算満額の可視化バンドとして機能。 */}
-              {annualTargetTotal > 0 && (
-                <div style={{
-                  position: 'absolute', left: 0, top: 0, bottom: 0,
-                  width: '100%', background: `${BUDGET_BLUE}22`,
-                }} />
-              )}
-              {/* #2 L3: GOLD/RED 確定実績 fill。土台の上に重ねる (DOM 順で土台 → fill = z-stack 順)。 */}
-              {annualTargetTotal > 0 && s1Pct > 0 && (
-                <div style={{
-                  position: 'absolute', left: 0, top: 0, bottom: 0,
-                  width: `${s1Pct}%`, background: barGrad,
-                  transition: 'width 0.3s, background 0.3s',
-                }} />
-              )}
+              {/* 上段: 予算棒 (薄ブルー全幅、年間予算満額)。
+                  annualTargetTotal>0 のときだけ青 fill を出す (未設定なら NAVY3 のみ)。 */}
+              <div style={{
+                width: '100%', height: 6, borderRadius: 3,
+                background: NAVY3, overflow: 'hidden', marginBottom: 3,
+              }}>
+                {annualTargetTotal > 0 && (
+                  <div style={{
+                    width: '100%', height: '100%',
+                    background: BUDGET_BLUE,
+                  }} />
+                )}
+              </div>
+              {/* 下段: 実測棒 (GOLD or RED fill 幅 s1Pct%)。
+                  未到達部分は NAVY3 の container 背景が露出する。 */}
+              <div style={{
+                width: '100%', height: 6, borderRadius: 3,
+                background: NAVY3, overflow: 'hidden',
+              }}>
+                {annualTargetTotal > 0 && s1Pct > 0 && (
+                  <div style={{
+                    width: `${s1Pct}%`, height: '100%',
+                    background: barGrad,
+                    transition: 'width 0.3s, background 0.3s',
+                  }} />
+                )}
+              </div>
+              {/* 月境界 dashed 線 11 本: wrapper 全体に被せ、2 本バーを縦断する (top:0 bottom:0)。 */}
               {Array.from({ length: 11 }, (_, i) => (
                 <div key={i} style={{
                   position: 'absolute', top: 0, bottom: 0,
