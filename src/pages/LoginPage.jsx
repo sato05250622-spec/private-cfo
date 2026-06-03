@@ -104,13 +104,16 @@ const S = {
 };
 
 export default function LoginPage() {
-  const { signIn, signUp } = useAuth();
-  const [mode, setMode] = useState('login'); // 'login' | 'signup'
+  // ⑦-E: resetPassword を追加 (forgot モードでメール送信に使う)。
+  const { signIn, signUp, resetPassword } = useAuth();
+  const [mode, setMode] = useState('login'); // 'login' | 'signup' | 'forgot'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  // ⑦-E: forgot モードでのリセットメール送信完了表示用。mode 切替時にリセット。
+  const [forgotSent, setForgotSent] = useState(false);
 
   const switchTo = (next) => {
     if (next === mode) return;
@@ -118,6 +121,8 @@ export default function LoginPage() {
     setError(null);
     setPassword('');
     setPasswordConfirm('');
+    // ⑦-E: モード切替時は forgot 送信状態もクリア (戻り時に「送りました」が残らない)。
+    setForgotSent(false);
   };
 
   const onSubmit = async (e) => {
@@ -143,6 +148,13 @@ export default function LoginPage() {
         // signUp 成功後、Email Confirmation が OFF なら自動でセッションが発行され、
         // onAuthStateChange → loadProfile → role='client' / approved=false 。
         // AuthGate がそのまま PendingApprovalMessage に切り替わる。
+      } else if (mode === 'forgot') {
+        // ⑦-E: リセットメール送信。成功でも失敗 (=メール存在しない) でも
+        //   ユーザー列挙を許さないため同じ画面に進めるのが推奨だが、
+        //   Supabase 既定の resetPasswordForEmail は存在しないメールでもエラーを
+        //   返さないので、ここでは単純に「送りました」を表示する。
+        await resetPassword(email.trim());
+        setForgotSent(true);
       } else {
         await signIn(email.trim(), password);
       }
@@ -154,66 +166,158 @@ export default function LoginPage() {
   };
 
   const isSignup = mode === 'signup';
+  // ⑦-E: forgot 専用フラグ (既存 isSignup の読みやすさを壊さないよう別変数で導入)。
+  const isForgot = mode === 'forgot';
+
+  // ⑦-E: タイトル文言は 3 モード分岐。
+  const headerTitle = isForgot ? 'パスワード再設定' : (isSignup ? '新規登録' : 'ログイン');
+  // ⑦-E: submit ボタン文言。
+  const submitLabel = busy
+    ? (isForgot ? '送信中…' : (isSignup ? '登録中…' : 'ログイン中…'))
+    : (isForgot ? 'リセットメールを送る' : (isSignup ? '新規登録' : 'ログイン'));
 
   return (
     <div style={S.wrap}>
       <div style={S.card}>
         <div style={S.header}>
           <div style={S.brand}>PRIVATE CFO</div>
-          <div style={S.title}>{isSignup ? '新規登録' : 'ログイン'}</div>
+          <div style={S.title}>{headerTitle}</div>
         </div>
 
-        <div style={S.tabs}>
-          <button type="button" onClick={() => switchTo('login')}  style={S.tab(!isSignup)}>ログイン</button>
-          <button type="button" onClick={() => switchTo('signup')} style={S.tab(isSignup)}>新規登録</button>
-        </div>
+        {/* ⑦-E: タブは login/signup の時のみ表示。forgot は専用画面扱いで隠す。 */}
+        {!isForgot && (
+          <div style={S.tabs}>
+            <button type="button" onClick={() => switchTo('login')}  style={S.tab(!isSignup)}>ログイン</button>
+            <button type="button" onClick={() => switchTo('signup')} style={S.tab(isSignup)}>新規登録</button>
+          </div>
+        )}
 
-        <form onSubmit={onSubmit} style={S.form}>
-          <label style={S.labelRow}>
-            メールアドレス
-            <input
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={S.input}
-            />
-          </label>
-          <label style={S.labelRow}>
-            パスワード{isSignup && <span style={{ color: TEXT_MUTED, fontSize: 10 }}> (6 文字以上)</span>}
-            <input
-              type="password"
-              required
-              autoComplete={isSignup ? 'new-password' : 'current-password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={S.input}
-            />
-          </label>
-          {isSignup && (
+        {/* ⑦-E: forgot かつ送信完了は専用の確認ビューに差し替え (フォームを出さない)。 */}
+        {isForgot && forgotSent ? (
+          <>
+            <div style={{
+              fontSize: 12,
+              color: TEXT_PRIMARY,
+              background: `${GOLD}22`,
+              border: `1px solid ${GOLD}55`,
+              padding: '12px 14px',
+              borderRadius: 8,
+              lineHeight: 1.6,
+              textAlign: 'center',
+            }}>
+              リセットメールを送信しました。<br />
+              受信箱をご確認のうえ、メール内のリンクから<br />
+              新しいパスワードを設定してください。
+            </div>
+            <button
+              type="button"
+              onClick={() => switchTo('login')}
+              style={{
+                ...S.submit(false),
+                background: 'transparent',
+                color: GOLD,
+                border: `1px solid ${GOLD}`,
+                boxShadow: 'none',
+                marginTop: 14,
+              }}
+            >
+              ログインに戻る
+            </button>
+          </>
+        ) : (
+          <form onSubmit={onSubmit} style={S.form}>
             <label style={S.labelRow}>
-              パスワード(確認)
+              メールアドレス
               <input
-                type="password"
+                type="email"
                 required
-                autoComplete="new-password"
-                value={passwordConfirm}
-                onChange={(e) => setPasswordConfirm(e.target.value)}
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 style={S.input}
               />
             </label>
-          )}
-          {error && <div style={S.errorBox}>{error}</div>}
-          <button type="submit" disabled={busy} style={S.submit(busy)}>
-            {busy
-              ? (isSignup ? '登録中…' : 'ログイン中…')
-              : (isSignup ? '新規登録' : 'ログイン')}
-          </button>
-        </form>
+            {/* ⑦-E: forgot ではパスワード入力を非表示 (email のみ送信)。既存 login/signup の挙動は不変。 */}
+            {!isForgot && (
+              <label style={S.labelRow}>
+                パスワード{isSignup && <span style={{ color: TEXT_MUTED, fontSize: 10 }}> (6 文字以上)</span>}
+                <input
+                  type="password"
+                  required
+                  autoComplete={isSignup ? 'new-password' : 'current-password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  style={S.input}
+                />
+              </label>
+            )}
+            {isSignup && (
+              <label style={S.labelRow}>
+                パスワード(確認)
+                <input
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  value={passwordConfirm}
+                  onChange={(e) => setPasswordConfirm(e.target.value)}
+                  style={S.input}
+                />
+              </label>
+            )}
+            {error && <div style={S.errorBox}>{error}</div>}
+            <button type="submit" disabled={busy} style={S.submit(busy)}>
+              {submitLabel}
+            </button>
+            {/* ⑦-E: login モードのみ「パスワードを忘れた」リンクを submit 直後に表示。 */}
+            {!isSignup && !isForgot && (
+              <button
+                type="button"
+                onClick={() => switchTo('forgot')}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: TEXT_MUTED,
+                  fontSize: 11,
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  marginTop: 2,
+                  padding: 0,
+                  alignSelf: 'center',
+                }}
+              >
+                パスワードを忘れた方はこちら
+              </button>
+            )}
+            {/* ⑦-E: forgot モードでは「ログインに戻る」を form 内末尾に表示。 */}
+            {isForgot && (
+              <button
+                type="button"
+                onClick={() => switchTo('login')}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: TEXT_MUTED,
+                  fontSize: 11,
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  marginTop: 2,
+                  padding: 0,
+                  alignSelf: 'center',
+                }}
+              >
+                ログインに戻る
+              </button>
+            )}
+          </form>
+        )}
 
         <div style={S.footer}>
-          {isSignup ? (
+          {isForgot ? (
+            <>
+              ご登録のメールアドレス宛にリセット用リンクをお送りします。<br />
+              届かない場合は迷惑メールフォルダもご確認ください。
+            </>
+          ) : isSignup ? (
             <>
               ご登録後、本部の承認をお待ちください。<br />
               承認後にご利用いただけます。
@@ -247,5 +351,7 @@ function translateAuthError(err, mode) {
   if (/password.*6|weak password|should be at least/i.test(msg)) {
     return 'パスワードが弱すぎます。6 文字以上を入れてください。';
   }
+  // ⑦-E: forgot モード用フォールバック文言。
+  if (mode === 'forgot') return msg || 'リセットメールの送信に失敗しました。';
   return msg || (mode === 'signup' ? '新規登録に失敗しました。' : 'ログインに失敗しました。');
 }

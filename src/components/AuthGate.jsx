@@ -2,6 +2,7 @@ import { NAVY, TEXT_MUTED } from '@shared/theme';
 import { useAuth } from '../context/AuthContext';
 import LoginPage from '../pages/LoginPage';
 import PendingApprovalMessage from './PendingApprovalMessage';
+import ResetPasswordPage from '../pages/ResetPasswordPage';
 import App from '../App';
 
 const S = {
@@ -18,7 +19,14 @@ const S = {
 };
 
 export default function AuthGate() {
-  const { session, loading, role, approved } = useAuth();
+  const { session, loading, role, approved, recoveryMode } = useAuth();
+
+  // ⑦-E: パスワードリセットメール経由のリカバリ中は他の全分岐より優先。
+  // 一時的な recovery セッションを伴うため loading/!session/approved の判定より前に置く
+  // (そうしないと LoginPage や App が一瞬描かれてから ResetPasswordPage に切り替わる)。
+  if (recoveryMode) {
+    return <ResetPasswordPage />;
+  }
 
   if (loading) {
     return <div style={S.loading}>LOADING…</div>;

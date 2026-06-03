@@ -38,6 +38,11 @@ export function AuthProvider({ children }) {
   // Phase 3: 固定費 込み/抜きフラグ (profiles.include_fixed_expenses)。HQ が顧客ごとに切替。
   // true = 込み (固定費行を表示、DB default)。未取得 / 失敗 / サインアウト時も true を default。
   const [includeFixedExpenses, setIncludeFixedExpenses] = useState(true);
+  // ⑦-E: パスワードリセットメール経由のリカバリセッション中フラグ。
+  // onAuthStateChange の event==='PASSWORD_RECOVERY' で true に立て、
+  // AuthGate がここを最優先で見て ResetPasswordPage に切替。
+  // updatePassword 成功時に false に戻し、signOut で通常 LoginPage へ。
+  const [recoveryMode, setRecoveryMode] = useState(false);
 
   // #6 修正: profile を読み込み済みの userId。onAuthStateChange が同一ユーザーで
   // 再発火 (TOKEN_REFRESHED 等) したとき profile 再取得をスキップするための番兵。
@@ -131,6 +136,14 @@ export function AuthProvider({ children }) {
       // eslint-disable-next-line no-console
       console.log('[auth] onAuthStateChange', event, next?.user?.id);
       if (!mounted) return;
+      // ⑦-E: パスワードリセットメール経由でアクセスされた直後のイベント。
+      // 一時的な recovery セッションを伴うため、通常の session 判定より先に拾って
+      // AuthGate を ResetPasswordPage に切替える。以降の setSession / loadProfile は
+      // 既存ロジックのまま走らせる (number/role 等の取得は副作用なし、recoveryMode
+      // が AuthGate で優先されるだけ)。
+      if (event === 'PASSWORD_RECOVERY') {
+        setRecoveryMode(true);
+      }
       setSession(next);
       try {
         const nextId = next?.user?.id ?? null;
@@ -175,6 +188,26 @@ export function AuthProvider({ children }) {
   };
 
   const signOut = async () => {
+    await supabase.auth.signOut();
+  };
+
+  // ⑦-E: パスワードリセットメール送信。redirectTo は本番 origin の `/` 固定。
+  // Supabase ダッシュボード Authentication → URL Configuration の
+  // Redirect URLs allowlist に origin/ を登録してある前提。
+  // 成功時は Supabase 側でメールがキューイングされ、エラーは throw。
+  const resetPassword = async (email) => {
+    const redirectTo = `${window.location.origin}/`;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+    if (error) throw error;
+  };
+
+  // ⑦-E: リカバリセッション中の新パスワード適用。成功で recoveryMode を解除し、
+  // signOut で一時セッションを完全に破棄する (リカバリトークンを残さない)。
+  // signOut の onAuthStateChange(SIGNED_OUT) で session=null → AuthGate が LoginPage 復帰。
+  const updatePassword = async (newPassword) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+    setRecoveryMode(false);
     await supabase.auth.signOut();
   };
 
@@ -223,6 +256,10 @@ export function AuthProvider({ children }) {
     signUp,
     signOut,
     refreshProfile,
+    // ⑦-E: パスワードリセット関連 (AuthGate / LoginPage / ResetPasswordPage が consume)。
+    recoveryMode,
+    resetPassword,
+    updatePassword,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
