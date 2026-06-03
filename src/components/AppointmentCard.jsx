@@ -1,6 +1,5 @@
-import { useState } from 'react';
 import {
-  NAVY, NAVY2, GOLD, GOLD_GRAD,
+  NAVY, NAVY2, GOLD,
   CARD_BG, BORDER, SHADOW,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
   TEAL,
@@ -21,38 +20,15 @@ function fmtDateTime(iso) {
   return `${y}/${m}/${dd}(${JA_WEEKDAYS[d.getDay()]}) ${hh}:${mm}`;
 }
 
-// datetime-local の value 初期値 / min 用。ローカル TZ の "YYYY-MM-DDTHH:mm"
-function nowLocalStr() {
-  const d = new Date();
-  const tz = d.getTimezoneOffset() * 60000;
-  return new Date(d - tz).toISOString().slice(0, 16);
-}
-
 export default function AppointmentCard({ onBack }) {
-  const { appointment, loading, submitting, requestReschedule } = useNextAppointment();
-  const [showModal, setShowModal] = useState(false);
-  const [newDateTime, setNewDateTime] = useState('');
-  const [reason, setReason] = useState('');
+  // #4-D (2026-06-03): リスケ機能を顧客アプリから撤去。LINE 経由に一本化。
+  //   ボタン/モーダル/送信 handler を削除し、useNextAppointment の {submitting, requestReschedule}
+  //   は destructure しない (未使用警告回避)。useAppointments.js 側のラッパ実装は残置 (legacy互換)。
+  //   ステータスバッジは既存通り表示 (legacy reschedule_requested 行があれば「変更希望中」を表示)。
+  const { appointment, loading } = useNextAppointment();
 
   const status = appointment?.status ?? null;
-  const canRequest = status === 'scheduled' || status === 'confirmed';
   const isPending = status === 'reschedule_requested';
-
-  const openModal = () => {
-    setNewDateTime(nowLocalStr());
-    setReason('');
-    setShowModal(true);
-  };
-
-  const onSubmit = async () => {
-    if (submitting || !newDateTime || !reason.trim()) return;
-    const ok = await requestReschedule(newDateTime, reason);
-    if (ok) {
-      setShowModal(false);
-    } else {
-      alert('変更希望の送信に失敗しました。通信状況を確認し、もう一度お試しください。');
-    }
-  };
 
   return (
     <div style={{ minHeight: '100dvh', background: NAVY }}>
@@ -101,70 +77,16 @@ export default function AppointmentCard({ onBack }) {
               )}
             </div>
 
-            {canRequest && (
-              <div style={{ padding: '12px 18px 18px' }}>
-                <button
-                  onClick={openModal}
-                  style={{ width: '100%', padding: 14, background: GOLD_GRAD, color: '#0A1628', border: 'none', borderRadius: 24, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
-                >
-                  日程を変更したい
-                </button>
-              </div>
-            )}
+            {/* #4-D: 旧「日程を変更したい」ボタン & モーダルを削除。
+                LINE 経由で本部にご連絡いただく運用に一本化。注記スタイルで控えめに表示。 */}
+            <div style={{ padding: '12px 18px 18px', textAlign: 'center' }}>
+              <span style={{ fontSize: 11, color: TEXT_MUTED, lineHeight: 1.6 }}>
+                日程変更はLINEにてご連絡ください
+              </span>
+            </div>
           </div>
         )}
       </div>
-
-      {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-          <div style={{ width: '100%', maxWidth: 430, background: NAVY, borderTopLeftRadius: 20, borderTopRightRadius: 20, border: `1px solid ${BORDER}`, padding: '20px 18px 24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <span style={{ fontSize: 15, fontWeight: 700, color: TEXT_PRIMARY }}>日程変更希望</span>
-              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', color: TEXT_SECONDARY, fontSize: 18, cursor: 'pointer' }}>✕</button>
-            </div>
-
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, color: TEXT_SECONDARY, marginBottom: 14 }}>
-              新しい希望日時
-              <input
-                type="datetime-local"
-                value={newDateTime}
-                onChange={(e) => setNewDateTime(e.target.value)}
-                min={nowLocalStr()}
-                style={{ padding: '10px 12px', background: NAVY2, color: TEXT_PRIMARY, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 14, outline: 'none', colorScheme: 'dark' }}
-              />
-            </label>
-
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, color: TEXT_SECONDARY, marginBottom: 18 }}>
-              変更理由(必須)
-              <textarea
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="例:当日出張が入りました"
-                rows={4}
-                style={{ padding: '10px 12px', background: NAVY2, color: TEXT_PRIMARY, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 14, outline: 'none', resize: 'none', fontFamily: 'inherit' }}
-              />
-            </label>
-
-            <button
-              onClick={onSubmit}
-              disabled={submitting || !newDateTime || !reason.trim()}
-              style={{
-                width: '100%',
-                padding: 14,
-                background: !submitting && newDateTime && reason.trim() ? GOLD_GRAD : 'rgba(255,255,255,0.1)',
-                color: !submitting && newDateTime && reason.trim() ? '#0A1628' : TEXT_MUTED,
-                border: 'none',
-                borderRadius: 24,
-                fontSize: 14,
-                fontWeight: 700,
-                cursor: submitting ? 'wait' : ((newDateTime && reason.trim()) ? 'pointer' : 'default'),
-              }}
-            >
-              {submitting ? '送信中…' : '送信する'}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
