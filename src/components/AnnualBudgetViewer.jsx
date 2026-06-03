@@ -668,13 +668,24 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // 旧 cellFontSize 二値固定 (isLandscape ? 8 : 11) は項目名/ヘッダ/空白セル用に baseCellFontSize へ改名。
   // 数字 td は下で定義する関数 cellFontSize(text, avail) を使って桁数から確定計算で縮小する。
   const baseCellFontSize = isLandscape ? 8 : 11;
+  // #6 (2026-06-03): メインテーブルの全列境界に縦区切り線 (1px solid ${GOLD}40)。
+  //   各行先頭=カテゴリ列セルは labelWrapStyle / stickyBase + 個別 borderLeft:none で覆い、
+  //   月セル・実測セル・目標セルの 14 個に borderLeft が出る。
+  //   既存 borderBottom (1px solid ${BORDER}) は維持し、行下罫線と組み合わせて格子化。
+  //   先頭セルだけ borderLeft 無効化は JSX 側で個別に `borderLeft: 'none'` を override する方針。
   const cellStyle = {
     padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: baseCellFontSize,
-    color: TEXT_PRIMARY, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
+    color: TEXT_PRIMARY,
+    borderBottom: `1px solid ${BORDER}`,
+    borderLeft: `1px solid ${GOLD}40`,
+    whiteSpace: "nowrap",
   };
   const headCellStyle = {
     padding: `6px ${cellPadX}px`, textAlign: "right", fontSize: baseCellFontSize, fontWeight: 700,
-    color: GOLD, borderBottom: `1px solid ${BORDER}`, whiteSpace: "nowrap",
+    color: GOLD,
+    borderBottom: `1px solid ${BORDER}`,
+    borderLeft: `1px solid ${GOLD}40`,
+    whiteSpace: "nowrap",
     background: NAVY3,
   };
   // 桁数から確定式でフォントサイズを返す (下限 5px / 上限 11px)。avail = 列幅 - 横padding。
@@ -728,6 +739,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         ...cellStyle, ...stickyBase, background: NAVY2,
         fontWeight: 600, color: TEXT_PRIMARY,
         borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
+        // #6: 先頭=カテゴリ列セルは borderLeft 無効化 (cellStyle の borderLeft を override)。
+        borderLeft: 'none',
       }}>
         {label}
       </td>
@@ -930,12 +943,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         const barGrad = isRed
           ? 'linear-gradient(90deg, #FF5252 0%, #C62828 100%)'
           : 'linear-gradient(90deg, #D4A843 0%, #B88E33 100%)';
-        // 2 セグメント: s1Pct (確定済=settledCum) と s2Pct (未確定分=なし、確定月限定方針で 0)。
-        //   確定月実績のみを白字で表示する新方針では未確定 cum 分を出さないため s2Pct=0 で固定。
-        //   背景の残り (100-pct)% は年間目標に対する未消化分として可視化。
+        // #2 (2026-06-03): 単一 fill % (= 確定済 settledCum / annualTargetTotal)。
+        //   旧 s2Pct (未確定セグメント) は廃止 — 薄ブルー全幅土台 (L2) で年間予算満額を可視化する方針に変更。
+        //   背景の残り (100-pct)% は薄ブルー土台が露出し、未消化分として可視化される。
         const s1Pct = pct;
-        const s2Pct = 0;
-        const budgetBlueGrad = 'linear-gradient(90deg, #5BA8FF 0%, #2E7BD9 100%)';
         return (
           <div style={{
             padding: '16px 12px',
@@ -957,26 +968,31 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               <span style={{ color: BUDGET_BLUE, fontSize: 14 }}>¥{Math.round(annualTargetTotal).toLocaleString()}</span>
             </div>
             {/* 横長バー: 14px 高 / 7px 角丸 / NAVY3 背景。
-                C-2: 単一 fill を 2 セグメントに分割 (確定済=GOLD/RED, 未確定=BUDGET_BLUE)。
-                左から s1Pct (確定済) → s2Pct (未確定) の順に絶対配置で並べ、両者合計 = pct%。
+                #2 (2026-06-03): 3 層構成に統一。
+                  L1: NAVY3 背景 (本 div の background)
+                  L2: 薄ブルー全幅 100% 土台 (annualTargetTotal=年間予算満額の可視化)
+                  L3: GOLD/RED 確定実績 fill (s1Pct=settledCum / annualTargetTotal、L2 の上に重ねる)
+                死んでいた s2Pct (=0 ハードコード) の青セグメントは廃止し、薄ブルー土台 div に置換。
                 + 月境界 dashed 線 11 本 (1/12, 2/12, ..., 11/12 位置に縦点線、fill の上に重ねる)。 */}
             <div style={{
               position: 'relative',
               width: '100%', height: 14, borderRadius: 7,
               background: NAVY3, overflow: 'hidden', marginBottom: 4,
             }}>
+              {/* #2 L2: 薄ブルー全幅土台。annualTargetTotal>0 のときだけ表示 (予算未設定で全幅青を出さない)。
+                  ${BUDGET_BLUE}22 = #5BA8FF + alpha 0x22 = 半透明、NAVY3 の上で予算満額の可視化バンドとして機能。 */}
+              {annualTargetTotal > 0 && (
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0,
+                  width: '100%', background: `${BUDGET_BLUE}22`,
+                }} />
+              )}
+              {/* #2 L3: GOLD/RED 確定実績 fill。土台の上に重ねる (DOM 順で土台 → fill = z-stack 順)。 */}
               {annualTargetTotal > 0 && s1Pct > 0 && (
                 <div style={{
                   position: 'absolute', left: 0, top: 0, bottom: 0,
                   width: `${s1Pct}%`, background: barGrad,
                   transition: 'width 0.3s, background 0.3s',
-                }} />
-              )}
-              {annualTargetTotal > 0 && s2Pct > 0 && (
-                <div style={{
-                  position: 'absolute', left: `${s1Pct}%`, top: 0, bottom: 0,
-                  width: `${s2Pct}%`, background: budgetBlueGrad,
-                  transition: 'left 0.3s, width 0.3s, background 0.3s',
                 }} />
               )}
               {Array.from({ length: 11 }, (_, i) => (
@@ -1030,7 +1046,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           )}
           <thead>
             <tr>
-              <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3, ...labelWrapStyle }}>カテゴリ</th>
+              {/* #6: 先頭=カテゴリ列ヘッダは borderLeft 無効化 (headCellStyle の borderLeft を override)。 */}
+              <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3, ...labelWrapStyle, borderLeft: 'none' }}>カテゴリ</th>
               {monthOrder.map((m) => {
                 const sel = m === selectedMonth;
                 // P4-赤青枠撤去: 月見出しの border (赤/青) を撤去。文字色は確定=RED/未確定=BLUE で
@@ -1061,10 +1078,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               return (
               <Fragment key={rowKey}>
               <tr>
+                {/* #6: 行先頭=カテゴリ列セルは borderLeft 無効化。 */}
                 <td style={{
                   ...cellStyle, ...stickyBase, background: CARD_BG,
                   fontWeight: 600, color: line?.archived ? TEXT_MUTED : TEXT_SECONDARY,
                   ...labelWrapStyle,
+                  borderLeft: 'none',
                 }}
                   title={line?.category_name || undefined}
                 >
@@ -1144,9 +1163,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 #4 色テーマ: 支出合計=確定系=白 (TEXT_PRIMARY)、目標 grand=予算系=青 (BUDGET_BLUE)。
                 赤確定月の数値も TEXT_PRIMARY 化 (背景の赤で「確定」を表示、文字色は確定系統一)。 */}
             <tr>
+              {/* #6: 行先頭=ラベル列セルは borderLeft 無効化。 */}
               <td style={{
                 ...cellStyle, ...stickyBase, background: NAVY2,
                 fontWeight: 700, color: TEXT_PRIMARY,
+                borderLeft: 'none',
               }}>
                 支出合計
               </td>
@@ -1205,9 +1226,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                     → 「累計支出[最終月] = 支出合計.grand = 固定費合計.grand + 変動費合計.grand」も常に成立
                 #4 色テーマ: 累計支出=確定系=白 (ラベルも TEXT_PRIMARY 化、TEXT_SECONDARY 廃止)。 */}
             <tr>
+              {/* #6: 行先頭=ラベル列セルは borderLeft 無効化。 */}
               <td style={{
                 ...cellStyle, ...stickyBase, background: NAVY2,
                 fontWeight: 700, color: TEXT_PRIMARY,
+                borderLeft: 'none',
               }}>
                 累計支出
               </td>
