@@ -2588,7 +2588,7 @@ export default function App() {
           <div onClick={()=>window.open("https://forms.gle/example","_blank")} style={{display:"flex",alignItems:"center",gap:10,padding:"13px 16px",borderBottom:`1px solid ${BORDER}`,cursor:"pointer"}}>
             <div style={{width:26,height:26,borderRadius:7,background:"rgba(123,108,246,0.2)",border:"1px solid rgba(123,108,246,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>📋</div>
             <div style={{flex:1}}>
-              <div style={{fontSize:13,fontWeight:600,color:TEXT_PRIMARY}}>会社フォームページ</div>
+              <div style={{fontSize:13,fontWeight:600,color:TEXT_PRIMARY}}>会社ホームページ</div>
               <div style={{fontSize:9,color:TEXT_MUTED}}>各種申請・届出フォーム</div>
             </div>
             <span style={{fontSize:13,color:TEXT_MUTED}}>›</span>
@@ -2679,12 +2679,17 @@ export default function App() {
       </div>
       {!showTelop&&<div onClick={()=>setShowTelop(true)} style={{position:"fixed",top:"env(safe-area-inset-top)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,zIndex:200,height:8,background:`${GOLD}33`,cursor:"pointer",borderBottom:`1px solid ${GOLD}22`}}/>}
 
-      {/* paddingBottom = 62 + safe + 8 = ナビバー実高(button~54 + paddingBottom safe+8)+ 8px 呼吸。
-          以前は 60(ナビ button 高さの初期見積もり)+ safe + 8 = 約 6px gap だったが、
-          実測ではナビ button 内部の line-height で ~54px、加えてユーザー要望の 8px 呼吸を
-          確実に確保するために 62 へ調整。サンドイッチ構造の footer はこの paddingBottom 分だけ
-          ナビバー上端から離れて固定される。 */}
-      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom:"calc(62px + env(safe-area-inset-bottom) + 8px)"}}>
+      {/* タスク#3 (2026-06-03): 入力タブ「支出を入力する」NAVY2 footer 帯とナビバー上端の隙間を
+          ~10px に詰める。
+          - 旧式 "62 + safe + 8" は safe を生で加算するため、nav 側 (paddingBottom: max(8, safe-12))
+            と safe 消費が乖離し、iPhone (safe=34px) で実隙間 ~27px に開いていた。
+          - 新式 "65 + max(8, safe-12)" は nav 構造をそのままミラー (54 button + 1 borderTop + 10 呼吸)
+            に合わせ、safe 値によらず実隙間が常に ~10px に揃う (iPhone=10、Desktop=10)。
+          - iOS Safari ジッタ回避方針 (L120-144 のコメント参照) は維持: position:fixed/env() 上書き
+            は使わず、CSS max() で safe 消費のみ揃える。FIXED_SUBMIT_STYLE は無改変。
+          - tab !== "daily" の時は旧式を残す: 他タブには「支出を入力する」帯が無く、隙間詰めは
+            不要 + ユーザー指示「他タブに影響させない」順守。 */}
+      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom: tab === "daily" ? "calc(65px + max(8px, env(safe-area-inset-bottom) - 12px))" : "calc(62px + env(safe-area-inset-bottom) + 8px)"}}>
         {tab==="daily"&&renderDaily()}
         {tab==="day"&&renderDayView()}
         {tab==="weekly"&&renderWeekly()}
