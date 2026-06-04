@@ -117,6 +117,11 @@ if (typeof window !== "undefined" && window.localStorage.getItem("cfo_migratedRe
 // admin が INSERT しないままでも画面が成立するための安全網。
 const FALLBACK_TELOP = "【本部より】今月の経費精算は月末25日までにご提出ください　　　／　　　来月の研修は5月10日（土）を予定しております　　　／　　　ご不明点はお気軽に本部までお問い合わせください";
 
+// 顧客メニュー下部の外部リンクカード用 URL (renderMenu 内 L2588 / L2595 で参照)。
+// 空文字の間は onClick のガード分岐でタップ無効化、確定 URL を貼るだけで即有効化される。
+const COMPANY_HP_URL = "";   // ← 会社HPのURL確定後ここに貼るだけで即反映。空の間はタップ無効
+const COMPANY_PDF_URL = "";  // ← 会社案内PDFのURL確定後ここに貼るだけで即反映。空の間はタップ無効
+
 // ---------------------------------------------------------------
 // 「支出を入力する」固定ゴールドボタン用のスタイルを module スコープに昇格。
 // - App 内 `const S = {...}` は毎レンダで再生成 → S.fixedSubmit の参照も毎回新規
@@ -2585,14 +2590,14 @@ export default function App() {
           <span style={{fontSize:12,color:TEXT_MUTED}}>履歴 ›</span>
         </div>
         <div style={{margin:"0 16px 20px",background:CARD_BG,borderRadius:12,overflow:"hidden",border:`1px solid ${BORDER}`}}>
-          <div onClick={()=>window.open("https://forms.gle/example","_blank")} style={{display:"flex",alignItems:"center",gap:10,padding:"13px 16px",borderBottom:`1px solid ${BORDER}`,cursor:"pointer"}}>
+          <div onClick={()=>{ if(COMPANY_HP_URL) window.open(COMPANY_HP_URL,"_blank"); }} style={{display:"flex",alignItems:"center",gap:10,padding:"13px 16px",borderBottom:`1px solid ${BORDER}`,cursor:"pointer"}}>
             <div style={{width:26,height:26,borderRadius:7,background:"rgba(123,108,246,0.2)",border:"1px solid rgba(123,108,246,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>📋</div>
             <div style={{flex:1}}>
               <div style={{fontSize:13,fontWeight:600,color:TEXT_PRIMARY}}>会社HP</div>
             </div>
             <span style={{fontSize:13,color:TEXT_MUTED}}>›</span>
           </div>
-          <div onClick={()=>window.open("https://example.com/company.pdf","_blank")} style={{display:"flex",alignItems:"center",gap:10,padding:"13px 16px",cursor:"pointer"}}>
+          <div onClick={()=>{ if(COMPANY_PDF_URL) window.open(COMPANY_PDF_URL,"_blank"); }} style={{display:"flex",alignItems:"center",gap:10,padding:"13px 16px",cursor:"pointer"}}>
             <div style={{width:26,height:26,borderRadius:7,background:`${RED}22`,border:`1px solid ${RED}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>📄</div>
             <div style={{flex:1}}>
               <div style={{fontSize:13,fontWeight:600,color:TEXT_PRIMARY}}>会社案内（PDF）</div>
