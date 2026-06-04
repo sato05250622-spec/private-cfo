@@ -2588,8 +2588,7 @@ export default function App() {
           <div onClick={()=>window.open("https://forms.gle/example","_blank")} style={{display:"flex",alignItems:"center",gap:10,padding:"13px 16px",borderBottom:`1px solid ${BORDER}`,cursor:"pointer"}}>
             <div style={{width:26,height:26,borderRadius:7,background:"rgba(123,108,246,0.2)",border:"1px solid rgba(123,108,246,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>📋</div>
             <div style={{flex:1}}>
-              <div style={{fontSize:13,fontWeight:600,color:TEXT_PRIMARY}}>会社ホームページ</div>
-              <div style={{fontSize:9,color:TEXT_MUTED}}>各種申請・届出フォーム</div>
+              <div style={{fontSize:13,fontWeight:600,color:TEXT_PRIMARY}}>会社HP</div>
             </div>
             <span style={{fontSize:13,color:TEXT_MUTED}}>›</span>
           </div>
