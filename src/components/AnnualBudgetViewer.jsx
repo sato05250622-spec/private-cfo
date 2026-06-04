@@ -765,13 +765,18 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         );
       })}
       {/* 実測 grand (subtotal 内 partition の Σ resolveCell)。
-          タスク⑯ (2026-06-02): 着地見込み (確定実績+未確定予算) のため青字 (BUDGET_BLUE) に統一 (admin L1221 一致)。 */}
+          タスク⑯ (2026-06-02): 着地見込み (確定実績+未確定予算) のため青字 (BUDGET_BLUE) に統一 (admin L1221 一致)。
+          2026-06-04 ⑤: subtotal (固定費合計/変動費合計) の実測が目標合計 (sub.target) を
+            超えたら RED に切替。sub.target=0/null は予算未設定として青のまま。admin 同形。 */}
       {(() => {
         const txt = fmtCell(sub.grand);
+        const subTarget = sub.target || 0;
+        const isOverBudget = subTarget > 0 && sub.grand != null && sub.grand > subTarget;
         return (
           <td style={{
             ...cellStyle, background: NAVY2,
-            fontWeight: 600, color: sub.grand == null ? TEXT_MUTED : BUDGET_BLUE,
+            fontWeight: 600,
+            color: sub.grand == null ? TEXT_MUTED : (isOverBudget ? RED : BUDGET_BLUE),
             borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
             fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden',
           }}>
@@ -1096,9 +1101,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 );
               })}
               {/* #4 色テーマ: 確定系=白 (TEXT_PRIMARY)、予算系=青 (BUDGET_BLUE)。
-                  headCellStyle.color のデフォルトは GOLD なので「実測」だけ override で白に上書き。 */}
+                  headCellStyle.color のデフォルトは GOLD なので「実測」だけ override で白に上書き。
+                  2026-06-04 ④: 「目標」ヘッダも BUDGET_BLUE → TEXT_PRIMARY に変更し、
+                    「実測」「目標」両ヘッダを白で揃える (青はセル値の予算系のみ)。admin 6ba3b33 同形。 */}
               <th style={{ ...headCellStyle, color: TEXT_PRIMARY }}>実測</th>
-              <th style={{ ...headCellStyle, color: BUDGET_BLUE }}>目標</th>
+              <th style={{ ...headCellStyle, color: TEXT_PRIMARY }}>目標</th>
             </tr>
           </thead>
           <tbody>
@@ -1159,13 +1166,18 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 })}
                 {/* タスク⑰ (2026-06-02): 個別行の実測列 grand を本部 admin (タスク②/⑬で BLUE 統一済) と一致。
                     実測列 grand は「着地見込み (確定実績+未確定予算)」のため青字 (BUDGET_BLUE)。
-                    null 時のみ TEXT_MUTED で「無し」表示 (admin renderSubtotalRow L1221 のパターン準拠)。 */}
+                    null 時のみ TEXT_MUTED で「無し」表示 (admin renderSubtotalRow L1221 のパターン準拠)。
+                    2026-06-04 ⑤: 個別行の実測が目標 (line.target_value) を超えたら RED に切替。
+                      予算未設定 (target_value=0/null) は青のまま (「予算がないのに超過」を避ける)。
+                      admin 6ba3b33 同形。 */}
                 {(() => {
                   const grand = lineYearSpent(line);
                   const txt = fmtCell(grand);
+                  const lineTarget = Number(line?.target_value) || 0;
+                  const isOverBudget = lineTarget > 0 && grand != null && grand > lineTarget;
                   return (
                     <td style={{ ...cellStyle, fontWeight: 700,
-                      color: grand == null ? TEXT_MUTED : BUDGET_BLUE,
+                      color: grand == null ? TEXT_MUTED : (isOverBudget ? RED : BUDGET_BLUE),
                       fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden' }}>
                       {txt}
                     </td>
@@ -1229,11 +1241,16 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 );
               })}
               {/* 年間実測 grand: タスク⑯ (2026-06-02) で本部 admin (L1744) と一致させ青字 (BUDGET_BLUE) に統一。
-                  着地見込み (確定実績+未確定予算) を表す。 */}
+                  着地見込み (確定実績+未確定予算) を表す。
+                  2026-06-04 ⑤: 全体の実測が目標合計 (targetGrandTotal) を超えたら RED に切替。
+                    targetGrandTotal=0 は予算未設定として青のまま。admin 同形。 */}
               {(() => {
-                const txt = fmtCell((fixedSubtotals?.grand ?? 0) + (variableSubtotals?.grand ?? 0));
+                const grandActual = (fixedSubtotals?.grand ?? 0) + (variableSubtotals?.grand ?? 0);
+                const txt = fmtCell(grandActual);
+                const isOverBudget = targetGrandTotal > 0 && grandActual > targetGrandTotal;
                 return (
-                  <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700, color: BUDGET_BLUE,
+                  <td style={{ ...cellStyle, background: NAVY2, fontWeight: 700,
+                    color: isOverBudget ? RED : BUDGET_BLUE,
                     fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden' }}>
                     {txt}
                   </td>
@@ -1403,10 +1420,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                         </div>
                       )}
 
-                      {/* カテゴリ別 */}
+                      {/* 変動費 (旧「カテゴリ」、2026-06-04 ①): subtotal「変動費合計」と表記統一。
+                          上の「固定費」(L1398) とペアになる。admin 6ba3b33 同形。 */}
                       {cats.length > 0 && (
                         <div data-pdf-unit="sum-cat-group">
-                          <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_SECONDARY, marginBottom: 6 }}>カテゴリ</div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_SECONDARY, marginBottom: 6 }}>変動費</div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                             {/* タスク⑭ (2026-06-02): カテゴリ個別バーも確定月実績のみで進捗計算。 */}
                             {cats.map((line) => renderBar(line, settledLineSpent))}
