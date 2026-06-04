@@ -939,7 +939,22 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           ? Math.min((settledCum / annualTargetTotal) * 100, 100)
           : 0;
         const overflow = annualTargetTotal > 0 && settledCum > annualTargetTotal;
-        const isRed = overflow;
+        // 案 B (2026-06-04): 上段予算棒を「選択月までの累計予算」で伸縮させる
+        //   ため、selectedMonthIdx → cumBudgetToSelected → budgetPct を派生計算する。
+        //   selectedMonth は月ダイヤル (L843-847) 連動なので、ダイヤルでバーが動的に変化する。
+        //   monthOrder.indexOf(selectedMonth) で年度内インデックスを取り (msd 基準)、
+        //   その月までの monthlyBudget (L903-930 で既に算出済) を Σ して累計予算を得る。
+        //   分母は annualTargetTotal 据置 (バー全幅 = 年間予算満額に対する 100% スケール、admin と同じ)。
+        const selectedMonthIdx = Math.max(0, monthOrder.indexOf(selectedMonth));
+        const cumBudgetToSelected = monthOrder
+          .slice(0, selectedMonthIdx + 1)
+          .reduce((s, m) => s + (monthlyBudget[m] || 0), 0);
+        const budgetPct = annualTargetTotal > 0
+          ? Math.min((cumBudgetToSelected / annualTargetTotal) * 100, 100)
+          : 0;
+        // 確定実測累計 settledCum が「選択月までの予算累計」を超えたらオーバーペース。
+        const isOverPace = settledCum > cumBudgetToSelected;
+        const isRed = overflow || isOverPace;
         const barGrad = isRed
           ? 'linear-gradient(90deg, #FF5252 0%, #C62828 100%)'
           : 'linear-gradient(90deg, #D4A843 0%, #B88E33 100%)';
@@ -981,16 +996,18 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               width: '100%',
               marginBottom: 4,
             }}>
-              {/* 上段: 予算棒 (薄ブルー全幅、年間予算満額)。
-                  annualTargetTotal>0 のときだけ青 fill を出す (未設定なら NAVY3 のみ)。 */}
+              {/* 上段: 予算棒 (BUDGET_BLUE)。案 B (2026-06-04): 幅 = 選択月までの累計予算 ÷ 年間予算満額。
+                  selectedMonth (月ダイヤル連動) で動的に伸縮、月を変えると ▼ マーカー位置に合わせて
+                  予算棒の右端も移動する。annualTargetTotal>0 のときだけ青 fill を出す。 */}
               <div style={{
                 width: '100%', height: 6, borderRadius: 3,
                 background: NAVY3, overflow: 'hidden', marginBottom: 3,
               }}>
                 {annualTargetTotal > 0 && (
                   <div style={{
-                    width: '100%', height: '100%',
+                    width: `${budgetPct}%`, height: '100%',
                     background: BUDGET_BLUE,
+                    transition: 'width 0.3s',
                   }} />
                 )}
               </div>
