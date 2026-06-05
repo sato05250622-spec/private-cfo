@@ -325,6 +325,19 @@ export default function App() {
     if (editLockedToastTimer.current) clearTimeout(editLockedToastTimer.current);
     editLockedToastTimer.current = setTimeout(() => setEditLockedToast(false), 3500);
   };
+  // 2026-06-05: 機能ゲート用トースト + ラッパ
+  const PLAN_GATE_MSG = '本機能は、Monthlyプラン以上をご契約のお客様よりご利用いただけます。';
+  const [featureLockedToast, setFeatureLockedToast] = useState(null);
+  const featureLockedToastTimer = useRef(null);
+  const showFeatureLockedToast = () => {
+    setFeatureLockedToast(PLAN_GATE_MSG);
+    if (featureLockedToastTimer.current) clearTimeout(featureLockedToastTimer.current);
+    featureLockedToastTimer.current = setTimeout(() => setFeatureLockedToast(null), 3500);
+  };
+  const requestFeature = (flag, action) => {
+    if (flag) action();
+    else showFeatureLockedToast();
+  };
   // Step B ④: 予算オーバートースト。addTransaction 成功後、当該カテゴリが
   // 「ちょうど over に乗った」瞬間 (spentOld < budget && spentNew >= budget) だけ発火。
   // null=非表示 / string=表示メッセージ。3.5s 自動消滅 (editLockedToast と同方針)。
@@ -426,7 +439,7 @@ export default function App() {
   // ログイン直後に 1 回だけ実行。冪等 (cfo_paymentsLoansMigrated フラグ + idempotent upsert)。
   // ref ガードで StrictMode 二重起動を抑止。失敗は console.warn のみで UI 阻害しない。
   // 完了後に refetchPaymentMethods / refetchLoans で UI を最新 DB 状態へ同期。
-  const { user: authUser, customerEditEnabled } = useAuth();
+  const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled } = useAuth();
   const authUserId = authUser?.id ?? null;
   // 繰越票 (annual_budgets) の committed snapshot を購読。月間サマリーの「月の予算」を
   // HQ が決めた monthly_budget と連動させる (getCarryoverMonthBudget 経由)。
@@ -2566,8 +2579,8 @@ export default function App() {
     //   ダイヤル統合により廃止。導線は currentMonthReport に向け直し済 (下の menuGroups)。
 
     const menuGroups=[[
-      {icon:"📊",label:"レポート",action:()=>setMenuScreen("currentMonthReport")},
-      {icon:"🤝",label:"面談予定",action:()=>setMenuScreen("appointment")},
+      {icon:"📊",label:"レポート"+(reportEnabled?"":" 🔒"),action:()=>requestFeature(reportEnabled, ()=>setMenuScreen("currentMonthReport"))},
+      {icon:"🤝",label:"面談予定"+(meetingEnabled?"":" 🔒"),action:()=>requestFeature(meetingEnabled, ()=>setMenuScreen("appointment"))},
     ]];
     const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"固定費",action:()=>setMenuScreen("loanSetting")}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
 
@@ -2648,6 +2661,30 @@ export default function App() {
         }}>
           💼 予算・カテゴリ・お支払い方法の<br/>
           管理は本部で承っております
+        </div>
+      )}
+      {/* 2026-06-05: 機能ゲート用トースト。editLockedToast と同形 (中央 fixed・z-index 10000・3.5s)。
+          driven は featureLockedToast (string)、文言は PLAN_GATE_MSG を表示。 */}
+      {featureLockedToast && (
+        <div style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          background: "rgba(13,30,54,0.96)",
+          color: "#D4A843",
+          padding: "20px 28px",
+          borderRadius: 14,
+          border: "1px solid rgba(212,168,67,0.4)",
+          boxShadow: "0 12px 40px rgba(0,0,0,0.6)",
+          zIndex: 10000,
+          fontSize: 14,
+          lineHeight: 1.7,
+          maxWidth: "min(360px, 86vw)",
+          textAlign: "center",
+          pointerEvents: "none",
+        }}>
+          {featureLockedToast}
         </div>
       )}
       {/* Step B ④: 予算オーバートースト。addTransaction 成功時、当該カテゴリが

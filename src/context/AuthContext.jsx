@@ -38,6 +38,13 @@ export function AuthProvider({ children }) {
   // Phase 3: 固定費 込み/抜きフラグ (profiles.include_fixed_expenses)。HQ が顧客ごとに切替。
   // true = 込み (固定費行を表示、DB default)。未取得 / 失敗 / サインアウト時も true を default。
   const [includeFixedExpenses, setIncludeFixedExpenses] = useState(true);
+  // 2026-06-05: アプリ設定タブ 機能ゲート
+  const [reportEnabled, setReportEnabled] = useState(false);
+  const [meetingEnabled, setMeetingEnabled] = useState(false);
+  const [fixedCostsEnabled, setFixedCostsEnabled] = useState(false);
+  const [utilizationEnabled, setUtilizationEnabled] = useState(false);
+  const [categoryAddEnabled, setCategoryAddEnabled] = useState(false);
+  const [cardLimit, setCardLimit] = useState(null);
   // ⑦-E: パスワードリセットメール経由のリカバリセッション中フラグ。
   // onAuthStateChange の event==='PASSWORD_RECOVERY' で true に立て、
   // AuthGate がここを最優先で見て ResetPasswordPage に切替。
@@ -59,7 +66,7 @@ export function AuthProvider({ children }) {
       try {
         const q = supabase
           .from('profiles')
-          .select('role, approved, management_start_day, customer_edit_enabled, include_fixed_expenses')
+          .select('role, approved, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit')
           .eq('id', userId)
           .maybeSingle();
         const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles fetch');
@@ -78,6 +85,12 @@ export function AuthProvider({ children }) {
         setApproved(data?.approved ?? null);
         setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
         setIncludeFixedExpenses(data?.include_fixed_expenses ?? true);
+        setReportEnabled(data?.report_enabled ?? false);
+        setMeetingEnabled(data?.meeting_enabled ?? false);
+        setFixedCostsEnabled(data?.fixed_costs_enabled ?? false);
+        setUtilizationEnabled(data?.utilization_enabled ?? false);
+        setCategoryAddEnabled(data?.category_add_enabled ?? false);
+        setCardLimit(data?.card_limit ?? null);
         // #6 修正: 「取得成功時のみ」ロード済み userId を記録する。
         //   こうすると失敗/タイムアウトしたロードは "未ロード" のまま残り、次の focus
         //   再発火で再試行され、customerEditEnabled の false 張り付きが自己回復する。
@@ -218,7 +231,7 @@ export function AuthProvider({ children }) {
     try {
       const q = supabase
         .from('profiles')
-        .select('role, approved, management_start_day, customer_edit_enabled')
+        .select('role, approved, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit')
         .eq('id', session.user.id)
         .maybeSingle();
       const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles refresh');
@@ -230,6 +243,12 @@ export function AuthProvider({ children }) {
       setApproved(data?.approved ?? null);
       setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
       setIncludeFixedExpenses(data?.include_fixed_expenses ?? true);
+      setReportEnabled(data?.report_enabled ?? false);
+      setMeetingEnabled(data?.meeting_enabled ?? false);
+      setFixedCostsEnabled(data?.fixed_costs_enabled ?? false);
+      setUtilizationEnabled(data?.utilization_enabled ?? false);
+      setCategoryAddEnabled(data?.category_add_enabled ?? false);
+      setCardLimit(data?.card_limit ?? null);
       // B-2: loadProfile と同じ msd sync (refresh 経路でも一貫性を保つ)
       if (data?.management_start_day != null) {
         const local = getManagementStartDay();
@@ -250,6 +269,13 @@ export function AuthProvider({ children }) {
     approved,
     customerEditEnabled,
     includeFixedExpenses,
+    // 2026-06-05: アプリ設定タブ 機能ゲート
+    reportEnabled,
+    meetingEnabled,
+    fixedCostsEnabled,
+    utilizationEnabled,
+    categoryAddEnabled,
+    cardLimit,
     isAdmin: role === 'admin',
     isApproved: approved === true,
     signIn,
