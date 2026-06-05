@@ -439,7 +439,7 @@ export default function App() {
   // ログイン直後に 1 回だけ実行。冪等 (cfo_paymentsLoansMigrated フラグ + idempotent upsert)。
   // ref ガードで StrictMode 二重起動を抑止。失敗は console.warn のみで UI 阻害しない。
   // 完了後に refetchPaymentMethods / refetchLoans で UI を最新 DB 状態へ同期。
-  const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled } = useAuth();
+  const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled, fixedCostsEnabled, utilizationEnabled } = useAuth();
   const authUserId = authUser?.id ?? null;
   // 繰越票 (annual_budgets) の committed snapshot を購読。月間サマリーの「月の予算」を
   // HQ が決めた monthly_budget と連動させる (getCarryoverMonthBudget 経由)。
@@ -1557,11 +1557,13 @@ export default function App() {
             <div style={{padding:"8px 14px",background:CARD_BG}}>
               <div style={{display:"flex",background:NAVY3,borderRadius:24,padding:2,border:`1px solid ${BORDER}`,width:"100%"}}>
                 <button style={S.typeBtn(progressTab==="budget")} onClick={()=>setProgressTab("budget")}>予算進捗</button>
-                <button style={S.typeBtn(progressTab==="operation")} onClick={()=>setProgressTab("operation")}>稼働進捗</button>
+                <button style={S.typeBtn(progressTab==="operation")} onClick={()=>requestFeature(utilizationEnabled, ()=>setProgressTab("operation"))}>稼働進捗{utilizationEnabled?"":" 🔒"}</button>
               </div>
             </div>
             {progressTab === "budget" ? (<>
-            {/* #11: 固定費 込み/分ける トグル (pill型・SummaryBar 直上)。'split'=既定(カテゴリのみ)。 */}
+            {/* #11: 固定費 込み/分ける トグル (pill型・SummaryBar 直上)。'split'=既定(カテゴリのみ)。
+                2026-06-05: fixedCostsEnabled OFF のときは丸ごと非表示 (メニューの「固定費」と整合)。 */}
+            {fixedCostsEnabled && (
             <div style={{padding:"0 14px 8px",background:CARD_BG}}>
               <div style={{display:"inline-flex",background:NAVY3,border:`1px solid ${BORDER}`,borderRadius:999,padding:2}}>
                 {[["split","固定費分ける"],["incl","固定費込み"]].map(([mode,label])=>{
@@ -1573,6 +1575,7 @@ export default function App() {
                 })}
               </div>
             </div>
+            )}
             <SummaryBar spent={dispSpent} budget={dispBudget} remain={dispBudget-dispSpent} labelBudget={inclFixed?"月の予算 (固定費込)":"月の予算"} labelSpent={inclFixed?"月の支出 (固定費込)":"月の支出"} labelRemain="月の残予算"/>
 
             {/* ★ 円グラフはそのまま維持 */}
@@ -2582,7 +2585,7 @@ export default function App() {
       {icon:"📊",label:"レポート"+(reportEnabled?"":" 🔒"),action:()=>requestFeature(reportEnabled, ()=>setMenuScreen("currentMonthReport"))},
       {icon:"🤝",label:"面談予定"+(meetingEnabled?"":" 🔒"),action:()=>requestFeature(meetingEnabled, ()=>setMenuScreen("appointment"))},
     ]];
-    const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"固定費",action:()=>setMenuScreen("loanSetting")}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
+    const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"固定費"+(fixedCostsEnabled?"":" 🔒"),action:()=>requestFeature(fixedCostsEnabled, ()=>setMenuScreen("loanSetting"))}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
 
     return(
       <div>
