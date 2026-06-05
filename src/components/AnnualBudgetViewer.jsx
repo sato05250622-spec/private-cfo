@@ -184,6 +184,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   const { data, loading, error } = useAnnualBudgets(clientId, selectedYear);
   // 修正2(b): 繰越票の月ダイヤル。選択月 (初期=当月) の列へ横スクロール＆ハイライト。
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1);
+  // 固定費合計 / 変動費合計 の独立アコーディオン state (画面表示のみ。PDF/合計計算には影響しない)。
+  //   subtotal 行をホストにして三角トグルで配下の内訳行 (固定費=loans/変動費=カテゴリ+特殊) を開閉。
+  const [fixedCollapsed, setFixedCollapsed] = useState(false);
+  const [variableCollapsed, setVariableCollapsed] = useState(false);
   const monthThRefs = useRef({}); // { [month]: <th> } 選択月へ scrollIntoView するため
   useEffect(() => {
     const el = monthThRefs.current[selectedMonth];
@@ -910,15 +914,29 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   //   - 月別セル: 確定系=TEXT_PRIMARY (#4 色テーマ準拠)
   //   - 実測 grand: TEXT_PRIMARY、目標 grand: BUDGET_BLUE
   //   - 強調: NAVY2 背景 + 上下 2px GOLD55 border、fontWeight 600
-  const renderSubtotalRow = (label, sub) => (
+  // collapsed / onToggle はアコーディオン用 (省略時はトグル非表示で従来挙動)。
+  //   三角 (▼=展開 / ▶=折りたたみ) は no-print + GOLD 色 + cursor:pointer。
+  //   subtotal 行の見た目 (NAVY2 / GOLD55 border / 数値色) は現状維持。
+  const renderSubtotalRow = (label, sub, collapsed, onToggle) => (
     <tr>
-      <td style={{
-        ...cellStyle, ...stickyBase, background: NAVY2,
-        fontWeight: 600, color: TEXT_PRIMARY,
-        borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
-        // #6: 先頭=カテゴリ列セルは borderLeft 無効化 (cellStyle の borderLeft を override)。
-        borderLeft: 'none',
-      }}>
+      <td
+        style={{
+          ...cellStyle, ...stickyBase, background: NAVY2,
+          fontWeight: 600, color: TEXT_PRIMARY,
+          borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
+          // #6: 先頭=カテゴリ列セルは borderLeft 無効化 (cellStyle の borderLeft を override)。
+          borderLeft: 'none',
+          cursor: onToggle ? 'pointer' : undefined,
+        }}
+        onClick={onToggle || undefined}
+      >
+        {onToggle && (
+          <span
+            className="no-print"
+            style={{ color: GOLD, marginRight: 6, fontSize: 10, userSelect: 'none' }}
+            aria-label={collapsed ? '展開' : '折りたたみ'}
+          >{collapsed ? '▶' : '▼'}</span>
+        )}
         {label}
       </td>
       {monthOrder.map((m) => {
@@ -1290,8 +1308,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               // 固定費行は確定塗り (赤) を適用しない (毎月同額の予算=実測。本部 Phase 2a と整合)。
               const isFixed = line?.row_type === "fixed_cost";
               const rowKey = line?.category_id || line?.row_type || i;
+              // アコーディオン: collapsed のとき行本体だけ描画スキップ (subtotal は外側で必ず出す)。
+              const collapsed = isFixed ? fixedCollapsed : variableCollapsed;
               return (
               <Fragment key={rowKey}>
+              {!collapsed && (
               <tr>
                 {/* #6: 行先頭=カテゴリ列セルは borderLeft 無効化。 */}
                 <td style={{
@@ -1371,11 +1392,13 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   );
                 })()}
               </tr>
+              )}
               {/* #2 各グループ末尾の直後に subtotal 行を 1 本挿入。
                   既存「支出合計」「累計支出」より前 = 月合計の手前で固定/変動の分解を提示。
-                  lastFixedIdx / lastVariableIdx は forward 1 パス計算 (findLastIndex 不使用)。 */}
-              {i === lastFixedIdx    && renderSubtotalRow("固定費合計", fixedSubtotals)}
-              {i === lastVariableIdx && renderSubtotalRow("変動費合計", variableSubtotals)}
+                  lastFixedIdx / lastVariableIdx は forward 1 パス計算 (findLastIndex 不使用)。
+                  collapsed 中でも subtotal は必ず出す (三角トグルのホスト)。 */}
+              {i === lastFixedIdx    && renderSubtotalRow("固定費合計", fixedSubtotals, fixedCollapsed, () => setFixedCollapsed((v) => !v))}
+              {i === lastVariableIdx && renderSubtotalRow("変動費合計", variableSubtotals, variableCollapsed, () => setVariableCollapsed((v) => !v))}
               </Fragment>
               );
             })}
