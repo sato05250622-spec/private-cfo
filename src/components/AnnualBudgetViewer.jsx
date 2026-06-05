@@ -511,21 +511,30 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         c.style.width = `${w}%`;
         cg.appendChild(c);
       };
-      const CAT_PCT = 16;
-      const ACT_PCT = 7;
-      const TGT_PCT = 7;
-      const MONTH_PCT = (100 - CAT_PCT - ACT_PCT - TGT_PCT) / 12;
+      // 桁切れ修正: 実測・目標が 7% (≈55px) では "1,440,000" 9 文字が入らないため
+      //   CAT=14 / 各月=5(×12=60) / 実測=13 / 目標=13 (合計100) に再配分。
+      //   月列は 5%×~787px ≈ 39px/列 → fontSize 8px + 小 padding で 7 桁 "293,382" が収まる。
+      const CAT_PCT = 14;
+      const ACT_PCT = 13;
+      const TGT_PCT = 13;
+      const MONTH_PCT = 5; // (100 - 14 - 13 - 13) / 12 = 60/12 = 5
       addColPct(CAT_PCT);
       for (let i = 0; i < 12; i++) addColPct(MONTH_PCT);
       addColPct(ACT_PCT);
       addColPct(TGT_PCT);
       tableClone.insertBefore(cg, tableClone.firstChild);
-      // sticky 解除 (handlePrint と同じ)。
+      // Phase 1 (DOM 追加前): sticky 解除 + 折返し防止 + padding 詰め + 右寄せフォールバック。
+      //   fontSize はここでは設定しない (offsetWidth が 0 なので、第2パスで動的に決める)。
+      //   tableClone.style.fontSize はベースの cascade (各セル未設定時の保険) として 8px をセット。
+      tableClone.style.fontSize = "8px";
       tableClone.querySelectorAll("th, td").forEach((c) => {
         if (c.style.position === "sticky") {
           c.style.position = "static";
           c.style.left = "auto";
         }
+        c.style.whiteSpace = "nowrap";
+        c.style.padding = "3px 3px";
+        if (!c.style.textAlign) c.style.textAlign = "right";
       });
       tableWrap.appendChild(tableClone);
       leftCol.appendChild(tableWrap);
@@ -565,6 +574,28 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
 
       container.appendChild(inner);
       document.body.appendChild(container);
+
+      // Phase 2: 動的フォントサイズ (offsetWidth ベース)。
+      //   レイアウト完了後 (DOM attach 済) に各セルの実幅を測り、収まる最大 fontSize を逆算。
+      //   経験則: 数字/カンマ 1 文字幅 ≈ fontSize × 0.58 → avail / (len × 0.58)。
+      //   下限 6px / 上限 11px でクランプ (極端な空セル/単文字でも視認可能、長文も最低 6px で残す)。
+      //   offsetWidth が 0 (レイアウト未確定) のときは cellIndex + 列% からフォールバック算出。
+      const TABLE_W_EST = 772; // INNER_W(1063) × flex 3/4 ≈ 787 − padding 16 ≈ 772 (fallback)
+      const FALLBACK_W = [CAT_PCT, ...Array(12).fill(MONTH_PCT), ACT_PCT, TGT_PCT]
+        .map((p) => (TABLE_W_EST * p) / 100);
+      tableClone.querySelectorAll("th, td").forEach((c) => {
+        const txt = (c.textContent || "").trim();
+        const len = Math.max(1, txt.length);
+        let cellW = c.offsetWidth;
+        if (!cellW || cellW <= 0) {
+          const idx = c.cellIndex;
+          cellW = (idx >= 0 && idx < FALLBACK_W.length) ? FALLBACK_W[idx] : 40;
+        }
+        const avail = cellW - 6; // padding 3px × 2
+        let fs = avail / (len * 0.58);
+        fs = Math.max(6, Math.min(11, fs));
+        c.style.fontSize = fs.toFixed(1) + "px";
+      });
 
       // 自然高さ計測 → INNER_H を超える場合は uniform scale で 1 ページ fit。
       const naturalH = inner.scrollHeight;
