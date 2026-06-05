@@ -808,6 +808,7 @@ export default function App() {
       amount: txAmount,
       memo: inputMemo,
       category: txCatId,
+      categoryLabel: expenseCats.find(c => c.id === txCatId)?.label ?? null,
       payment: inputPayment,
     })
       .then(() => {
@@ -855,6 +856,7 @@ export default function App() {
       amount: Number(editDraft.amount),
       memo: editDraft.memo,
       category: editDraft.category,
+      categoryLabel: expenseCats.find(c => c.id === editDraft.category)?.label ?? null,
       payment: editDraft.payment,
     })
       .then(() => setShowEditModal(false))
@@ -876,6 +878,7 @@ export default function App() {
         amount: Number(r.amount),
         memo: r.memo,
         category: r.category,
+        categoryLabel: expenseCats.find(c => c.id === r.category)?.label ?? null,
       }).catch((e) => console.error(e));
     });
   };

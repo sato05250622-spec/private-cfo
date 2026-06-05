@@ -27,7 +27,7 @@ function toApp(row, userId) {
 // client_id / entered_by は認証ユーザーで埋める(顧客自身が入力する場合)。
 // 本部代行入力は admin アプリ側から別パスで挿入されるので、このフックでは扱わない。
 function toDb(app, userId) {
-  return {
+  const row = {
     client_id: userId,
     entered_by: userId,
     date: app.date,
@@ -38,6 +38,8 @@ function toDb(app, userId) {
     is_recurring: app.isRecurring || false,
     recur_id: app.recurId || null,
   };
+  if (app.categoryLabel !== undefined) row.category_label = app.categoryLabel ?? null;
+  return row;
 }
 
 export function useExpenses() {
