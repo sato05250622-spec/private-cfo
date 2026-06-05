@@ -451,6 +451,152 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     }
   };
 
+  // A4 横 1 枚・左右 2 カラム PDF。
+  //   左: 繰越テーブル (cloneNode) + 年間合計サマリー (handlePrint L295-310 と同形を簡略合成)。
+  //   右: 消化サマリー [data-pdf="summary"] (cloneNode)。
+  // オフスクリーン (position:fixed; left:-99999px) に固定サイズコンテナを構築し、
+  //   はみ出る場合は transform:scale で 1 ページに fit。html2canvas → jsPDF.addImage で 1 ページ。
+  // 既存 handlePrint は壊さず温存。📄ボタン onClick だけ差し替える。
+  const handlePrintOnePage = async () => {
+    const el = pdfRef.current;
+    if (!el || pdfBusy.current) return;
+    pdfBusy.current = true;
+    let container = null;
+    try {
+      const tableEl = el.querySelector("table");
+      const summaryEl = el.querySelector('[data-pdf="summary"]');
+      if (!tableEl) { console.warn("[handlePrintOnePage] no table"); return; }
+
+      // A4 横 297×210mm。1mm≈3.78px @96dpi → 1123×794px。
+      // margin 8mm = 30px → 内寸 1063×734px。
+      const A4_W = 1123;
+      const A4_H = 794;
+      const MARGIN_PX = 30;
+      const INNER_W = A4_W - MARGIN_PX * 2;
+      const INNER_H = A4_H - MARGIN_PX * 2;
+      const NAVY_BG = "#0D1E36";
+
+      container = document.createElement("div");
+      container.style.cssText =
+        `position:fixed;left:-99999px;top:0;width:${A4_W}px;height:${A4_H}px;` +
+        `background:${NAVY_BG};box-sizing:border-box;padding:${MARGIN_PX}px;` +
+        `font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","Hiragino Sans","Yu Gothic",sans-serif;` +
+        `color:#F0EAD6;overflow:hidden;`;
+
+      // 内側コンテナ: scale 用 transform-origin: top left。flex 2 カラム。
+      const inner = document.createElement("div");
+      inner.style.cssText =
+        `width:${INNER_W}px;display:flex;gap:12px;transform-origin:top left;` +
+        `align-items:flex-start;`;
+
+      // ---- 左カラム: テーブル + 年間合計 ----
+      const leftCol = document.createElement("div");
+      leftCol.style.cssText =
+        `flex:3;min-width:0;display:flex;flex-direction:column;gap:10px;`;
+
+      const tableWrap = document.createElement("div");
+      tableWrap.style.cssText =
+        `background:${CARD_BG};border-radius:12px;padding:8px;overflow:hidden;`;
+      const tableClone = tableEl.cloneNode(true);
+      // table-layout:fixed + colgroup を強制 (handlePrint L259-289 と同方針)。
+      tableClone.style.minWidth = "0";
+      tableClone.style.width = "100%";
+      tableClone.style.tableLayout = "fixed";
+      const existingCg = tableClone.querySelector("colgroup");
+      if (existingCg) existingCg.remove();
+      const cg = document.createElement("colgroup");
+      // 15 列: 項目 / 1-12月 / 実測 / 目標。% 配分で固定。
+      const addColPct = (w) => {
+        const c = document.createElement("col");
+        c.style.width = `${w}%`;
+        cg.appendChild(c);
+      };
+      const CAT_PCT = 16;
+      const ACT_PCT = 7;
+      const TGT_PCT = 7;
+      const MONTH_PCT = (100 - CAT_PCT - ACT_PCT - TGT_PCT) / 12;
+      addColPct(CAT_PCT);
+      for (let i = 0; i < 12; i++) addColPct(MONTH_PCT);
+      addColPct(ACT_PCT);
+      addColPct(TGT_PCT);
+      tableClone.insertBefore(cg, tableClone.firstChild);
+      // sticky 解除 (handlePrint と同じ)。
+      tableClone.querySelectorAll("th, td").forEach((c) => {
+        if (c.style.position === "sticky") {
+          c.style.position = "static";
+          c.style.left = "auto";
+        }
+      });
+      tableWrap.appendChild(tableClone);
+      leftCol.appendChild(tableWrap);
+
+      // 年間合計サマリー (handlePrint L295-310 の synthGrandHtml を簡略再利用)。
+      const grandTotalVal = data?.committed_totals?.grandTotal ?? null;
+      const grandWrap = document.createElement("div");
+      grandWrap.innerHTML =
+        `<div style="background:${CARD_BG};border-radius:12px;padding:12px 16px;` +
+        `display:flex;justify-content:space-between;gap:16px;align-items:baseline;">` +
+          `<div>` +
+            `<div style="font-size:10px;color:rgba(240,234,214,0.55);margin-bottom:4px;">年間合計</div>` +
+            `<div style="font-size:18px;font-weight:700;color:#F0EAD6;">¥${Number(grandTotalVal || 0).toLocaleString()}</div>` +
+          `</div>` +
+          `<div style="text-align:right;">` +
+            `<div style="font-size:10px;color:rgba(240,234,214,0.55);margin-bottom:4px;">年間目標</div>` +
+            `<div style="font-size:18px;font-weight:700;color:#5BA8FF;">¥${Number(targetGrandTotal || 0).toLocaleString()}</div>` +
+          `</div>` +
+        `</div>`;
+      leftCol.appendChild(grandWrap.firstElementChild);
+      inner.appendChild(leftCol);
+
+      // ---- 右カラム: 消化サマリー ----
+      if (summaryEl) {
+        const rightCol = document.createElement("div");
+        rightCol.style.cssText =
+          `flex:1;min-width:0;background:${CARD_BG};border-radius:12px;` +
+          `padding:8px;overflow:hidden;`;
+        const summaryClone = summaryEl.cloneNode(true);
+        // margin / 既存 borderTop / padding をリセット (右カラム自身が枠を持つため)。
+        summaryClone.style.margin = "0";
+        summaryClone.style.padding = "0";
+        summaryClone.style.borderTop = "none";
+        rightCol.appendChild(summaryClone);
+        inner.appendChild(rightCol);
+      }
+
+      container.appendChild(inner);
+      document.body.appendChild(container);
+
+      // 自然高さ計測 → INNER_H を超える場合は uniform scale で 1 ページ fit。
+      const naturalH = inner.scrollHeight;
+      if (naturalH > INNER_H) {
+        const s = INNER_H / naturalH;
+        inner.style.transform = `scale(${s})`;
+      }
+
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        backgroundColor: NAVY_BG,
+        useCORS: true,
+        width: A4_W,
+        height: A4_H,
+        windowWidth: A4_W,
+        windowHeight: A4_H,
+      });
+
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const imgData = canvas.toDataURL("image/png");
+      doc.addImage(imgData, "PNG", 0, 0, pageW, pageH);
+      doc.save(`支出管理繰越票_1枚_${data?.fiscal_year ?? ""}年度.pdf`);
+    } catch (err) {
+      console.error("[handlePrintOnePage]", err);
+    } finally {
+      if (container && container.parentNode) container.parentNode.removeChild(container);
+      pdfBusy.current = false;
+    }
+  };
+
   // ロード中・未反映・取得失敗・data 無しは「準備中」カードを表示。
   if (loading) return <StatusCard message="読み込み中..." />;
   const lines = Array.isArray(data?.committed_lines) ? data.committed_lines : [];
@@ -817,7 +963,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         </div>
         <button
           className="no-print"
-          onClick={handlePrint}
+          onClick={handlePrintOnePage}
           style={{
             background: GOLD, color: NAVY, border: "none", borderRadius: 8,
             padding: "6px 12px", fontSize: 12, fontWeight: 700,
