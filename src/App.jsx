@@ -439,7 +439,7 @@ export default function App() {
   // ログイン直後に 1 回だけ実行。冪等 (cfo_paymentsLoansMigrated フラグ + idempotent upsert)。
   // ref ガードで StrictMode 二重起動を抑止。失敗は console.warn のみで UI 阻害しない。
   // 完了後に refetchPaymentMethods / refetchLoans で UI を最新 DB 状態へ同期。
-  const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled, fixedCostsEnabled, utilizationEnabled } = useAuth();
+  const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled, fixedCostsEnabled, utilizationEnabled, categoryAddEnabled, cardLimit } = useAuth();
   const authUserId = authUser?.id ?? null;
   // 繰越票 (annual_budgets) の committed snapshot を購読。月間サマリーの「月の予算」を
   // HQ が決めた monthly_budget と連動させる (getCarryoverMonthBudget 経由)。
@@ -1918,7 +1918,7 @@ export default function App() {
         <div style={S.overlayHeader}><button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:400,fontSize:15,color:TEXT_PRIMARY}}>カテゴリ編集</span><span style={{width:40}}></span></div>
         <div style={{height:12,background:CREAM}}/>
         <div style={{background:CARD_BG}}>
-          <div onClick={()=>requestEdit(()=>setMenuScreen("catNew"))} style={{...S.listItem,color:ORANGE,fontWeight:600}}><span>＋</span><span style={{flex:1}}>新規カテゴリーの追加</span><span style={{color:"#bbb"}}>›</span></div>
+          <div onClick={()=>{ if(expenseCats.length>=9 && !categoryAddEnabled){ showFeatureLockedToast(); return; } setMenuScreen("catNew"); }} style={{...S.listItem,color:ORANGE,fontWeight:600}}><span>＋</span><span style={{flex:1}}>新規カテゴリーの追加</span><span style={{color:"#bbb"}}>›</span></div>
           <DndContext
             sensors={dndSensors}
             collisionDetection={closestCenter}
@@ -1937,14 +1937,14 @@ export default function App() {
                   key={cat.id}
                   cat={cat}
                   icon={<CatSvgIcon cat={cat} size={32}/>}
-                  onEdit={(c) => requestEdit(() => {
+                  onEdit={(c) => {
                     setEditingCat(c);
                     setEditName(c.label);
                     setEditIcon(c.iconKey || c.icon || "restaurant");
                     setEditColor(c.color || "#FF6B35");
                     setMenuScreen("catEditDetail");
-                  })}
-                  onRemove={(id) => requestEdit(() => removeCategory(id).catch((e) => { console.error(e); alert("削除に失敗しました。"); }))}
+                  }}
+                  onRemove={(id) => removeCategory(id).catch((e) => { console.error(e); alert("削除に失敗しました。"); })}
                 />
               ))}
             </SortableContext>
@@ -1992,7 +1992,7 @@ export default function App() {
         <div style={S.overlayHeader}><button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:400,fontSize:15,color:TEXT_PRIMARY}}>支払い方法</span><span style={{width:40}}></span></div>
         <div style={{height:12,background:CREAM}}/>
         <div style={{background:CARD_BG}}>
-          <div onClick={()=>requestEdit(()=>{setPaymentDraft({label:"",color:"#4CAF50",closingDay:"",withdrawalDay:""});setEditingPaymentId(null);setMenuScreen("paymentNew");})} style={{...S.listItem,color:ORANGE,fontWeight:600}}>
+          <div onClick={()=>requestEdit(()=>{const cardPms=paymentMethods.filter(p=>p.id!=="cash");if(cardLimit!=null && cardPms.length>=cardLimit){showFeatureLockedToast();return;}setPaymentDraft({label:"",color:"#4CAF50",closingDay:"",withdrawalDay:""});setEditingPaymentId(null);setMenuScreen("paymentNew");})} style={{...S.listItem,color:ORANGE,fontWeight:600}}>
             <span>＋</span><span style={{flex:1}}>新しい支払い方法を追加</span><span style={{color:"#bbb"}}>›</span>
           </div>
           {/* カテゴリ編集と同じ iOS 長押しドラッグ機構。
