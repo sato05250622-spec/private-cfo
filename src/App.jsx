@@ -2736,7 +2736,7 @@ export default function App() {
             は使わず、CSS max() で safe 消費のみ揃える。FIXED_SUBMIT_STYLE は無改変。
           - tab !== "daily" の時は旧式を残す: 他タブには「支出を入力する」帯が無く、隙間詰めは
             不要 + ユーザー指示「他タブに影響させない」順守。 */}
-      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom: tab === "daily" ? "calc(65px + max(8px, env(safe-area-inset-bottom) - 12px))" : "calc(62px + env(safe-area-inset-bottom) + 8px)"}}>
+      <div style={{...S.main,paddingTop:showTelop?24:8,paddingBottom: tab === "daily" ? "calc(57px + max(8px, env(safe-area-inset-bottom) - 12px))" : "calc(62px + env(safe-area-inset-bottom) + 8px)"}}>
         {tab==="daily"&&renderDaily()}
         {tab==="day"&&renderDayView()}
         {tab==="weekly"&&renderWeekly()}
