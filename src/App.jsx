@@ -439,7 +439,7 @@ export default function App() {
   // ログイン直後に 1 回だけ実行。冪等 (cfo_paymentsLoansMigrated フラグ + idempotent upsert)。
   // ref ガードで StrictMode 二重起動を抑止。失敗は console.warn のみで UI 阻害しない。
   // 完了後に refetchPaymentMethods / refetchLoans で UI を最新 DB 状態へ同期。
-  const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled, fixedCostsEnabled, utilizationEnabled, categoryAddEnabled, cardLimit } = useAuth();
+  const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled, fixedCostsEnabled, utilizationEnabled, categoryAddEnabled, cardLimit, assetSheetEnabled } = useAuth();
   const authUserId = authUser?.id ?? null;
   // 繰越票 (annual_budgets) の committed snapshot を購読。月間サマリーの「月の予算」を
   // HQ が決めた monthly_budget と連動させる (getCarryoverMonthBudget 経由)。
@@ -2279,6 +2279,26 @@ export default function App() {
       return <AppointmentCard onBack={() => setMenuScreen("main")} />;
     }
 
+    // Phase A タスク3 (2026-06-06): 資産残高繰越票 — 準備中プレースホルダ。
+    //   既存 overlayHeader + 本文中央寄せ「準備中です」。NAVY/GOLD テーマで他画面と整合。
+    if (menuScreen === "assetSheet") {
+      return (
+        <div style={{minHeight:"100dvh",background:NAVY}}>
+          <div style={S.overlayHeader}>
+            <button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
+            <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>資産残高繰越票</span>
+            <span style={{width:40}}/>
+          </div>
+          <div style={{margin:"80px 16px 0",textAlign:"center"}}>
+            <div style={{fontSize:48,marginBottom:16}}>📈</div>
+            <div style={{fontSize:18,fontWeight:700,color:GOLD,marginBottom:8}}>準備中です</div>
+            <div style={{fontSize:13,color:TEXT_SECONDARY,lineHeight:1.7}}>近日中に公開予定です。<br/>もうしばらくお待ちください。</div>
+            <button onClick={()=>setMenuScreen("main")} style={{marginTop:24,padding:"12px 32px",background:GOLD_GRAD,border:"none",borderRadius:24,fontSize:14,fontWeight:700,color:"#0A1628",cursor:"pointer"}}>メニューに戻る</button>
+          </div>
+        </div>
+      );
+    }
+
     if(menuScreen==="contact"){
       return(
         <div style={{minHeight:"100dvh",background:NAVY}}>
@@ -2586,6 +2606,7 @@ export default function App() {
 
     const menuGroups=[[
       {icon:"📊",label:"レポート"+(reportEnabled?"":" 🔒"),action:()=>requestFeature(reportEnabled, ()=>setMenuScreen("currentMonthReport"))},
+      {icon:"📈",label:"資産残高繰越票"+(assetSheetEnabled?"":" 🔒"),action:()=>requestFeature(assetSheetEnabled, ()=>setMenuScreen("assetSheet"))},
       {icon:"🤝",label:"面談予定"+(meetingEnabled?"":" 🔒"),action:()=>requestFeature(meetingEnabled, ()=>setMenuScreen("appointment"))},
     ]];
     const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"固定費"+(fixedCostsEnabled?"":" 🔒"),action:()=>requestFeature(fixedCostsEnabled, ()=>setMenuScreen("loanSetting"))}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];

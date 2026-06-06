@@ -45,6 +45,8 @@ export function AuthProvider({ children }) {
   const [utilizationEnabled, setUtilizationEnabled] = useState(false);
   const [categoryAddEnabled, setCategoryAddEnabled] = useState(false);
   const [cardLimit, setCardLimit] = useState(null);
+  // Phase A タスク3 (2026-06-06): 資産残高繰越票 機能ゲート。DB asset_sheet_enabled DEFAULT false。
+  const [assetSheetEnabled, setAssetSheetEnabled] = useState(false);
   // ⑦-E: パスワードリセットメール経由のリカバリセッション中フラグ。
   // onAuthStateChange の event==='PASSWORD_RECOVERY' で true に立て、
   // AuthGate がここを最優先で見て ResetPasswordPage に切替。
@@ -66,7 +68,7 @@ export function AuthProvider({ children }) {
       try {
         const q = supabase
           .from('profiles')
-          .select('role, approved, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit')
+          .select('role, approved, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit, asset_sheet_enabled')
           .eq('id', userId)
           .maybeSingle();
         const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles fetch');
@@ -91,6 +93,7 @@ export function AuthProvider({ children }) {
         setUtilizationEnabled(data?.utilization_enabled ?? false);
         setCategoryAddEnabled(data?.category_add_enabled ?? false);
         setCardLimit(data?.card_limit ?? null);
+        setAssetSheetEnabled(data?.asset_sheet_enabled ?? false);
         // #6 修正: 「取得成功時のみ」ロード済み userId を記録する。
         //   こうすると失敗/タイムアウトしたロードは "未ロード" のまま残り、次の focus
         //   再発火で再試行され、customerEditEnabled の false 張り付きが自己回復する。
@@ -231,7 +234,7 @@ export function AuthProvider({ children }) {
     try {
       const q = supabase
         .from('profiles')
-        .select('role, approved, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit')
+        .select('role, approved, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit, asset_sheet_enabled')
         .eq('id', session.user.id)
         .maybeSingle();
       const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles refresh');
@@ -249,6 +252,7 @@ export function AuthProvider({ children }) {
       setUtilizationEnabled(data?.utilization_enabled ?? false);
       setCategoryAddEnabled(data?.category_add_enabled ?? false);
       setCardLimit(data?.card_limit ?? null);
+      setAssetSheetEnabled(data?.asset_sheet_enabled ?? false);
       // B-2: loadProfile と同じ msd sync (refresh 経路でも一貫性を保つ)
       if (data?.management_start_day != null) {
         const local = getManagementStartDay();
@@ -276,6 +280,7 @@ export function AuthProvider({ children }) {
     utilizationEnabled,
     categoryAddEnabled,
     cardLimit,
+    assetSheetEnabled,
     isAdmin: role === 'admin',
     isApproved: approved === true,
     signIn,
