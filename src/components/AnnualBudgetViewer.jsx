@@ -6,7 +6,7 @@ import { listFiscalYearsByClient } from "../lib/api/annualBudgets";
 import { useLoans } from "../hooks/useLoans";
 import { useBudgets } from "../hooks/useBudgets";
 import { PopoverDial } from "./MonthDialPicker";
-import { cycleStart, cycleEnd, findCycleOfDate, getManagementStartDay } from "../utils/cycle";
+import { cycleStart, cycleEnd, findCycleOfDate, weekInCycle, weeksInCycle, getManagementStartDay } from "../utils/cycle";
 import { toDateStr } from "@shared/format";
 import {
   GOLD, NAVY, NAVY2, NAVY3, CARD_BG, BORDER, RED, TEAL,
@@ -1091,7 +1091,14 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           return 0;
         };
         const yearBudgetTotal = displayLines.reduce((s, l) => s + (summaryBudget(l) || 0), 0);
-        const currentCycleMonth = findCycleOfDate(new Date(), msd).month + 1;
+        const _today = new Date();
+        const _cyc = findCycleOfDate(_today, msd);
+        const currentCycleMonth = _cyc.month + 1;
+        // Step1 (週刻み青バー): 現在週情報。cycle.js の API を流用 (週は常時 1..4)。
+        //   weekInCycle: 第N週 (1..4) / weeksInCycle: 各週の境界配列 (length は常時 4)。
+        const currentCycleWeek = weekInCycle(_today, msd);
+        const _weeks = weeksInCycle(_cyc.year, _cyc.month, msd);
+        const totalWeeksInMonth = _weeks.length || 4;
         // P4-B (α): 「現在月までの予算累計」を 100% の基準とする (案 I)。
         //   バー全幅 = 12ヶ月維持、fill 終端が現在月マーカー (▼) 位置に到達したら 100%。
         //   月境界 dashed line 11 本は 12 等分のまま (案 II と違い C-1 の意味を保持)。
@@ -1146,9 +1153,46 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         //   その月までの monthlyBudget (L903-930 で既に算出済) を Σ して累計予算を得る。
         //   分母は annualTargetTotal 据置 (バー全幅 = 年間予算満額に対する 100% スケール、admin と同じ)。
         const selectedMonthIdx = Math.max(0, monthOrder.indexOf(selectedMonth));
+        // Step1 (週刻み青バー): 現在月の貢献を「週単位まで」に圧縮する partial 値を別途算出。
+        //   - 固定費/特殊行 → その月の月額満額 (按分しない、実測の固定費と整合)
+        //   - カテゴリ行 → weekCatBudgets の 第1〜currentCycleWeek 週分のみ加算
+        //   monthlyBudget の同じ分岐ロジックを再走査 (依存変数: displayLines, weekCatBudgets,
+        //   fyYear, startMonth, currentCycleMonth, currentCycleWeek)。
+        let currentMonthPartialBudget = 0;
+        for (const l of displayLines) {
+          if (l?.row_type === "fixed_cost") {
+            const ma = l.monthly_amounts;
+            const base = Number(l.monthly_amount) || 0;
+            const v = ma ? (ma[currentCycleMonth] ?? ma[String(currentCycleMonth)]) : null;
+            currentMonthPartialBudget += (v != null ? Number(v) : base) || 0;
+          } else if (l?.row_type === "category" && l?.category_id) {
+            for (const key of Object.keys(weekCatBudgets || {})) {
+              const mt = key.match(/^(\d+)-(\d+)-w(\d+)_(.+)$/);
+              if (!mt) continue;
+              if (String(mt[4]) !== String(l.category_id)) continue;
+              const cm = Number(mt[2]);
+              if (cm !== currentCycleMonth) continue;
+              if (Number(mt[1]) !== fiscalMonthCalendarYear(fyYear, startMonth, cm)) continue;
+              const wn = Number(mt[3]);
+              if (!(wn >= 1 && wn <= currentCycleWeek)) continue;
+              currentMonthPartialBudget += Number(weekCatBudgets[key]) || 0;
+            }
+          } else {
+            const tv = Number(l?.target_value);
+            if (Number.isFinite(tv) && tv > 0) currentMonthPartialBudget += tv / 12;
+          }
+        }
+        // 走査は月ダイヤルの選択月まで。各月 m を fiscal 位置 i で判定:
+        //   i < currentMonthIdx → monthlyBudget[m] 満額
+        //   i === currentMonthIdx → currentMonthPartialBudget (週単位 partial)
+        //   i > currentMonthIdx → 0 (未来分は青バーに含めない=今期待消化を超えない)
         const cumBudgetToSelected = monthOrder
           .slice(0, selectedMonthIdx + 1)
-          .reduce((s, m) => s + (monthlyBudget[m] || 0), 0);
+          .reduce((s, m, i) => {
+            if (i < currentMonthIdx) return s + (monthlyBudget[m] || 0);
+            if (i === currentMonthIdx) return s + currentMonthPartialBudget;
+            return s;
+          }, 0);
         const budgetPct = annualTargetTotal > 0
           ? Math.min((cumBudgetToSelected / annualTargetTotal) * 100, 100)
           : 0;
@@ -1234,6 +1278,21 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   pointerEvents: 'none',
                 }} />
               ))}
+              {/* Step1 (週境界): 現在月の区間内に dotted で週境界を控えめに引く。
+                  totalWeeksInMonth は常時 4 だが weeksInCycle.length に追従させる。
+                  月境界より控えめな 1px dotted ${GOLD}40 (月の半透明よりさらに薄め)。 */}
+              {Array.from({ length: Math.max(0, totalWeeksInMonth - 1) }, (_, i) => {
+                const w = i + 1;
+                const left = ((currentMonthIdx + w / totalWeeksInMonth) / 12) * 100;
+                return (
+                  <div key={`w${w}`} style={{
+                    position: 'absolute', top: 0, bottom: 0,
+                    left: `${left}%`, width: 0,
+                    borderLeft: `1px dotted ${GOLD}40`,
+                    pointerEvents: 'none',
+                  }} />
+                );
+              })}
             </div>
             {/* 月軸: monthOrder の順、刻み線 GOLD 25% 透過 (=`${GOLD}40`)、
                 現在サイクルのみ GOLD 強調 + 上に ▼ マーカー */}
