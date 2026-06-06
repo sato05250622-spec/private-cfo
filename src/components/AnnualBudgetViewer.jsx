@@ -5,6 +5,7 @@ import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import { listFiscalYearsByClient } from "../lib/api/annualBudgets";
 import { useLoans } from "../hooks/useLoans";
 import { useBudgets } from "../hooks/useBudgets";
+import { useExpenses } from "../hooks/useExpenses";
 import { PopoverDial } from "./MonthDialPicker";
 import { cycleStart, cycleEnd, findCycleOfDate, weekInCycle, weeksInCycle, getManagementStartDay } from "../utils/cycle";
 import { toDateStr } from "@shared/format";
@@ -209,6 +210,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // #2: 予算VS実績 (week_cat_budgets) を将来月予算の入力元にするため購読 (auth ベース)。
   //   カテゴリ将来月セルを Σ(週) で上書き表示する (本部 resolveCell とロジック統一)。
   const { weekCatBudgets } = useBudgets();
+  // Step2 (金バー週刻み): 今月サイクル内の実支出を週単位で進めるため raw expenses を取得。
+  //   useExpenses() は内部で auth user 経由で client_id を引いて自分の expenses を返す。
+  //   今月 (未確定) の expense を「今月 cycle 開始日〜今日」で合算し、金バー長を進める用途のみで使用。
+  //   既存 settledCum (snapshot monthly_spent 由来) と重複しないよう、現在月が未確定のときだけ加算。
+  const { expenses: liveExpenses } = useExpenses();
 
   // 横画面検出 (Rules of Hooks: 早期 return より前で呼ぶ)。
   // landscape のときだけ繰越票テーブルを全画面パネル化し、12ヶ月を横スクロール無しで表示する。
@@ -1196,16 +1202,38 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         const budgetPct = annualTargetTotal > 0
           ? Math.min((cumBudgetToSelected / annualTargetTotal) * 100, 100)
           : 0;
-        // 確定実測累計 settledCum が「選択月までの予算累計」を超えたらオーバーペース。
-        const isOverPace = settledCum > cumBudgetToSelected;
-        const isRed = overflow || isOverPace;
+        // Step2 (金バー週刻み): 今月サイクル内の生 expenses から
+        //   「今月 cycle 開始日〜今日」の実支出を合算 → settledCum に足して金バー長を進める。
+        //   - 現在月が確定済 (isMonthSettled) のときは monthly_spent[currentMonth] が
+        //     既に settledCum に含まれているため二重計上回避で加算しない (_addCurMonth=false)。
+        //   - liveExpenses は loading 中 [] のことがあるが、`for-of (...||[])` で安全。
+        //   - 数字表示 (¥settledCum) は触らない (snapshot 由来の確定月のみで明示)。
+        const _cycleStartDate = _cyc.startDate;
+        let currentMonthSpentToToday = 0;
+        for (const e of (liveExpenses || [])) {
+          if (!e?.date) continue;
+          const d = new Date(e.date);
+          if (Number.isNaN(d.getTime())) continue;
+          if (d >= _cycleStartDate && d <= _today) {
+            currentMonthSpentToToday += Number(e.amount) || 0;
+          }
+        }
+        const _addCurMonth = !isMonthSettled(currentCycleMonth);
+        const settledCumForBar = settledCum + (_addCurMonth ? currentMonthSpentToToday : 0);
+        // 金バー幅は settledCumForBar 基準。色判定は settledCumForBar vs cumBudgetToSelected で
+        //   青(週単位 partial)と追っかけっこできる。overflow は annualTargetTotal を超えたら依然 RED。
+        const isOverPace = settledCumForBar > cumBudgetToSelected;
+        const overflowForBar = annualTargetTotal > 0 && settledCumForBar > annualTargetTotal;
+        const isRed = overflowForBar || isOverPace;
         const barGrad = isRed
           ? 'linear-gradient(90deg, #FF5252 0%, #C62828 100%)'
           : 'linear-gradient(90deg, #D4A843 0%, #B88E33 100%)';
-        // #2 (2026-06-03): 単一 fill % (= 確定済 settledCum / annualTargetTotal)。
+        // #2 (2026-06-03): 単一 fill % (= settledCumForBar / annualTargetTotal)。
         //   旧 s2Pct (未確定セグメント) は廃止 — 薄ブルー全幅土台 (L2) で年間予算満額を可視化する方針に変更。
         //   背景の残り (100-pct)% は薄ブルー土台が露出し、未消化分として可視化される。
-        const s1Pct = pct;
+        const s1Pct = annualTargetTotal > 0
+          ? Math.min((settledCumForBar / annualTargetTotal) * 100, 100)
+          : 0;
         return (
           <div style={{
             padding: '16px 12px',
