@@ -703,6 +703,15 @@ export default function App() {
   const PIE_OUTER_RADIUS = 90;
   const PIE_LABEL_GAP = 18;       // 小スライスラベルの最小行間 (px)
   const PIE_LABEL_THRESHOLD = 0.08; // 内側/外側分岐の percent 閾値
+  // タスクB追補2 (2026-06-07): チャート領域 (高さ 240、cy=120) からはみ出るのを防ぐ。
+  //   offset は cy 相対値。上端 = -(120 - PIE_LABEL_TOP_PAD)、下端 = 120 - PIE_LABEL_BOT_PAD。
+  //   テキスト fontSize=10 の上下分 (~5px) と外周余裕 (7px) で計 12px をパッドに。
+  const PIE_CHART_HEIGHT = 240;
+  const PIE_CY = PIE_CHART_HEIGHT / 2;
+  const PIE_LABEL_TOP_PAD = 12;
+  const PIE_LABEL_BOT_PAD = 12;
+  const PIE_CY_MIN_OFFSET = -(PIE_CY - PIE_LABEL_TOP_PAD); // 例: -108
+  const PIE_CY_MAX_OFFSET =  (PIE_CY - PIE_LABEL_BOT_PAD); // 例: +108
   const catLabelLayout = useMemo(() => {
     if (!Array.isArray(catBreakdown) || catBreakdown.length === 0) return {};
     const total = catBreakdown.reduce((s, e) => s + (Number(e?.value) || 0), 0);
@@ -726,15 +735,49 @@ export default function App() {
         isSmall: p < PIE_LABEL_THRESHOLD,
       };
     });
-    // 同じ側に集まる小スライスを naturalY 昇順ソート → minGap で押し下げ。
+    // 同じ側に集まる小スライスを 3 段で配置調整:
+    //   Step 1: naturalY 昇順 + minGap=18px で下方向にカスケード押し下げ
+    //   Step 2: 末尾が下端 (PIE_CY_MAX_OFFSET) を超えたらグループ全体を上にシフト
+    //   Step 3: 先頭が上端 (PIE_CY_MIN_OFFSET) を下回ったら、
+    //           総高さが利用可能高さ以下なら下にシフト、超えるなら均等分散 (compress)
+    //   → 日用品など最末尾の極小スライスも必ずチャート領域内 (TOP_PAD..BOT_PAD) に収まる
     const adjustSide = (sideItems) => {
+      if (sideItems.length === 0) return;
       sideItems.sort((a, b) => a.naturalYOffset - b.naturalYOffset);
+      // Step 1: 下方向カスケード押し下げ (既存)
       for (let i = 0; i < sideItems.length; i++) {
         if (i === 0) {
           sideItems[i].finalYOffset = sideItems[i].naturalYOffset;
         } else {
           const minAllowed = sideItems[i - 1].finalYOffset + PIE_LABEL_GAP;
           sideItems[i].finalYOffset = Math.max(sideItems[i].naturalYOffset, minAllowed);
+        }
+      }
+      // Step 2: 下端超過 → グループ全体を上にシフト
+      const lastOffset = sideItems[sideItems.length - 1].finalYOffset;
+      if (lastOffset > PIE_CY_MAX_OFFSET) {
+        const shift = lastOffset - PIE_CY_MAX_OFFSET;
+        for (let i = 0; i < sideItems.length; i++) {
+          sideItems[i].finalYOffset -= shift;
+        }
+      }
+      // Step 3: 上端不足 → シフト or 均等分散 (compress)
+      const firstOffset = sideItems[0].finalYOffset;
+      if (firstOffset < PIE_CY_MIN_OFFSET) {
+        const groupHeight = sideItems[sideItems.length - 1].finalYOffset - firstOffset;
+        const availableHeight = PIE_CY_MAX_OFFSET - PIE_CY_MIN_OFFSET;
+        if (groupHeight <= availableHeight) {
+          // 単に下方向シフト
+          const shift = PIE_CY_MIN_OFFSET - firstOffset;
+          for (let i = 0; i < sideItems.length; i++) {
+            sideItems[i].finalYOffset += shift;
+          }
+        } else {
+          // 均等分散で fit (minGap を縮める)
+          const newGap = sideItems.length > 1 ? availableHeight / (sideItems.length - 1) : 0;
+          for (let i = 0; i < sideItems.length; i++) {
+            sideItems[i].finalYOffset = PIE_CY_MIN_OFFSET + i * newGap;
+          }
         }
       }
     };
