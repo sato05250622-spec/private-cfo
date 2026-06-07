@@ -37,6 +37,12 @@ export function useAnnualBudgets(clientId, fiscalYear) {
               ...row,
               committedSettledMonths: row.committed_settled_months ?? [],
               committedAnnualTotalTarget: row.committed_annual_total_target ?? null,
+              // Phase B-3 (2026-06-07): 資産残高繰越票用。admin commitIncomeSnapshot で焼かれた snapshot を露出。
+              //   AssetSheetViewer が「準備中」判定 (incomeCommittedAt null) と本体描画 (committedIncomeLines) に使う。
+              //   支出側 committedLines も読み出しが増えるため snake_case のままだが camelCase でも露出。
+              committedLines: row.committed_lines ?? [],
+              committedIncomeLines: row.committed_income_lines ?? [],
+              incomeCommittedAt: row.income_committed_at ?? null,
             }
           : null,
       );

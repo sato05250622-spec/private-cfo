@@ -29,14 +29,14 @@ export async function getCommittedByClient(clientId, fiscalYear) {
   if (fiscalYear != null) {
     const { data, error } = await supabase
       .from(TABLE)
-      .select('fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at')
+      .select('fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at, committed_income_lines, income_committed_at')
       .eq('client_id', clientId)
       .eq('fiscal_year', fiscalYear)
       .maybeSingle();
     if (error) throw error;
     return data ?? null;
   }
-  const SELECT = 'fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at';
+  const SELECT = 'fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at, committed_income_lines, income_committed_at';
   // 既定: 反映済み (last_committed_at not null) の最新年度を優先。
   const committed = await supabase
     .from(TABLE)

@@ -30,6 +30,7 @@ import AppointmentCard from "./components/AppointmentCard";
 import SortableCategoryRow from "./components/SortableCategoryRow";
 import SortablePaymentRow from "./components/SortablePaymentRow";
 import AnnualBudgetViewer from "./components/AnnualBudgetViewer";
+import AssetSheetViewer from "./components/AssetSheetViewer";
 import MonthlyReviewViewer from "./components/MonthlyReviewViewer";
 import InvestmentRecoveryViewer from "./pages/InvestmentRecoveryViewer";
 import { MonthPopoverDial } from "./components/MonthDialPicker";
@@ -2279,8 +2280,9 @@ export default function App() {
       return <AppointmentCard onBack={() => setMenuScreen("main")} />;
     }
 
-    // Phase A タスク3 (2026-06-06): 資産残高繰越票 — 準備中プレースホルダ。
-    //   既存 overlayHeader + 本文中央寄せ「準備中です」。NAVY/GOLD テーマで他画面と整合。
+    // Phase B-3 (2026-06-07): 資産残高繰越票 — AssetSheetViewer に差替。
+    //   旧 placeholder ブロックは Viewer 内 StatusCard に統合 (準備中ゲートは Viewer 側で判定)。
+    //   外側のヘッダ (戻るボタン + タイトル) は維持し、本文に Viewer を差し込む。
     if (menuScreen === "assetSheet") {
       return (
         <div style={{minHeight:"100dvh",background:NAVY}}>
@@ -2289,11 +2291,8 @@ export default function App() {
             <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>資産残高繰越票</span>
             <span style={{width:40}}/>
           </div>
-          <div style={{margin:"80px 16px 0",textAlign:"center"}}>
-            <div style={{fontSize:48,marginBottom:16}}>📈</div>
-            <div style={{fontSize:18,fontWeight:700,color:GOLD,marginBottom:8}}>準備中です</div>
-            <div style={{fontSize:13,color:TEXT_SECONDARY,lineHeight:1.7}}>近日中に公開予定です。<br/>もうしばらくお待ちください。</div>
-            <button onClick={()=>setMenuScreen("main")} style={{marginTop:24,padding:"12px 32px",background:GOLD_GRAD,border:"none",borderRadius:24,fontSize:14,fontWeight:700,color:"#0A1628",cursor:"pointer"}}>メニューに戻る</button>
+          <div style={{padding:"12px 12px"}}>
+            <AssetSheetViewer clientId={authUserId} />
           </div>
         </div>
       );
