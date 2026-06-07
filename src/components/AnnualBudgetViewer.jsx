@@ -1274,10 +1274,26 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   - 下段「実測棒」: NAVY3 背景 / GOLD or RED fill 幅 s1Pct% (settledCum/annualTargetTotal)
                 月境界 dashed 線 11 本は wrapper 全体に position:absolute で被せ、2 本バーを縦断する。
                 各棒 height 6px / borderRadius 3px (=高さ/2) で角丸感は維持。 */}
+            {/* タスクF (2026-06-08): バー左に行ラベル列 (予算/現進捗) を追加。
+                外側 flex (alignItems:center, gap:6) で「ラベル列(40px)」と「バーラッパ(flex:1)」を横並びに。
+                既存バーラッパの marginBottom:4 は外側 flex に移管。バー本体・進捗計算・▼マーカー・月境界・月軸は無改修。
+                色はハードコードせず予算=BUDGET_BLUE、現進捗=isRed?RED:GOLD でバーと同期。 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <div style={{
+                width: 40,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                height: 15,
+                fontSize: 10,
+                whiteSpace: 'nowrap',
+              }}>
+                <div style={{ color: BUDGET_BLUE }}>予算</div>
+                <div style={{ color: isRed ? RED : GOLD }}>現進捗</div>
+              </div>
             <div style={{
               position: 'relative',
-              width: '100%',
-              marginBottom: 4,
+              flex: 1,
             }}>
               {/* 上段: 予算棒 (BUDGET_BLUE)。案 B (2026-06-04): 幅 = 選択月までの累計予算 ÷ 年間予算満額。
                   selectedMonth (月ダイヤル連動) で動的に伸縮、月を変えると ▼ マーカー位置に合わせて
@@ -1333,9 +1349,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 );
               })}
             </div>
+            </div>
             {/* 月軸: monthOrder の順、刻み線 GOLD 25% 透過 (=`${GOLD}40`)、
                 現在サイクルのみ GOLD 強調 + 上に ▼ マーカー */}
-            <div style={{ display: 'flex', paddingTop: 12, position: 'relative' }}>
+            {/* タスクF (2026-06-08): 月軸の左端をバーの左端 (ラベル列40px + gap6px) に揃える。
+                外側 flex (gap:6) の子1 = 空スペーサ(width:40)、子2 = 既存月軸div (flex:1 付与)。
+                月軸の内容(monthOrder/刻み線/▼マーカー)は無改修。 */}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ width: 40 }} />
+            <div style={{ display: 'flex', paddingTop: 12, position: 'relative', flex: 1 }}>
               {monthOrder.map((m, i) => {
                 const isCurrent = m === currentCycleMonth;
                 return (
@@ -1357,6 +1379,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   </div>
                 );
               })}
+            </div>
             </div>
           </div>
         );
