@@ -2568,9 +2568,8 @@ export default function App() {
           </div>
           <div style={{margin:"12px 16px 0",background:CARD_BG,borderRadius:12,overflow:"hidden",border:`1px solid ${BORDER}`}}>
             {[
-              {label:"名前",placeholder:"例：山田 太郎",type:"text"},
-              {label:"メールアドレス",placeholder:"例：example@mail.com",type:"email"},
-              {label:"電話番号",placeholder:"例：090-1234-5678",type:"tel"},
+              // タスクG (2026-06-08): 名前/メール/電話 は uncontrolled stub で保存処理もないため削除。
+              //   報酬日・管理スタート日のみ残す。else 分岐の素 <input> (L2664付近) は dead code 化するが今回は無改修。
               // 報酬日:Phase 2 で複数登録チップ UI(iOS ネイティブカレンダーピッカー併用)。
               {label:"報酬日"},
               // 管理スタート日:cycle 切替の本体機能(旧 rewardDay の役割)。
