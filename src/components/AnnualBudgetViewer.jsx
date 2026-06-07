@@ -130,10 +130,17 @@ function pickMonth(obj, m) {
 // (admin 側の live 集計値は snapshot に含まれないため override / values のみ)
 function resolveCell(line, m) {
   // Phase 3 (固定費): 各月 monthly_amounts[m] ?? monthly_amount (基準額)。読み取り専用。
+  // タスクA (2026-06-07): 月セル解決順を 3 段フォールバックに拡張 (非破壊・DB変更なし)。
+  //   ① 手入力 monthly_amounts[m] があればそれ優先
+  //   ② 無ければ 年間目標 (target_value=loans.annual_target) / 12 を表示 (Math.round で端数丸め)
+  //   ③ それも無ければ monthly_amount (基準月額)
+  //   admin AnnualBudgetTab.jsx resolveCell 固定費分岐と完全同一ロジック。
   if (line?.row_type === "fixed_cost") {
     const ma = line.monthly_amounts;
     const mv = ma ? (ma[m] ?? ma[String(m)]) : null;
-    const a = mv != null ? Number(mv) : Number(line.monthly_amount);
+    const tv = Number(line.target_value);
+    const perMonth = (Number.isFinite(tv) && tv > 0) ? Math.round(tv / 12) : null;
+    const a = mv != null ? Number(mv) : (perMonth != null ? perMonth : Number(line.monthly_amount));
     return Number.isFinite(a) && a !== 0 ? a : null;
   }
   const ov = pickMonth(line?.monthly_overrides, m);
