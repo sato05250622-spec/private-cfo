@@ -694,6 +694,60 @@ export default function App() {
   }, [transactions, reportMonth, managementStartDay]);
   const reportExpense=reportTxs.reduce((s,t)=>s+t.amount,0);
   const catBreakdown=useMemo(()=>{const map={};reportTxs.forEach(t=>{map[t.category]=(map[t.category]||0)+t.amount;});return expenseCats.filter(c=>map[c.id]).map(c=>({name:c.label,value:map[c.id],color:c.color}));},[reportTxs,expenseCats]);
+  // タスクB (2026-06-07): 月タブ円グラフの小スライス (percent<0.08) ラベル衝突回避。
+  //   事前に全スライスの midAngle と naturalY を recharts と同式で算出、cos 符号で左右に振り分け、
+  //   各側で naturalY 昇順ソート → minGap=18px を強制して下方向に押し下げ。
+  //   index → { side, finalYOffset } のマップを返す。label 関数は引数 index で参照。
+  //   ※ 内側ラベル (percent>=0.08) は補正対象外。Pie の cx/cy/outerRadius は JSX 側のリテラル
+  //      (cx="50%"/cy="50%"/outerRadius=90) と整合させる。
+  const PIE_OUTER_RADIUS = 90;
+  const PIE_LABEL_GAP = 18;       // 小スライスラベルの最小行間 (px)
+  const PIE_LABEL_THRESHOLD = 0.08; // 内側/外側分岐の percent 閾値
+  const catLabelLayout = useMemo(() => {
+    if (!Array.isArray(catBreakdown) || catBreakdown.length === 0) return {};
+    const total = catBreakdown.reduce((s, e) => s + (Number(e?.value) || 0), 0);
+    if (total <= 0) return {};
+    const START_ANGLE = 0; // recharts Pie default
+    const SWEEP = 360;
+    const RADIAN = Math.PI / 180;
+    let cum = 0;
+    const items = catBreakdown.map((e, i) => {
+      const p = (Number(e?.value) || 0) / total;
+      const midAngle = START_ANGLE + (cum + p / 2) * SWEEP;
+      cum += p;
+      // 既存 label 関数と同じ -midAngle 反転 (SVG y 軸下向き整合)。
+      const sin = Math.sin(-midAngle * RADIAN);
+      const cos = Math.cos(-midAngle * RADIAN);
+      return {
+        index: i,
+        percent: p,
+        naturalYOffset: (PIE_OUTER_RADIUS + 8) * sin,
+        side: cos >= 0 ? "right" : "left",
+        isSmall: p < PIE_LABEL_THRESHOLD,
+      };
+    });
+    // 同じ側に集まる小スライスを naturalY 昇順ソート → minGap で押し下げ。
+    const adjustSide = (sideItems) => {
+      sideItems.sort((a, b) => a.naturalYOffset - b.naturalYOffset);
+      for (let i = 0; i < sideItems.length; i++) {
+        if (i === 0) {
+          sideItems[i].finalYOffset = sideItems[i].naturalYOffset;
+        } else {
+          const minAllowed = sideItems[i - 1].finalYOffset + PIE_LABEL_GAP;
+          sideItems[i].finalYOffset = Math.max(sideItems[i].naturalYOffset, minAllowed);
+        }
+      }
+    };
+    const rightSmall = items.filter((it) => it.isSmall && it.side === "right");
+    const leftSmall  = items.filter((it) => it.isSmall && it.side === "left");
+    adjustSide(rightSmall);
+    adjustSide(leftSmall);
+    const map = {};
+    for (const it of [...rightSmall, ...leftSmall]) {
+      map[it.index] = { side: it.side, finalYOffset: it.finalYOffset };
+    }
+    return map;
+  }, [catBreakdown]);
 
   // yearlyData:12 サイクル(各カレンダー月起点)を独立に集計。
   // 報酬日 25 なら 5月分 = 5/25-6/24 のように、隣接サイクルが同じ取引を重複カウントしないよう
@@ -1589,10 +1643,10 @@ export default function App() {
                   <PieChart>
                     <Pie
                       data={catBreakdown} cx="50%" cy="50%" innerRadius={50} outerRadius={90} dataKey="value" labelLine={false}
-                      label={({cx,cy,midAngle,innerRadius,outerRadius,name,percent,fill})=>{
+                      label={({cx,cy,midAngle,innerRadius,outerRadius,name,percent,fill,index})=>{
                         const RADIAN=Math.PI/180;
                         const pctInt=Math.round(percent*100);
-                        // 中サイズ以上: リング内側に従来どおり重ね描画
+                        // 中サイズ以上: リング内側に従来どおり重ね描画 (補正対象外)
                         if(percent>=0.08){
                           const r=innerRadius+(outerRadius-innerRadius)*0.5;
                           const x=cx+r*Math.cos(-midAngle*RADIAN);
@@ -1604,21 +1658,29 @@ export default function App() {
                             </g>
                           );
                         }
-                        // 小サイズ: スライス外縁からリーダーライン → 外側ラベル
+                        // 小サイズ: スライス外縁からリーダーライン → 外側ラベル。
+                        // タスクB (2026-06-07): catLabelLayout から事前計算済の finalYOffset / side を取得し、
+                        //   小スライス同士の y 衝突を minGap=18px で押し下げて回避する。引き出し線は
+                        //   sx,sy (スライス外周) → bx,finalY (押し下げ後の屈曲点) → ex,finalY (水平延長) の
+                        //   2 線分で構成。屈曲点 x は元の (outerRadius+8)*cos に合わせ、押し下げで生じた
+                        //   オフセットは最初の線分の斜めで吸収。textAnchor は side で振り分け。
                         const cos=Math.cos(-midAngle*RADIAN);
                         const sin=Math.sin(-midAngle*RADIAN);
                         const sx=cx+outerRadius*cos;
                         const sy=cy+outerRadius*sin;
-                        const mx=cx+(outerRadius+8)*cos;
-                        const my=cy+(outerRadius+8)*sin;
-                        const ex=mx+(cos>=0?1:-1)*10;
-                        const ey=my;
-                        const textAnchor=cos>=0?'start':'end';
-                        const tx=ex+(cos>=0?3:-3);
+                        const layout=catLabelLayout?.[index];
+                        const side=layout?layout.side:(cos>=0?'right':'left');
+                        const finalY=layout?(cy+layout.finalYOffset):(cy+(outerRadius+8)*sin);
+                        const dirSign=side==='right'?1:-1;
+                        const bx=cx+(outerRadius+8)*cos;   // 屈曲点 x (元の natural x、押し下げで y のみ動く)
+                        const ex=bx+dirSign*10;             // ラベルアンカー x (さらに水平に 10px 延長)
+                        const ey=finalY;
+                        const textAnchor=side==='right'?'start':'end';
+                        const tx=ex+dirSign*3;
                         const lineColor=fill||TEXT_MUTED;
                         return(
                           <g>
-                            <path d={`M${sx},${sy}L${mx},${my}L${ex},${ey}`} stroke={lineColor} strokeWidth={1} fill="none" opacity={0.7}/>
+                            <path d={`M${sx},${sy}L${bx},${finalY}L${ex},${ey}`} stroke={lineColor} strokeWidth={1} fill="none" opacity={0.7}/>
                             <circle cx={ex} cy={ey} r={1.5} fill={lineColor}/>
                             <text x={tx} y={ey} fill={TEXT_PRIMARY} textAnchor={textAnchor} dominantBaseline="central" fontSize={10} fontWeight={600}>{(name.length>4?name.slice(0,4):name)} {pctInt}%</text>
                           </g>
