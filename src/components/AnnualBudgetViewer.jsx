@@ -659,6 +659,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   const fyYear = Number(data.fiscal_year) || new Date().getFullYear();
   const msd = getManagementStartDay();
   const todayStr = toDateStr(new Date());
+  // タスクE (2026-06-08): 現在進行中の管理サイクル月 (calendar 1-12)。
+  //   thead の月列ヘッダで黄色ハイライトに使う (IIFE 内 L1108 の同名と等価、ここに hoist)。
+  //   msd null フォールバック: findCycleOfDate(date, null) は 1 日起点で today の calendar 月を返す。
+  const currentCycleMonth = findCycleOfDate(new Date(), msd).month + 1;
   const sortedLines = [...lines].sort(
     (a, b) => (Number(a?.display_order) || 0) - (Number(b?.display_order) || 0),
   );
@@ -1375,17 +1379,22 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               <th style={{ ...headCellStyle, ...stickyBase, background: NAVY3, ...labelWrapStyle, borderLeft: 'none' }}>カテゴリ</th>
               {monthOrder.map((m) => {
                 const sel = m === selectedMonth;
+                // タスクE (2026-06-08): 現在進行中の管理サイクル月を明るい黄色でハイライト。
+                //   優先順: isCurrent > sel(selectedMonth GOLD22) > NAVY3 (デフォルト)。
+                //   #FFD60055 = 明るい黄色 (selectedMonth GOLD22 と区別、文字色 RED/BLUE は不変)。
+                const isCurrent = m === currentCycleMonth;
                 // P4-赤青枠撤去: 月見出しの border (赤/青) を撤去。文字色は確定=RED/未確定=BLUE で
                 //   識別性を残しつつ、外枠は headCellStyle の borderBottom (BORDER グレー) に統一。
                 //   選択ハイライト (GOLD背景) は確定/未確定どちらでも上から重ねる。
+                const bgColor = isCurrent ? '#FFD60055' : (sel ? `${GOLD}22` : NAVY3);
                 const thStyle = isMonthSettled(m)
-                  ? { ...headCellStyle, color: RED,
-                      background: sel ? `${GOLD}22` : NAVY3 }
-                  : { ...headCellStyle, color: BUDGET_BLUE,
-                      background: sel ? `${GOLD}22` : NAVY3 };
+                  ? { ...headCellStyle, color: RED,         background: bgColor }
+                  : { ...headCellStyle, color: BUDGET_BLUE, background: bgColor };
                 return (
                   <th key={m} ref={(el) => { monthThRefs.current[m] = el; }} style={thStyle}
-                    title={isMonthSettled(m) ? "この月は確定済 (凍結実測)" : "この月は未確定 (予算扱い)"}
+                    title={isCurrent
+                      ? "この月は現在進行中の管理サイクル月"
+                      : (isMonthSettled(m) ? "この月は確定済 (凍結実測)" : "この月は未確定 (予算扱い)")}
                   >{m}月</th>
                 );
               })}
