@@ -1279,17 +1279,20 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 既存バーラッパの marginBottom:4 は外側 flex に移管。バー本体・進捗計算・▼マーカー・月境界・月軸は無改修。
                 色はハードコードせず予算=BUDGET_BLUE、現進捗=isRed?RED:GOLD でバーと同期。 */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              {/* タスクF 微調整 (2026-06-08): ラベル列を棒ラッパと同じ縦構造に作り直す。
+                  棒の実値 (青棒 height:6 + marginBottom:3 + 赤棒 height:6 = 総高 15) を
+                  ハードコード値ではなく行構造でミラー: 行(6) / gap(3) / 行(6)。
+                  各行内は display:flex, alignItems:center で text 中心を行中心に固定 →
+                  ラベル中心が棒中心 (y=3 / y=12) に一致する。 */}
               <div style={{
                 width: 40,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                height: 15,
                 fontSize: 10,
+                lineHeight: 1,
                 whiteSpace: 'nowrap',
               }}>
-                <div style={{ color: BUDGET_BLUE }}>予算</div>
-                <div style={{ color: isRed ? RED : GOLD }}>現進捗</div>
+                <div style={{ height: 6, display: 'flex', alignItems: 'center', color: BUDGET_BLUE }}>予算</div>
+                <div style={{ height: 3 }} />
+                <div style={{ height: 6, display: 'flex', alignItems: 'center', color: isRed ? RED : GOLD }}>現進捗</div>
               </div>
             <div style={{
               position: 'relative',
