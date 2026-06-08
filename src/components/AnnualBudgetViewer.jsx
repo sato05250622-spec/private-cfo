@@ -1207,11 +1207,20 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           .slice(0, selectedMonthIdx + 1)
           .reduce((s, m, i) => {
             if (i < currentMonthIdx) return s + (monthlyBudget[m] || 0);
-            if (i === currentMonthIdx) return s + (monthlyBudget[m] || 0) * ((currentCycleWeek - 1) / totalWeeksInMonth);
+            if (i === currentMonthIdx) return s + currentMonthPartialBudget;
             return s;
           }, 0);
+        // タスク (方式B 2026-06-08): 予算バー右端をカレンダー(月+週)基準にスナップ。
+        //   過去月選択 → 月末(= (selectedMonthIdx+1)/12)
+        //   現在月以降選択 → 現在月+週進捗((currentMonthIdx + (currentCycleWeek-1)/totalWeeksInMonth)/12)
+        //   cumBudgetToSelected / cumBudgetToCurrent は色判定 (isOverPace) 等で参照されるため残置 (未使用化しない)。
         const budgetPct = annualTargetTotal > 0
-          ? Math.min((cumBudgetToSelected / annualTargetTotal) * 100, 100)
+          ? Math.min(
+              (selectedMonthIdx < currentMonthIdx)
+                ? ((selectedMonthIdx + 1) / 12) * 100
+                : ((currentMonthIdx + (currentCycleWeek - 1) / totalWeeksInMonth) / 12) * 100,
+              100
+            )
           : 0;
         // Step2 (金バー週刻み): 今月サイクル内の生 expenses から
         //   「今月 cycle 開始日〜今日」の実支出を合算 → settledCum に足して金バー長を進める。
