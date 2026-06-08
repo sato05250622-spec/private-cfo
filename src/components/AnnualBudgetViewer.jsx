@@ -1372,6 +1372,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             <div style={{ display: 'flex', paddingTop: 12, position: 'relative', flex: 1 }}>
               {monthOrder.map((m, i) => {
                 const isCurrent = m === currentCycleMonth;
+                // タスク (2026-06-08): 月軸ラベルは数字のみ、先頭と末尾だけ「○月」を付ける。
+                //   2桁月 (10-12) で「月」が下に折り返さないよう whiteSpace:nowrap を併用。
+                const isEdge = i === 0 || i === monthOrder.length - 1;
                 return (
                   <div key={m} style={{
                     position: 'relative', flex: 1, textAlign: 'center',
@@ -1379,6 +1382,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                     color: isCurrent ? GOLD : TEXT_SECONDARY,
                     fontWeight: isCurrent ? 700 : 400,
                     borderLeft: i === 0 ? 'none' : `1px solid ${GOLD}40`,
+                    whiteSpace: 'nowrap',
                   }}>
                     {isCurrent && (
                       <div style={{
@@ -1387,7 +1391,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                         fontSize: 9, color: GOLD, lineHeight: 1,
                       }}>▼</div>
                     )}
-                    {m}月
+                    {isEdge ? `${m}月` : `${m}`}
                   </div>
                 );
               })}
