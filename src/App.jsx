@@ -1898,7 +1898,7 @@ export default function App() {
                       cursor={{stroke:`${GOLD}33`,strokeWidth:1}}
                     />
                     <Area
-                      type="monotone"
+                      type="linear"
                       dataKey="expense"
                       stroke={GOLD}
                       strokeWidth={2.5}
