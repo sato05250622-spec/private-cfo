@@ -1218,7 +1218,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           ? Math.min(
               (selectedMonthIdx < currentMonthIdx)
                 ? ((selectedMonthIdx + 1) / 12) * 100
-                : ((currentMonthIdx + (currentCycleWeek - 1) / totalWeeksInMonth) / 12) * 100,
+                : ((currentMonthIdx + currentCycleWeek / totalWeeksInMonth) / 12) * 100,
               100
             )
           : 0;
