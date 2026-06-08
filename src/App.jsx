@@ -1970,7 +1970,7 @@ export default function App() {
                 const barColor = isCurrentMonth ? GOLD : isOver ? RED : "#2196F3";
                 return(
                   <div key={i} style={{display:"flex",alignItems:"center",padding:"10px 20px",borderBottom:`1px solid ${BORDER}`,background:isCurrentMonth?`${GOLD}0A`:CARD_BG}}>
-                    <span style={{fontSize:13,fontWeight:isCurrentMonth?700:400,color:isCurrentMonth?GOLD:TEXT_PRIMARY,minWidth:40}}>{i+1}月</span>
+                    <span style={{fontSize:13,fontWeight:isCurrentMonth?700:400,color:isCurrentMonth?GOLD:TEXT_PRIMARY,minWidth:40}}>{d.name}</span>
                     <div style={{flex:1,height:3,background:"rgba(255,255,255,0.07)",borderRadius:2,overflow:"hidden",margin:"0 12px"}}>
                       {d.expense>0&&<div style={{height:"100%",width:`${Math.round(d.expense/Math.max(...yearlyData.map(x=>x.expense),1)*100)}%`,background:barColor,borderRadius:2}}/>}
                     </div>
