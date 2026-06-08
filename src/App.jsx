@@ -331,14 +331,14 @@ export default function App() {
   const PLAN_GATE_MSG = '本機能は、Monthlyプラン以上をご契約のお客様よりご利用いただけます。';
   const [featureLockedToast, setFeatureLockedToast] = useState(null);
   const featureLockedToastTimer = useRef(null);
-  const showFeatureLockedToast = () => {
-    setFeatureLockedToast(PLAN_GATE_MSG);
+  const showFeatureLockedToast = (msg = PLAN_GATE_MSG) => {
+    setFeatureLockedToast(msg);
     if (featureLockedToastTimer.current) clearTimeout(featureLockedToastTimer.current);
     featureLockedToastTimer.current = setTimeout(() => setFeatureLockedToast(null), 3500);
   };
-  const requestFeature = (flag, action) => {
+  const requestFeature = (flag, action, lockedMsg = PLAN_GATE_MSG) => {
     if (flag) action();
-    else showFeatureLockedToast();
+    else showFeatureLockedToast(lockedMsg);
   };
   // Step B ④: 予算オーバートースト。addTransaction 成功後、当該カテゴリが
   // 「ちょうど over に乗った」瞬間 (spentOld < budget && spentNew >= budget) だけ発火。
@@ -2714,7 +2714,7 @@ export default function App() {
 
     const menuGroups=[[
       {icon:"📊",label:"レポート"+(reportEnabled?"":" 🔒"),action:()=>requestFeature(reportEnabled, ()=>setMenuScreen("currentMonthReport"))},
-      {icon:"📈",label:"資産残高繰越票"+(assetSheetEnabled?"":" 🔒"),action:()=>requestFeature(assetSheetEnabled, ()=>setMenuScreen("assetSheet"))},
+      {icon:"📈",label:"資産残高繰越票"+(assetSheetEnabled?"":" 🔒"),action:()=>requestFeature(assetSheetEnabled, ()=>setMenuScreen("assetSheet"), '本機能は、追加プランをご契約いただくことでご利用いただけます。')},
       {icon:"🤝",label:"面談予定"+(meetingEnabled?"":" 🔒"),subLabel:(meetingEnabled && nextAppointment) ? fmtDateTime(nextAppointment.scheduledAt) : '',action:()=>requestFeature(meetingEnabled, ()=>setMenuScreen("appointment"))},
     ]];
     const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"固定費"+(fixedCostsEnabled?"":" 🔒"),action:()=>requestFeature(fixedCostsEnabled, ()=>setMenuScreen("loanSetting"))}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
