@@ -9,7 +9,8 @@ import { useNextAppointment } from '../hooks/useAppointments';
 const JA_WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
 // ISO → "YYYY/MM/DD(曜) HH:mm" 表示
-function fmtDateTime(iso) {
+// タスク (2026-06-08): App.jsx メニュー「面談予定」行のサブ日時表示でも再利用するため export。
+export function fmtDateTime(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   const y = d.getFullYear();

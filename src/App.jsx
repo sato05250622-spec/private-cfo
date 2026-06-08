@@ -26,7 +26,8 @@ import { usePaymentMethods } from "./hooks/usePaymentMethods";
 import { useLoans } from "./hooks/useLoans";
 import { usePoints } from "./hooks/usePoints";
 import LogoutButton from "./components/LogoutButton";
-import AppointmentCard from "./components/AppointmentCard";
+import AppointmentCard, { fmtDateTime } from "./components/AppointmentCard";
+import { useNextAppointment } from "./hooks/useAppointments";
 import SortableCategoryRow from "./components/SortableCategoryRow";
 import SortablePaymentRow from "./components/SortablePaymentRow";
 import AnnualBudgetViewer from "./components/AnnualBudgetViewer";
@@ -442,6 +443,10 @@ export default function App() {
   // 完了後に refetchPaymentMethods / refetchLoans で UI を最新 DB 状態へ同期。
   const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled, fixedCostsEnabled, utilizationEnabled, categoryAddEnabled, cardLimit, assetSheetEnabled } = useAuth();
   const authUserId = authUser?.id ?? null;
+  // タスク (2026-06-08): メニュー「面談予定」行に次回面談日時を read-only 表示するため、
+  //   詳細画面 AppointmentCard と同じ useNextAppointment を top-level で 1 回購読する。
+  //   loading/エラーは UI 上「日時 or 空」で吸収 (subLabel 空表示)。
+  const { appointment: nextAppointment } = useNextAppointment();
   // 繰越票 (annual_budgets) の committed snapshot を購読。月間サマリーの「月の予算」を
   // HQ が決めた monthly_budget と連動させる (getCarryoverMonthBudget 経由)。
   // AnnualBudgetViewer も別途同フックを使うが、ここは消費者を増やすだけ (Viewer 側は不変)。
@@ -2710,7 +2715,7 @@ export default function App() {
     const menuGroups=[[
       {icon:"📊",label:"レポート"+(reportEnabled?"":" 🔒"),action:()=>requestFeature(reportEnabled, ()=>setMenuScreen("currentMonthReport"))},
       {icon:"📈",label:"資産残高繰越票"+(assetSheetEnabled?"":" 🔒"),action:()=>requestFeature(assetSheetEnabled, ()=>setMenuScreen("assetSheet"))},
-      {icon:"🤝",label:"面談予定"+(meetingEnabled?"":" 🔒"),action:()=>requestFeature(meetingEnabled, ()=>setMenuScreen("appointment"))},
+      {icon:"🤝",label:"面談予定"+(meetingEnabled?"":" 🔒"),subLabel:(meetingEnabled && nextAppointment) ? fmtDateTime(nextAppointment.scheduledAt) : '',action:()=>requestFeature(meetingEnabled, ()=>setMenuScreen("appointment"))},
     ]];
     const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"固定費"+(fixedCostsEnabled?"":" 🔒"),action:()=>requestFeature(fixedCostsEnabled, ()=>setMenuScreen("loanSetting"))}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
 
@@ -2719,7 +2724,7 @@ export default function App() {
         <div style={{padding:"14px 18px",background:NAVY2,display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${BORDER}`}}><span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>メニュー</span></div>
         {menuGroups.map((group,gi)=>(
           <div key={gi} style={{background:CARD_BG,borderRadius:12,margin:"12px 16px 0",overflow:"hidden"}}>
-            {group.map((item,i)=>(<div key={i} onClick={item.action} style={{...S.menuItem,borderBottom:i<group.length-1?`1px solid ${BORDER}`:"none"}}><span style={{fontSize:18,color:GOLD}}>{item.icon}</span><span style={{flex:1,fontSize:13,fontWeight:500,color:TEXT_PRIMARY}}>{item.label}</span><span style={{color:TEXT_MUTED}}>›</span></div>))}
+            {group.map((item,i)=>(<div key={i} onClick={item.action} style={{...S.menuItem,borderBottom:i<group.length-1?`1px solid ${BORDER}`:"none"}}><span style={{fontSize:18,color:GOLD}}>{item.icon}</span><span style={{flex:1,fontSize:13,fontWeight:500,color:TEXT_PRIMARY}}>{item.label}</span>{item.subLabel?<span style={{fontSize:12,color:TEXT_MUTED,marginRight:8,whiteSpace:"nowrap"}}>{item.subLabel}</span>:null}<span style={{color:TEXT_MUTED}}>›</span></div>))}
           </div>
         ))}
         <div style={{padding:"20px 16px 8px"}}><span style={{fontSize:12,fontWeight:700,color:TEXT_MUTED,letterSpacing:"0.08em"}}>設定</span></div>
