@@ -451,6 +451,18 @@ export default function App() {
   // HQ が決めた monthly_budget と連動させる (getCarryoverMonthBudget 経由)。
   // AnnualBudgetViewer も別途同フックを使うが、ここは消費者を増やすだけ (Viewer 側は不変)。
   const { data: carryoverBudget } = useAnnualBudgets(authUserId);
+  // 2026-06-08 ②: 初回のみ reportYear を「今いる年度の起点暦年」へ合わせる。
+  //   例) startMonth=4・today=2026-02 → 年度起点は 2025 (2025年4月〜2026年3月)。
+  //   ユーザーが年ナビを動かした後は上書きしない (didInitReportYear で guard)。
+  const didInitReportYear = useRef(false);
+  useEffect(() => {
+    if (didInitReportYear.current) return;
+    if (carryoverBudget?.fiscal_year_start_month == null) return;
+    const sm = Number(carryoverBudget.fiscal_year_start_month) || 1;
+    const now = new Date();
+    setReportYear((now.getMonth() + 1) >= sm ? now.getFullYear() : now.getFullYear() - 1);
+    didInitReportYear.current = true;
+  }, [carryoverBudget]);
   const paymentsLoansMigrationStartedRef = useRef(false);
   useEffect(() => {
     if (!authUserId) return;
@@ -800,14 +812,22 @@ export default function App() {
   // yearlyData:12 サイクル(各カレンダー月起点)を独立に集計。
   // 報酬日 25 なら 5月分 = 5/25-6/24 のように、隣接サイクルが同じ取引を重複カウントしないよう
   // 各サイクル range で個別 filter する。
-  const yearlyData = useMemo(() => Array.from({length: 12}, (_, m) => {
-    const sStr = toDateStr(cycleStart(reportYear, m, managementStartDay));
-    const eStr = toDateStr(cycleEnd(reportYear, m, managementStartDay));
-    return {
-      name: `${m + 1}月`,
-      expense: transactions.filter(t => t.date >= sStr && t.date <= eStr).reduce((s, t) => s + t.amount, 0),
-    };
-  }), [transactions, reportYear, managementStartDay]);
+  // 2026-06-08 ②: 会計年度開始月 (carryoverBudget.fiscal_year_start_month) で並び替え、
+  //   開始月より前の月 (例 startMonth=4 のとき 1〜3 月) は翌暦年 (reportYear+1) で集計。
+  //   各要素に month/year を保持し、現在月ハイライト・予算キーの組立に再利用する。
+  const startMonth = Number(carryoverBudget?.fiscal_year_start_month) || 1;
+  const yearlyData = useMemo(() => {
+    const monthOrder = Array.from({length:12}, (_, i) => ((startMonth - 1 + i) % 12) + 1);
+    return monthOrder.map((m) => {
+      const yr = m >= startMonth ? reportYear : reportYear + 1;
+      const sStr = toDateStr(cycleStart(yr, m - 1, managementStartDay));
+      const eStr = toDateStr(cycleEnd(yr, m - 1, managementStartDay));
+      return {
+        name: `${m}月`, month: m, year: yr,
+        expense: transactions.filter(t => t.date >= sStr && t.date <= eStr).reduce((s, t) => s + t.amount, 0),
+      };
+    });
+  }, [transactions, reportYear, managementStartDay, startMonth]);
   // #4 数字ずれ修正: 年間合計支出 standalone 表示を削除したため yearlyTotal も廃止。
   // 残った yearlyData は AreaChart / 月別バー (L1717,L1788,L1804) で引き続き使用。
 
@@ -1905,7 +1925,7 @@ export default function App() {
                       fill="url(#goldGrad)"
                       dot={(props)=>{
                         const {cx,cy,payload,index}=props;
-                        const isCurrentMonth = index===today.getMonth()&&reportYear===today.getFullYear();
+                        const isCurrentMonth = payload.month===(today.getMonth()+1)&&payload.year===today.getFullYear();
                         const hasData = payload.expense > 0;
                         if(!hasData) return <circle key={index} cx={cx} cy={cy} r={2} fill="rgba(212,168,67,0.2)" stroke="none"/>;
                         return(
@@ -1937,11 +1957,11 @@ export default function App() {
             <div style={{background:CARD_BG,padding:"14px 0"}}>
               <div style={{padding:"0 20px 10px",fontSize:12,fontWeight:700,color:TEXT_PRIMARY}}>月別支出</div>
               {yearlyData.map((d,i)=>{
-                const isCurrentMonth = i===today.getMonth()&&reportYear===today.getFullYear();
+                const isCurrentMonth = d.month===(today.getMonth()+1)&&d.year===today.getFullYear();
                 // その月の総予算を計算
                 const monthBudget = expenseCats.reduce((total,cat)=>{
-                  const directBudget = budgets[`${reportYear}-${i+1}-${cat.id}`] || 0;
-                  const weeklyBudgetSum = [1,2,3,4].reduce((s,wn)=>s+(weekCatBudgets[`${reportYear}-${i+1}-w${wn}_${cat.id}`]||0),0);
+                  const directBudget = budgets[`${d.year}-${d.month}-${cat.id}`] || 0;
+                  const weeklyBudgetSum = [1,2,3,4].reduce((s,wn)=>s+(weekCatBudgets[`${d.year}-${d.month}-w${wn}_${cat.id}`]||0),0);
                   return total + (directBudget>0 ? directBudget : weeklyBudgetSum);
                 }, 0);
                 const isOver = monthBudget>0 && d.expense>monthBudget;
