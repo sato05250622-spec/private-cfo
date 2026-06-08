@@ -1207,7 +1207,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           .slice(0, selectedMonthIdx + 1)
           .reduce((s, m, i) => {
             if (i < currentMonthIdx) return s + (monthlyBudget[m] || 0);
-            if (i === currentMonthIdx) return s + currentMonthPartialBudget;
+            if (i === currentMonthIdx) return s + (monthlyBudget[m] || 0) * ((currentCycleWeek - 1) / totalWeeksInMonth);
             return s;
           }, 0);
         const budgetPct = annualTargetTotal > 0
