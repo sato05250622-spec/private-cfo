@@ -1210,33 +1210,24 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             if (i === currentMonthIdx) return s + currentMonthPartialBudget;
             return s;
           }, 0);
-        // タスク③ (2026-06-10): 青バーを金額累計ベースに戻し、100%超を許容 (clamp 撤去)。
-        //   分子 = cumBudgetToSelected (過去月満額 + 当月は週単位 partial、固定費は1週目から月額満額)。
-        //   分母 = annualTargetTotal (Σ summaryBudget)。100%超で物理的にトラック右端からはみ出す。
+        // タスク④ (2026-06-10): 青バーを「確定済み月のみ」の予算累計に統一。
+        //   未確定の当月分 (週単位 partial) や未確定の過去月分は含めない。
+        //   分子 = Σ {m が確定済} monthlyBudget[m] (固定費月額 + カテゴリ週Σ + 特殊行 tv/12 を月別合算済)。
+        //   分母 = annualTargetTotal (Σ summaryBudget)。100% clamp なし、100%超で物理的にはみ出す。
+        //   cumBudgetToSelected は (週単位 partial を含むため使わず) 残置。
+        const settledOnlyBudget = monthOrder
+          .filter((m) => isMonthSettled(m))
+          .reduce((s, m) => s + (monthlyBudget[m] || 0), 0);
         const budgetPct = annualTargetTotal > 0
-          ? (cumBudgetToSelected / annualTargetTotal) * 100
+          ? (settledOnlyBudget / annualTargetTotal) * 100
           : 0;
-        // Step2 (金バー週刻み): 今月サイクル内の生 expenses から
-        //   「今月 cycle 開始日〜今日」の実支出を合算 → settledCum に足して金バー長を進める。
-        //   - 現在月が確定済 (isMonthSettled) のときは monthly_spent[currentMonth] が
-        //     既に settledCum に含まれているため二重計上回避で加算しない (_addCurMonth=false)。
-        //   - liveExpenses は loading 中 [] のことがあるが、`for-of (...||[])` で安全。
-        //   - 数字表示 (¥settledCum) は触らない (snapshot 由来の確定月のみで明示)。
-        const _cycleStartDate = _cyc.startDate;
-        let currentMonthSpentToToday = 0;
-        for (const e of (liveExpenses || [])) {
-          if (!e?.date) continue;
-          const d = new Date(e.date);
-          if (Number.isNaN(d.getTime())) continue;
-          if (d >= _cycleStartDate && d <= _today) {
-            currentMonthSpentToToday += Number(e.amount) || 0;
-          }
-        }
-        const _addCurMonth = !isMonthSettled(currentCycleMonth);
-        const settledCumForBar = settledCum + (_addCurMonth ? currentMonthSpentToToday : 0);
-        // 金バー幅は settledCumForBar 基準。色判定は settledCumForBar vs cumBudgetToSelected で
-        //   青(週単位 partial)と追っかけっこできる。overflow は annualTargetTotal を超えたら依然 RED。
-        const isOverPace = settledCumForBar > cumBudgetToSelected;
+        // タスク④ (2026-06-10): 金バーも「確定月の実測累計のみ」に統一。未確定の今月ライブ分は加算しない。
+        //   旧: settledCum + (今月未確定なら liveExpenses 累積) → 未確定今月分が混在
+        //   新: settledCum そのまま → 確定月だけで一貫
+        //   色判定 (isOverPace) も「確定実測 vs 確定予算 (settledOnlyBudget)」で揃え、
+        //   バー長さ・色のどちらにもライブ今月分が混ざらないようにする。
+        const settledCumForBar = settledCum;
+        const isOverPace = settledCumForBar > settledOnlyBudget;
         const overflowForBar = annualTargetTotal > 0 && settledCumForBar > annualTargetTotal;
         const isRed = overflowForBar || isOverPace;
         const barGrad = isRed
