@@ -191,7 +191,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   const [fiscalYears, setFiscalYears] = useState([]);
   const { data, loading, error } = useAnnualBudgets(clientId, selectedYear);
   // 修正2(b): 繰越票の月ダイヤル。選択月 (初期=当月) の列へ横スクロール＆ハイライト。
-  const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1);
+  const [selectedMonth, setSelectedMonth] = useState(() => findCycleOfDate(new Date(), getManagementStartDay()).month + 1);
   // 固定費合計 / 変動費合計 の独立アコーディオン state (画面表示のみ。PDF/合計計算には影響しない)。
   //   subtotal 行をホストにして三角トグルで配下の内訳行 (固定費=loans/変動費=カテゴリ+特殊) を開閉。
   const [fixedCollapsed, setFixedCollapsed] = useState(false);
