@@ -1210,17 +1210,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             if (i === currentMonthIdx) return s + currentMonthPartialBudget;
             return s;
           }, 0);
-        // タスク (方式B 2026-06-08): 予算バー右端をカレンダー(月+週)基準にスナップ。
-        //   過去月選択 → 月末(= (selectedMonthIdx+1)/12)
-        //   現在月以降選択 → 現在月+週進捗((currentMonthIdx + (currentCycleWeek-1)/totalWeeksInMonth)/12)
-        //   cumBudgetToSelected / cumBudgetToCurrent は色判定 (isOverPace) 等で参照されるため残置 (未使用化しない)。
+        // タスク③ (2026-06-10): 青バーを金額累計ベースに戻し、100%超を許容 (clamp 撤去)。
+        //   分子 = cumBudgetToSelected (過去月満額 + 当月は週単位 partial、固定費は1週目から月額満額)。
+        //   分母 = annualTargetTotal (Σ summaryBudget)。100%超で物理的にトラック右端からはみ出す。
         const budgetPct = annualTargetTotal > 0
-          ? Math.min(
-              (selectedMonthIdx < currentMonthIdx)
-                ? ((selectedMonthIdx + 1) / 12) * 100
-                : ((currentMonthIdx + currentCycleWeek / totalWeeksInMonth) / 12) * 100,
-              100
-            )
+          ? (cumBudgetToSelected / annualTargetTotal) * 100
           : 0;
         // Step2 (金バー週刻み): 今月サイクル内の生 expenses から
         //   「今月 cycle 開始日〜今日」の実支出を合算 → settledCum に足して金バー長を進める。
@@ -1251,8 +1245,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         // #2 (2026-06-03): 単一 fill % (= settledCumForBar / annualTargetTotal)。
         //   旧 s2Pct (未確定セグメント) は廃止 — 薄ブルー全幅土台 (L2) で年間予算満額を可視化する方針に変更。
         //   背景の残り (100-pct)% は薄ブルー土台が露出し、未消化分として可視化される。
+        // タスク③ (2026-06-10): 100% clamp 撤去。100%超で物理的にトラック右端からはみ出す。
         const s1Pct = annualTargetTotal > 0
-          ? Math.min((settledCumForBar / annualTargetTotal) * 100, 100)
+          ? (settledCumForBar / annualTargetTotal) * 100
           : 0;
         return (
           <div style={{
@@ -1312,7 +1307,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   予算棒の右端も移動する。annualTargetTotal>0 のときだけ青 fill を出す。 */}
               <div style={{
                 width: '100%', height: 6, borderRadius: 3,
-                background: NAVY3, overflow: 'hidden', marginBottom: 3,
+                background: NAVY3, overflow: 'visible', marginBottom: 3,
               }}>
                 {annualTargetTotal > 0 && (
                   <div style={{
@@ -1323,10 +1318,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 )}
               </div>
               {/* 下段: 実測棒 (GOLD or RED fill 幅 s1Pct%)。
-                  未到達部分は NAVY3 の container 背景が露出する。 */}
+                  未到達部分は NAVY3 の container 背景が露出する。
+                  タスク③ (2026-06-10): overflow:visible に変更し 100%超で物理的にはみ出す。 */}
               <div style={{
                 width: '100%', height: 6, borderRadius: 3,
-                background: NAVY3, overflow: 'hidden',
+                background: NAVY3, overflow: 'visible',
               }}>
                 {annualTargetTotal > 0 && s1Pct > 0 && (
                   <div style={{
