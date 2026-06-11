@@ -1,36 +1,44 @@
 // =============================================================
-// AssetSheetViewer — 資産残高繰越票 (顧客アプリ・read-only)
-// Phase B-3 (2026-06-07)
+// AssetSheetViewer — 資産残高繰越票 (顧客アプリ)
+// Phase 2-4a (2026-06-11): 全面書換え。
 //
-// admin AssetSheetTab (src/pages/AssetSheetTab.jsx) の表構造を read-only で再現。
+// 変更点 (Phase B-3 → 2-4a):
+//   - 描画ロジックを admin AssetSheetTab.jsx (1-D-3g) と同等の 4 行
+//     テーブルへ刷新 (初期資産行=月見出し兼用 / 本収入 / 支出合計 / 累計残高)
+//   - 計算を computeAssetSheet (src/utils/assetSheet.js, Phase 2-1 移植) に統一。
+//     旧 computeAssetBalance / sumIncomeForMonth / sumExpenseForMonth 経路は撤去。
+//   - データソースを committed_* (snapshot) から live (income_lines / lines /
+//     profiles.initial_asset) に切替え (Phase 2-2a/b で hook が live read 拡張済)。
+//   - 「準備中」ゲートを撤去 (incomeCommittedAt 判定を廃止)。常にシートを描画する。
+//   - 年度セレクタ (◀ {currentYear}年度 ▶) を内部 state で実装。
+//   - グラフ (累計残高推移 LineChart) はこのサブステップでは未実装 (Phase 2-4b で追加予定)。
+//   - 編集 UI / writer setter 結線は read-only (Phase 2-4c で hook setter に結線予定)。
+//
 // データソース:
-//   - 収入        : annual_budgets.committed_income_lines (admin commitIncomeSnapshot で焼かれた snapshot)
-//   - 支出 (Σ)    : annual_budgets.committed_lines (admin commitBudgetSnapshot で焼かれた snapshot)
-//   - 初期資産     : profiles.initial_asset (AuthContext.initialAsset 経由)
+//   - 本収入        : annual_budgets.income_lines  (live, hook 経由 data.incomeLines)
+//   - 支出 (Σ)      : annual_budgets.lines        (live, hook 経由 data.lines。月キーは
+//                                                  jsonb {1..12} 暦月、computeAssetSheet 側で
+//                                                  fiscal idx→暦月変換)
+//   - 初期資産       : profiles.initial_asset      (AuthContext.initialAsset 経由)
 //
-// 「準備中」ゲート:
-//   loading                             → 「読み込み中…」
-//   error/data 無し/incomeCommittedAt 無し/committedIncomeLines 空 → 「資産残高繰越票は本部からの反映待ちです」
-//   else                                → 本体描画
-//
-// テーマ: @shared/theme (顧客アプリ共通)。admin の繰越票専用色とは別系統。
+// 受け取り props 契約 (App.jsx 2425 から維持):
+//   { clientId }  ← それ以外の props は追加しない (新規 props が必要なら別 PR)。
 // =============================================================
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import { useAuth } from "../context/AuthContext";
-import { computeAssetBalance, sumIncomeForMonth, sumExpenseForMonth } from "../utils/assetSheet";
+import { computeAssetSheet } from "../utils/assetSheet";
 import {
-  GOLD, NAVY2, CARD_BG, BORDER, RED, TEAL,
+  GOLD, NAVY2, NAVY3, CARD_BG, BORDER, RED,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 } from "@shared/theme";
 
-// 緑色 (収入/累計残高 正値の強調)。
+// ローカル色定数 (@shared/theme は BLUE=TEAL なので、admin の予算系 BLUE と
+// 別物としてローカル定義。admin AssetSheetTab.jsx の BUDGET_BLUE と同値)。
+const BUDGET_BLUE = "#5BA8FF";
 const GREEN = "#43A047";
-// 予算系青 (admin AssetSheetTab に合わせる目標列の色)。
-const BLUE = "#5BA8FF";
 
-// ── 共通ヘルパ ──────────────────────────────────────
-const fmtY = (n) => (n == null ? "" : `¥${Number(n).toLocaleString("ja-JP")}`);
+// ── 共通ヘルパ (admin AssetSheetTab.jsx と完全同形) ─────
 const fmtN = (n) => (n == null ? "" : Number(n).toLocaleString("ja-JP"));
 const cellFontSize = (text) => {
   const len = String(text ?? "").length;
@@ -43,329 +51,286 @@ function monthsFromStart(startMonth) {
   for (let i = 0; i < 12; i++) out.push(((s - 1 + i) % 12) + 1);
   return out;
 }
-function fmtDateTime(iso) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// ── ステータスカード (AnnualBudgetViewer L161-176 と同パターン) ─
-function StatusCard({ message, showBadge }) {
-  return (
-    <div style={{ background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
-      <div style={{ padding: "16px 18px", borderBottom: `1px solid ${BORDER}`, display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{
-          width: 44, height: 44, borderRadius: 12,
-          background: `${GOLD}22`, border: `1px solid ${GOLD}44`,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 24, flexShrink: 0,
-        }}>📈</div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: TEXT_PRIMARY }}>資産残高繰越票</div>
-      </div>
-      <div style={{ padding: "14px 18px", background: NAVY2, textAlign: "center" }}>
-        <div style={{ fontSize: 11, color: TEXT_MUTED, marginBottom: showBadge ? 6 : 0 }}>{message}</div>
-        {showBadge && (
-          <div style={{
-            fontSize: 10, color: `${GOLD}88`, background: `${GOLD}11`,
-            borderRadius: 8, padding: "6px 12px", display: "inline-block",
-          }}>準備中</div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // =============================================================
 // メインコンポーネント
 // =============================================================
 export default function AssetSheetViewer({ clientId }) {
-  // 自分の profiles.initial_asset (AuthContext 経由)。
+  // 顧客自身の profiles.initial_asset (AuthContext 経由)。read-only 表示のみ。
   const { initialAsset } = useAuth();
-  // annual_budgets の最新確定年度 (camelCase で committedIncomeLines / incomeCommittedAt / committedLines 露出済)。
-  const { data, loading, error } = useAnnualBudgets(clientId);
+
+  // 年度セレクタの内部 state。初回は null → hook が最新年度を返す。
+  // 初回ロード後 data.fiscal_year を吸い上げて以後 ◀▶ で増減する。
+  const [currentYear, setCurrentYear] = useState(null);
+  const { data, loading, error } = useAnnualBudgets(clientId, currentYear);
+
+  // 初回 data 着弾時の年度同期 (currentYear が null の間だけ吸い上げ)。
+  useEffect(() => {
+    if (currentYear == null && data?.fiscal_year != null) {
+      setCurrentYear(Number(data.fiscal_year));
+    }
+  }, [currentYear, data?.fiscal_year]);
 
   const startMonth = Number(data?.fiscal_year_start_month) || 1;
   const months = useMemo(() => monthsFromStart(startMonth), [startMonth]);
 
-  const incomeLines = Array.isArray(data?.committedIncomeLines) ? data.committedIncomeLines : [];
-  const expenseLines = Array.isArray(data?.committedLines) ? data.committedLines : [];
+  // hook 露出フィールド (Phase 2-2a withCamel + 2-2b 再露出済)。snake fallback も保持。
+  const incomeLines = Array.isArray(data?.incomeLines)
+    ? data.incomeLines
+    : (Array.isArray(data?.income_lines) ? data.income_lines : []);
+  const expenseLines = Array.isArray(data?.lines) ? data.lines : [];
 
-  const balance = useMemo(
-    () => computeAssetBalance({ initialAsset, incomeLines, expenseLines }),
-    [initialAsset, incomeLines, expenseLines],
+  const initialAssetValue = Number(initialAsset) || 0;
+
+  // Phase 2-1 移植の computeAssetSheet。settledMonths は内部で自動判定 (実測>0)。
+  const { rows, summary } = useMemo(
+    () => computeAssetSheet({ incomeLines, expenseLines, months, initialAsset: initialAssetValue }),
+    [incomeLines, expenseLines, months, initialAssetValue],
   );
 
-  // ── 準備中ゲート ────────────────────────────────
-  if (loading) return <StatusCard message="読み込み中…" />;
-  if (error || !data || !data.incomeCommittedAt || incomeLines.length === 0) {
-    return <StatusCard message="資産残高繰越票は本部からの反映待ちです" showBadge />;
-  }
-
-  // ── 月別合計 ────────────────────────────────────
-  const monthlyIncome = months.map((_, idx) => sumIncomeForMonth(incomeLines, idx, true));
-  const monthlyExpense = months.map((_, idx) => sumExpenseForMonth(expenseLines, idx, true));
-  const monthlyNet = months.map((_, idx) => monthlyIncome[idx] - monthlyExpense[idx]);
-  const yearIncome = monthlyIncome.reduce((s, v) => s + v, 0);
-
-  // ── 行ごとの年間収入合計 ──────────────────────────
-  const sumIncomeRow = (line) => {
-    const arr = Array.isArray(line?.monthly_actuals) ? line.monthly_actuals : [];
-    let s = 0;
-    for (let i = 0; i < 12; i++) {
-      const v = Number(arr[i]);
-      s += Number.isFinite(v) ? v : 0;
-    }
-    return s;
-  };
-
-  // ── CSS Grid 列構成 ────────────────────────────
-  // 項目(160) + 月×12(minmax 64) + 年間目標(88) + 年合計/年末残高(100)
-  const gridCols = "160px repeat(12, minmax(64px, 1fr)) 88px 100px";
-
-  // ── セルスタイル共通 ──────────────────────────
+  // ── スタイル定数 (admin AssetSheetTab.jsx 1-D-3g と同形) ────
+  // CSS Grid: ラベル(260) + 月×12(84min) + 進捗(80) + 目標合計(110) = 15 列。
+  const gridCols = "260px repeat(12, minmax(84px, 1fr)) 80px 110px";
   const headerCellStyle = {
-    padding: "8px 6px", background: NAVY2, color: TEXT_SECONDARY,
-    fontSize: 11, fontWeight: 700, textAlign: "right",
-    borderRadius: 6, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden",
+    padding: "8px 6px", background: NAVY3, color: TEXT_SECONDARY,
+    fontSize: 11, fontWeight: 700, textAlign: "center",
+    borderRadius: 6, minWidth: 0, whiteSpace: "nowrap",
   };
-  const headerCellLeft = { ...headerCellStyle, textAlign: "left" };
   const cellStyle = {
-    padding: "6px 6px", background: CARD_BG, borderRadius: 6,
-    minWidth: 0, whiteSpace: "nowrap", overflow: "hidden",
-    border: `1px solid ${BORDER}`,
+    padding: "6px 6px", background: NAVY2, borderRadius: 6,
+    minWidth: 0, whiteSpace: "nowrap",
+    border: `1px solid ${BORDER}`, fontSize: 11,
   };
-  const numCellStyle = (color = TEXT_PRIMARY) => ({
-    ...cellStyle, textAlign: "right", color, fontSize: 11, fontWeight: 600,
-  });
+  const labelCellStyle = {
+    ...cellStyle, color: TEXT_SECONDARY, fontWeight: 700, textAlign: "left",
+  };
+  const yearNavBtnStyle = {
+    background: NAVY3, color: GOLD, border: `1px solid ${BORDER}`,
+    borderRadius: 6, padding: "6px 14px", fontSize: 14, fontWeight: 700,
+    cursor: "pointer", whiteSpace: "nowrap",
+  };
 
-  // ── 本体描画 ────────────────────────────────────
+  // 月セル 2 値表示 (上=実測 GOLD 大 / 下=予算/予想 BLUE 小)。
+  //   実測 null → "—" 大きめ、ref null → "—" 小さめ。admin 1-D-3a と同パラメタ。
+  const renderTwoValCell = (actualVal, refVal) => {
+    const actualSize = actualVal == null ? 15 : Math.max(10, cellFontSize(fmtN(actualVal)) + 5);
+    const refSize    = refVal    == null ? 8  : Math.max(7, Math.min(8, cellFontSize(fmtN(refVal)) - 3));
+    return (
+      <div style={{ ...cellStyle, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
+        <span style={{ color: GOLD, fontSize: actualSize, fontWeight: 700, lineHeight: 1.1 }}>
+          {actualVal == null ? "—" : fmtN(actualVal)}
+        </span>
+        <span style={{ color: BUDGET_BLUE, fontSize: refSize, fontWeight: 500, lineHeight: 1.1 }}>
+          {refVal == null ? "—" : fmtN(refVal)}
+        </span>
+      </div>
+    );
+  };
+
+  // 表示用 year ラベル (currentYear 着弾前は data.fiscal_year → 着弾も無ければ今年)。
+  const yearLabel = currentYear ?? data?.fiscal_year ?? new Date().getFullYear();
+
+  // 「準備中」ゲートは撤去 (Phase 2-4a)。loading / error はバナーで控えめに通知し、
+  // データ未着・空配列でもレイアウトは常に描画する (computeAssetSheet が空集合でも
+  // initialAsset 起点の forecastCum/actualCum を返すため layout が崩れない)。
   return (
     <div style={{
       background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`,
-      overflow: "hidden",
+      padding: 16, color: TEXT_PRIMARY,
+      display: "flex", flexDirection: "column", gap: 14,
     }}>
-      {/* ヘッダ */}
-      <div style={{
-        padding: "14px 18px", borderBottom: `1px solid ${BORDER}`,
-        display: "flex", alignItems: "center", gap: 12,
-      }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: 12,
-          background: `${GOLD}22`, border: `1px solid ${GOLD}44`,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 22, flexShrink: 0,
-        }}>📈</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: TEXT_PRIMARY }}>
-            資産残高繰越票
-            <span style={{ marginLeft: 8, fontSize: 11, color: TEXT_MUTED, fontWeight: 400 }}>
-              {data.fiscal_year} 年度
-            </span>
-          </div>
-          <div style={{ fontSize: 10, color: TEXT_SECONDARY, marginTop: 3 }}>
-            最終反映 {fmtDateTime(data.incomeCommittedAt)}
-          </div>
+
+      {/* ① 年セレクタ — 中央寄せ + 右側に状態バッジ */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ flex: 1 }} />
+        <button onClick={() => setCurrentYear(Number(yearLabel) - 1)} style={yearNavBtnStyle}>◀</button>
+        <span style={{ color: GOLD, fontSize: 16, fontWeight: 700, minWidth: 110, textAlign: "center" }}>
+          {yearLabel}年度
+        </span>
+        <button onClick={() => setCurrentYear(Number(yearLabel) + 1)} style={yearNavBtnStyle}>▶</button>
+        <div style={{ flex: 1, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
+          {loading && (
+            <span style={{ fontSize: 11, color: TEXT_MUTED, whiteSpace: "nowrap" }}>読み込み中…</span>
+          )}
+          {error && !loading && (
+            <span style={{ fontSize: 11, color: RED, whiteSpace: "nowrap" }}>読み込みエラー</span>
+          )}
         </div>
       </div>
 
-      {/* 補足説明 */}
-      <div style={{
-        padding: "10px 18px", background: NAVY2, borderBottom: `1px solid ${BORDER}`,
-        fontSize: 10, color: TEXT_SECONDARY, lineHeight: 1.5,
-      }}>
-        月次資産残高 = 前月残高 + 収入実測 − 支出実測 (初月は初期資産起点)
-      </div>
-
-      {/* テーブル本体 (横スクロール対応) */}
-      <div style={{ overflowX: "auto", padding: "14px 16px" }}>
+      {/* ② 4 行テーブル (1-D-3g レイアウト) — グラフは Phase 2-4b で追加予定 */}
+      <div style={{ overflowX: "auto" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: "fit-content" }}>
-          {/* ヘッダ行 */}
+
+          {/* 行1: 初期資産 (月見出し兼用行)
+              col1: 💰初期資産 ラベル + 値 (read-only span)
+              col2-13: 月見出し / col14: 進捗 / col15: 目標合計 */}
           <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
-            <div style={headerCellLeft}>項目</div>
+            <div style={{
+              ...labelCellStyle,
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+            }}>
+              <span style={{ whiteSpace: "nowrap" }}>💰 初期資産</span>
+              <span style={{
+                flex: 1, minWidth: 0,
+                color: GOLD, fontWeight: 700, textAlign: "right",
+                fontSize: Math.max(9, cellFontSize(fmtN(initialAssetValue)) + 2),
+              }}>
+                {initialAssetValue === 0 ? "—" : fmtN(initialAssetValue)}
+              </span>
+            </div>
             {months.map((m) => (
               <div key={m} style={headerCellStyle}>{m}月</div>
             ))}
-            <div style={headerCellStyle}>年間目標</div>
-            <div style={headerCellStyle}>年合計 / 年末残高</div>
+            <div style={headerCellStyle}>進捗</div>
+            <div style={headerCellStyle}>目標合計</div>
           </div>
 
-          {/* ── 初期資産行 ────────────────────────── */}
-          <div style={{
-            display: "grid", gridTemplateColumns: gridCols, gap: 4,
-            borderTop: `2px solid ${GOLD}33`, paddingTop: 4,
-          }}>
-            <div style={{
-              ...cellStyle, color: TEXT_SECONDARY, fontSize: 12, fontWeight: 700,
-            }}>💰 初期資産</div>
-            {months.map((_, idx) => (
-              <div key={idx} style={{ ...cellStyle, textAlign: "right", color: TEXT_MUTED, fontSize: 11 }}>−</div>
-            ))}
-            <div style={{ ...cellStyle, textAlign: "right", color: TEXT_MUTED, fontSize: 11 }}>−</div>
-            <div style={numCellStyle(GOLD)}>
-              <span style={{ fontSize: cellFontSize(fmtY(initialAsset)), fontWeight: 700 }}>
-                {fmtY(initialAsset)}
-              </span>
+          {/* セクション見出し: ⊕ 本収入 */}
+          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
+            <div style={{ ...labelCellStyle, color: GREEN, background: "transparent", border: "none" }}>
+              ⊕ 本収入
             </div>
           </div>
 
-          {/* ── 収入セクション見出し ───────────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4, marginTop: 6 }}>
-            <div style={{
-              gridColumn: "1 / -1", color: GREEN, fontSize: 12, fontWeight: 700,
-              padding: "6px 6px 2px",
-            }}>📥 収入</div>
-          </div>
-
-          {/* ── 収入行群 (read-only) ──────────────────── */}
-          {incomeLines.map((line) => {
-            const yearSum = sumIncomeRow(line);
-            return (
-              <div key={line.id ?? line.category_name} style={{
-                display: "grid", gridTemplateColumns: gridCols, gap: 4,
+          {/* 本収入 行群 (read-only)。行が無いときは empty hint。 */}
+          {incomeLines.length === 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
+              <div style={{
+                ...cellStyle, gridColumn: "1 / -1", background: CARD_BG,
+                color: TEXT_MUTED, fontSize: 11, textAlign: "center", padding: "14px",
               }}>
-                {/* 行名 */}
-                <div style={{
-                  ...cellStyle, color: TEXT_PRIMARY, fontSize: 12, fontWeight: 500,
-                  textOverflow: "ellipsis",
-                }}>
-                  {line?.category_name || "(無題)"}
+                （収入行はまだありません）
+              </div>
+            </div>
+          )}
+          {incomeLines.map((l) => {
+            const tArr = Array.isArray(l?.monthly_targets) ? l.monthly_targets : Array(12).fill(0);
+            const aArr = Array.isArray(l?.monthly_actuals) ? l.monthly_actuals : Array(12).fill(0);
+            const tSum = tArr.reduce((s, v) => s + (Number.isFinite(Number(v)) ? Number(v) : 0), 0);
+            const aSum = aArr.reduce((s, v) => s + (Number.isFinite(Number(v)) ? Number(v) : 0), 0);
+            const aFontFor = (v) => v == null ? 15 : Math.max(10, cellFontSize(fmtN(v)) + 5);
+            const tFontFor = (v) => v == null ? 8 : Math.max(7, Math.min(8, cellFontSize(fmtN(v)) - 3));
+            return (
+              <div key={l.id ?? l.category_name} style={{
+                display: "grid", gridTemplateColumns: gridCols, gap: 4,
+                borderTop: `1px dashed ${BORDER}`, paddingTop: 2,
+              }}>
+                {/* 行名 (read-only) */}
+                <div style={{ ...cellStyle, display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{
+                    flex: 1, minWidth: 0,
+                    color: TEXT_PRIMARY, fontWeight: 700, fontSize: 12,
+                    overflow: "hidden", textOverflow: "ellipsis",
+                  }}>
+                    {l?.category_name || "(無題)"}
+                  </span>
                 </div>
-                {/* 月別実測セル × 12 */}
-                {months.map((m, idx) => {
-                  const v = Number(line?.monthly_actuals?.[idx]) || 0;
+                {/* 月セル × 12 (read-only)。i=fiscal idx 0..11。
+                    aArr/tArr は 配列 0..11 (fiscal-indexed)。0/欠損は "—" 表示。 */}
+                {months.map((_m, i) => {
+                  const aRaw = Number(aArr[i]);
+                  const tRaw = Number(tArr[i]);
+                  const aVal = Number.isFinite(aRaw) && aRaw !== 0 ? aRaw : null;
+                  const tVal = Number.isFinite(tRaw) && tRaw !== 0 ? tRaw : null;
                   return (
-                    <div key={m} style={numCellStyle(v === 0 ? TEXT_MUTED : TEXT_PRIMARY)}>
-                      <span style={{ fontSize: cellFontSize(fmtN(v)), fontWeight: 500 }}>
-                        {v === 0 ? "−" : fmtN(v)}
+                    <div key={`s${i}`} style={{
+                      ...cellStyle, display: "flex", flexDirection: "column", gap: 1, padding: "4px 4px",
+                    }}>
+                      <span style={{
+                        color: GOLD, fontWeight: 700,
+                        fontSize: aFontFor(aVal),
+                        textAlign: "right", padding: "2px 4px", lineHeight: 1.1,
+                      }}>
+                        {aVal == null ? "—" : fmtN(aVal)}
+                      </span>
+                      <span style={{
+                        color: BUDGET_BLUE, fontWeight: 500,
+                        fontSize: tFontFor(tVal),
+                        textAlign: "right", padding: "2px 4px", lineHeight: 1.1,
+                      }}>
+                        {tVal == null ? "—" : fmtN(tVal)}
                       </span>
                     </div>
                   );
                 })}
-                {/* 年間目標 */}
-                <div style={numCellStyle(line?.target_value ? BLUE : TEXT_MUTED)}>
-                  <span style={{
-                    fontSize: cellFontSize(fmtN(line?.target_value)),
-                    fontStyle: "italic", fontWeight: 600,
-                  }}>
-                    {line?.target_value ? fmtN(line.target_value) : "−"}
-                  </span>
+                {/* 進捗列: Σ実測 */}
+                <div style={{
+                  ...cellStyle, textAlign: "right",
+                  color: GOLD, fontWeight: 700,
+                  fontSize: aFontFor(aSum), padding: "6px 6px",
+                }}>
+                  {fmtN(aSum)}
                 </div>
-                {/* 行年合計 */}
-                <div style={numCellStyle(yearSum === 0 ? TEXT_MUTED : GREEN)}>
-                  <span style={{ fontSize: cellFontSize(fmtY(yearSum)), fontWeight: 700 }}>
-                    {fmtY(yearSum)}
-                  </span>
+                {/* 目標合計列: Σ目標 */}
+                <div style={{
+                  ...cellStyle, textAlign: "right",
+                  color: BUDGET_BLUE, fontWeight: 600,
+                  fontSize: Math.max(9, cellFontSize(fmtN(tSum)) + 1),
+                  padding: "6px 6px",
+                }}>
+                  {fmtN(tSum)}
                 </div>
               </div>
             );
           })}
 
-          {/* 収入小計行 */}
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4, marginTop: 8 }}>
-            <div style={{ ...cellStyle, background: NAVY2, color: GREEN, fontSize: 12, fontWeight: 700 }}>
-              📥 収入合計
-            </div>
-            {months.map((_, idx) => (
-              <div key={idx} style={numCellStyle(monthlyIncome[idx] === 0 ? TEXT_MUTED : GREEN)}>
-                <span style={{ fontSize: cellFontSize(fmtN(monthlyIncome[idx])) }}>
-                  {monthlyIncome[idx] === 0 ? "−" : fmtN(monthlyIncome[idx])}
-                </span>
+          {/* 行3: − 支出合計 (computeAssetSheet で集計、read-only) */}
+          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4, marginTop: 6 }}>
+            <div style={labelCellStyle}>− 支出合計</div>
+            {rows.map((r, idx) => (
+              <div key={idx}>
+                {renderTwoValCell(
+                  r.expenseActual === 0 ? null : r.expenseActual,
+                  r.expenseBudget === 0 ? null : r.expenseBudget,
+                )}
               </div>
             ))}
-            <div style={numCellStyle(TEXT_MUTED)}>−</div>
-            <div style={numCellStyle(yearIncome === 0 ? TEXT_MUTED : GREEN)}>
-              <span style={{ fontSize: cellFontSize(fmtY(yearIncome)) }}>{fmtY(yearIncome)}</span>
+            <div style={{
+              ...cellStyle, textAlign: "right",
+              color: GOLD, fontWeight: 700,
+              fontSize: Math.max(9, cellFontSize(fmtN(summary.expenseActualTotal)) + 2),
+            }}>
+              {fmtN(summary.expenseActualTotal)}
+            </div>
+            <div style={{
+              ...cellStyle, textAlign: "right",
+              color: BUDGET_BLUE, fontWeight: 600,
+              fontSize: Math.max(9, cellFontSize(fmtN(summary.expenseBudgetTotal)) + 1),
+            }}>
+              {fmtN(summary.expenseBudgetTotal)}
             </div>
           </div>
 
-          {/* ── 支出セクション ───────────────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4, marginTop: 12 }}>
-            <div style={{
-              gridColumn: "1 / -1", color: RED, fontSize: 12, fontWeight: 700,
-              padding: "6px 6px 2px",
-            }}>📤 支出 (支出管理繰越票より自動連動)</div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
-            <div style={{ ...cellStyle, background: NAVY2, color: RED, fontSize: 12, fontWeight: 700 }}>
-              📤 支出合計
-            </div>
-            {months.map((_, idx) => (
-              <div key={idx} style={numCellStyle(monthlyExpense[idx] === 0 ? TEXT_MUTED : RED)}>
-                <span style={{ fontSize: cellFontSize(fmtN(monthlyExpense[idx])) }}>
-                  {monthlyExpense[idx] === 0 ? "−" : fmtN(monthlyExpense[idx])}
-                </span>
-              </div>
-            ))}
-            <div style={numCellStyle(TEXT_MUTED)}>−</div>
-            <div style={numCellStyle(TEXT_MUTED)}>−</div>
-          </div>
-
-          {/* ── 月次資産残高 (自動) ────────────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4, marginTop: 12 }}>
-            <div style={{
-              gridColumn: "1 / -1", color: GOLD, fontSize: 12, fontWeight: 700,
-              padding: "6px 6px 2px",
-            }}>💎 月次資産残高</div>
-          </div>
-          {/* 月次純増減 */}
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
-            <div style={{ ...cellStyle, background: NAVY2, color: TEXT_SECONDARY, fontSize: 11, fontWeight: 700 }}>
-              純増減 (収入−支出)
-            </div>
-            {months.map((_, idx) => {
-              const v = monthlyNet[idx];
-              const color = v > 0 ? GREEN : v < 0 ? RED : TEXT_MUTED;
-              return (
-                <div key={idx} style={numCellStyle(color)}>
-                  <span style={{ fontSize: cellFontSize(fmtN(v)) }}>
-                    {v === 0 ? "−" : fmtN(v)}
-                  </span>
-                </div>
-              );
-            })}
-            <div style={numCellStyle(TEXT_MUTED)}>−</div>
-            <div style={numCellStyle(TEXT_MUTED)}>−</div>
-          </div>
-          {/* 累計残高 */}
+          {/* 行4: 💎 累計残高 (上=実測 actualCum / 下=予想 forecastCum) */}
           <div style={{
             display: "grid", gridTemplateColumns: gridCols, gap: 4,
             borderTop: `2px solid ${GOLD}55`, paddingTop: 4,
           }}>
+            <div style={{ ...labelCellStyle, color: GOLD }}>💎 累計残高</div>
+            {rows.map((r, idx) => (
+              <div key={idx}>{renderTwoValCell(r.actualCum, r.forecastCum)}</div>
+            ))}
+            {/* 進捗列: 着地見込み (settled?actualNet:forecastNet のΣ + initialAsset) */}
             <div style={{
-              ...cellStyle, background: NAVY2, color: GOLD,
-              fontSize: 12, fontWeight: 700,
-              borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
-            }}>💎 累計残高</div>
-            {months.map((_, idx) => {
-              const v = balance.byMonth[idx];
-              const color = v >= 0 ? GOLD : RED;
-              return (
-                <div key={idx} style={{
-                  ...numCellStyle(color), fontWeight: 700,
-                  borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
-                }}>
-                  <span style={{ fontSize: cellFontSize(fmtN(v)) }}>{fmtN(v)}</span>
-                </div>
-              );
-            })}
-            <div style={{
-              ...numCellStyle(TEXT_MUTED),
-              borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
-            }}>−</div>
-            <div style={{
-              ...numCellStyle(balance.yearEnd >= 0 ? GOLD : RED), fontWeight: 700,
-              borderTop: `2px solid ${GOLD}55`, borderBottom: `2px solid ${GOLD}55`,
+              ...cellStyle, textAlign: "right", fontWeight: 700,
+              color: summary.progressLanding >= 0 ? GOLD : RED,
+              fontSize: Math.max(9, cellFontSize(fmtN(summary.progressLanding)) + 2),
             }}>
-              <span style={{ fontSize: cellFontSize(fmtY(balance.yearEnd)) }}>{fmtY(balance.yearEnd)}</span>
+              {fmtN(summary.progressLanding)}
+            </div>
+            {/* 目標合計列: 年末予想残高 (= 最終月 forecastCum) */}
+            <div style={{
+              ...cellStyle, textAlign: "right", fontWeight: 600,
+              color: summary.forecastCumTotal >= 0 ? BUDGET_BLUE : RED,
+              fontSize: Math.max(9, cellFontSize(fmtN(summary.forecastCumTotal)) + 1),
+            }}>
+              {fmtN(summary.forecastCumTotal)}
             </div>
           </div>
+
         </div>
       </div>
-
-      {/* 抑止のための未使用変数 (TEAL は将来用、現状未参照) */}
-      {(() => { void TEAL; return null; })()}
     </div>
   );
 }
