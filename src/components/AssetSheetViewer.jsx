@@ -215,6 +215,18 @@ export default function AssetSheetViewer({ clientId }) {
     [incomeLines, expenseLines, months, initialAssetValue],
   );
 
+  // Phase 1-D-3h (2026-06-11): 累計残高行「目標合計」列の派生計算 (案②: UI 側のみ)。
+  //   admin AssetSheetTab.jsx と同式・同意味:
+  //   expenseTargetTotal = Σ lines.target_value (= 支出管理繰越票 targetGrandTotal と完全一致)
+  //   targetNetTotal     = 年間目標差額 (初期資産抜き) = 目標収入 − 目標支出
+  //   ※ 既存 summary.forecastCumTotal は「年末予想残高 (初期資産起点・monthly_budget ベース)」で別物。
+  //      グラフ (forecastCum/actualCum) や月次累計表示には影響させない。
+  const expenseTargetTotal = (expenseLines || []).reduce(
+    (s, l) => s + (Number(l?.target_value) || 0),
+    0,
+  );
+  const targetNetTotal = summary.incomeTargetTotal - expenseTargetTotal;
+
   // Phase 2-4c: 累計残高推移グラフ用データ。
   //   - label   : `${r.month}月` (fiscal 順、startMonth=4 なら 4月..3月)
   //   - forecast: r.forecastCum (常に number)
@@ -526,12 +538,19 @@ export default function AssetSheetViewer({ clientId }) {
             }}>
               {fmtN(summary.progressLanding)}
             </div>
-            <div style={{
-              ...cellStyle, textAlign: "right", fontWeight: 600,
-              color: summary.forecastCumTotal >= 0 ? BUDGET_BLUE : RED,
-              fontSize: Math.max(9, cellFontSize(fmtN(summary.forecastCumTotal)) + 1),
-            }}>
-              {fmtN(summary.forecastCumTotal)}
+            {/* 目標合計列: 年間目標差額 (= 目標収入 − 目標支出、初期資産抜き) BLUE/RED, 600, 自動縮小。
+                Phase 1-D-3h: 旧「年末予想残高 (summary.forecastCumTotal、初期資産起点・monthly_budget ベース)」
+                  から targetNetTotal (案② UI 派生、admin AssetSheetTab.jsx と同式) に差替。
+                  目標差額の正負で色を判定 (≥0=BLUE / <0=RED)。 */}
+            <div
+              title="年間目標差額 (目標収入 − 目標支出、初期資産抜き)"
+              style={{
+                ...cellStyle, textAlign: "right", fontWeight: 600,
+                color: targetNetTotal >= 0 ? BUDGET_BLUE : RED,
+                fontSize: Math.max(9, cellFontSize(fmtN(targetNetTotal)) + 1),
+              }}
+            >
+              {fmtN(targetNetTotal)}
             </div>
           </div>
 
