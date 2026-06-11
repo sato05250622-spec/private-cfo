@@ -37,6 +37,10 @@ import {
   GOLD, NAVY2, NAVY3, CARD_BG, BORDER, RED,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 } from "@shared/theme";
+// Phase 2-4c: 累計残高推移グラフ (recharts は既存 package.json 導入済 ^2.12.7、App.jsx 等で利用中)。
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from "recharts";
 
 // ローカル色定数 (@shared/theme は BLUE=TEAL なのでローカル定義)。admin と同値。
 const BUDGET_BLUE = "#5BA8FF";
@@ -211,6 +215,15 @@ export default function AssetSheetViewer({ clientId }) {
     [incomeLines, expenseLines, months, initialAssetValue],
   );
 
+  // Phase 2-4c: 累計残高推移グラフ用データ。
+  //   - label   : `${r.month}月` (fiscal 順、startMonth=4 なら 4月..3月)
+  //   - forecast: r.forecastCum (常に number)
+  //   - actual  : r.actualCum   (未確定月は null → Line connectNulls={false} で線が切れる)
+  const chartData = useMemo(
+    () => rows.map((r) => ({ label: `${r.month}月`, forecast: r.forecastCum, actual: r.actualCum })),
+    [rows],
+  );
+
   // 表示用 year ラベル (writer 引数にもこの値を使う)。
   const yearLabel = currentYear ?? data?.fiscal_year ?? new Date().getFullYear();
   const fy = Number(yearLabel);
@@ -277,7 +290,38 @@ export default function AssetSheetViewer({ clientId }) {
         </div>
       </div>
 
-      {/* ② 4 行テーブル (1-D-3g レイアウト・編集可) */}
+      {/* ② 累計残高 推移グラフ (実測 GOLD / 予想 BLUE) — read-only。
+          admin AssetSheetTab.jsx L248-273 と同形 (recharts LineChart 2 本線)。
+          実測線は actualCum=null の未確定月で connectNulls={false} により線が切れる。 */}
+      <div style={{
+        background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 8, padding: 12,
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: GOLD, marginBottom: 8 }}>
+          累計残高 推移 (実測 / 予想)
+        </div>
+        <div style={{ width: "100%", height: 240 }}>
+          <ResponsiveContainer>
+            <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+              <CartesianGrid stroke={BORDER} strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="label" stroke={TEXT_SECONDARY} tick={{ fill: TEXT_SECONDARY, fontSize: 10 }} />
+              <YAxis
+                stroke={TEXT_SECONDARY}
+                tick={{ fill: TEXT_SECONDARY, fontSize: 10 }}
+                tickFormatter={(v) => Math.round(v / 10000)}
+              />
+              <Tooltip
+                contentStyle={{ background: NAVY3, border: `1px solid ${BORDER}`, color: TEXT_PRIMARY, fontSize: 11 }}
+                formatter={(v) => fmtN(v)}
+              />
+              <Legend wrapperStyle={{ fontSize: 11, color: TEXT_SECONDARY }} />
+              <Line dataKey="forecast" name="予想" stroke={BUDGET_BLUE} dot={false} />
+              <Line dataKey="actual" name="実測" stroke={GOLD} dot={false} connectNulls={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* ③ 4 行テーブル (1-D-3g レイアウト・編集可) */}
       <div style={{ overflowX: "auto" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: "fit-content" }}>
 
