@@ -51,6 +51,7 @@ export function useAnnualBudgets(clientId, fiscalYear) {
               incomeLines: row.incomeLines ?? row.income_lines ?? [],
               lines: row.lines ?? [],
               annualTotalTarget: row.annualTotalTarget ?? row.annual_total_target ?? null,
+              settledMonths: row.settled_months ?? [],
             }
           : null,
       );
