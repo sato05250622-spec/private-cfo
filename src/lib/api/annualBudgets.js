@@ -13,6 +13,21 @@ import { supabase } from '../supabaseClient';
 
 const TABLE = 'annual_budgets';
 
+// Phase 2-2a (2026-06-11): live 読取列を camelCase でも返却に露出する shim。
+//   既存 snake_case (income_lines / lines / annual_total_target) は ...row により
+//   そのまま残す。incomeLines / annualTotalTarget の camelCase mirror を追加。
+//   lines は既に小文字1単語なので snake/camel が同名 (null→[] のデフォルトのみ)。
+//   既存 committed_* キーは無改変 (hook 側で従来通り snake_case を読める)。
+function withCamel(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    incomeLines: row.income_lines ?? [],
+    lines: row.lines ?? [],
+    annualTotalTarget: row.annual_total_target ?? null,
+  };
+}
+
 // 指定 client の繰越票を 1 件取得。
 // 返却 shape:
 //   { fiscal_year, fiscal_year_start_month,
@@ -29,14 +44,14 @@ export async function getCommittedByClient(clientId, fiscalYear) {
   if (fiscalYear != null) {
     const { data, error } = await supabase
       .from(TABLE)
-      .select('fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at, committed_income_lines, income_committed_at')
+      .select('fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at, committed_income_lines, income_committed_at, income_lines, lines, annual_total_target')
       .eq('client_id', clientId)
       .eq('fiscal_year', fiscalYear)
       .maybeSingle();
     if (error) throw error;
-    return data ?? null;
+    return withCamel(data);
   }
-  const SELECT = 'fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at, committed_income_lines, income_committed_at';
+  const SELECT = 'fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at, committed_income_lines, income_committed_at, income_lines, lines, annual_total_target';
   // 既定: 反映済み (last_committed_at not null) の最新年度を優先。
   const committed = await supabase
     .from(TABLE)
@@ -47,7 +62,7 @@ export async function getCommittedByClient(clientId, fiscalYear) {
     .limit(1)
     .maybeSingle();
   if (committed.error) throw committed.error;
-  if (committed.data) return committed.data;
+  if (committed.data) return withCamel(committed.data);
   // 反映済みが無い場合のみ、絶対最新年度 (未反映含む) を返す (従来挙動のフォールバック)。
   const latest = await supabase
     .from(TABLE)
@@ -57,7 +72,7 @@ export async function getCommittedByClient(clientId, fiscalYear) {
     .limit(1)
     .maybeSingle();
   if (latest.error) throw latest.error;
-  return latest.data ?? null;
+  return withCamel(latest.data);
 }
 
 // ③: 指定 client の「確定済み (反映済み)」年度一覧を新しい順 (DESC) で返す。
@@ -80,4 +95,49 @@ export async function listFiscalYearsByClient(clientId) {
     if (Number.isFinite(y) && !seen.has(y)) { seen.add(y); out.push(y); }
   }
   return out;
+}
+
+// =============================================================
+// Phase 2-2a (2026-06-11): 顧客直接編集に向けた write API。
+//   admin リポ src/lib/api/annualBudgets.js (updateIncomeLines L307 /
+//   setInitialAsset L363) をロジック完全一致で顧客側へ移植。
+//   顧客は自分の行のみ更新するので entered_by 等の proxy フィールドは不要。
+//   所有権は RLS (Phase 2-3 で追加予定の annual_budgets_client_update_own:
+//   client_id = auth.uid()) が担保する前提。
+//
+//   ※ Phase 2-3 までは顧客 UPDATE 用 RLS が未追加のため、本ターン時点で
+//      実行すると RLS により拒否される想定。UI からは未呼出のため本番影響なし。
+// =============================================================
+
+// annual_budgets.income_lines (jsonb 配列) をピンポイント更新。
+//   対象行: client_id = clientId AND fiscal_year = fiscalYear (二重絞り込み)。
+//   incomeLines は jsonb 配列をそのまま保存 (caller が構築済み)。null は [] に正規化。
+export async function updateIncomeLines(clientId, fiscalYear, incomeLines) {
+  if (!clientId) throw new Error('clientId required');
+  if (fiscalYear == null) throw new Error('fiscalYear required');
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({ income_lines: incomeLines ?? [] })
+    .eq('client_id', clientId)
+    .eq('fiscal_year', fiscalYear)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// profiles.initial_asset のみ列限定 update (他列を絶対に触らない)。
+//   対象: id = clientId (= auth.uid())。NaN/非数は 0 に正規化。
+export async function setInitialAsset(clientId, value) {
+  if (!clientId) throw new Error('clientId required');
+  const n = Number(value);
+  const safe = Number.isFinite(n) ? n : 0;
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ initial_asset: safe })
+    .eq('id', clientId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 }
