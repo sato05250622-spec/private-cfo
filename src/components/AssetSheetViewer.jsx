@@ -32,7 +32,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import { useAuth } from "../context/AuthContext";
-import { computeAssetSheet } from "../utils/assetSheet";
+import {
+  computeAssetSheet,
+  aggregateCellsFromExpenses,
+  buildFixedCostLines,
+  deriveFutureWeekBudgetForCategory,
+  computeMonthlyExpenseBudgetTotals,
+} from "../utils/assetSheet";
 import {
   GOLD, NAVY2, NAVY3, CARD_BG, BORDER, RED,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
@@ -41,6 +47,11 @@ import {
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
+import { getManagementStartDay } from "../utils/cycle";
+import { toDateStr } from "@shared/format";
+import { useClientBudgetRows } from "../hooks/useClientBudgetRows";
+import { useClientLoanRows } from "../hooks/useClientLoanRows";
+import { useExpenses } from "../hooks/useExpenses";
 
 // ローカル色定数 (@shared/theme は BLUE=TEAL なのでローカル定義)。admin と同値。
 const BUDGET_BLUE = "#5BA8FF";
@@ -210,6 +221,65 @@ export default function AssetSheetViewer({ clientId }) {
     : (Array.isArray(data?.income_lines) ? data.income_lines : []);
   const expenseLines = Array.isArray(data?.lines) ? data.lines : [];
 
+  // Phase E-1 (2026-06-11): admin AssetSheetTab.jsx L117-190 と同経路で
+  //   expenseBudgetCtx を組み立てる。yearLabel/fy はここで前置宣言し、以降
+  //   全派生で fiscalYear=fy を共有する。E-1 では描画は触らず derive のみ追加。
+  // 表示用 year ラベル (writer 引数にもこの値を使う)。
+  const yearLabel = currentYear ?? data?.fiscal_year ?? new Date().getFullYear();
+  const fy = Number(yearLabel);
+
+  // ── Phase E-1: ctx 構築用 hook 3 本 (read-only / focus refetch あり) ──
+  const { weekCatBudgetRows } = useClientBudgetRows();
+  const { loanRows } = useClientLoanRows();
+  const { expenses } = useExpenses();
+
+  // ── Phase E-1: 派生 (admin L141-190 と対応) ─────────────────
+  const fixedCostLines = useMemo(() => buildFixedCostLines(loanRows), [loanRows]);
+  const linesForBudget = useMemo(
+    () => [...fixedCostLines, ...expenseLines],
+    [fixedCostLines, expenseLines],
+  );
+  const todayStr = useMemo(() => toDateStr(new Date()), []);
+  const msdVal = getManagementStartDay();
+  const settledMonths = useMemo(
+    () => (Array.isArray(data?.settledMonths) ? data.settledMonths : []),
+    [data?.settledMonths],
+  );
+  const aggregatedCells = useMemo(() => {
+    try {
+      return aggregateCellsFromExpenses(msdVal, fy, expenses, startMonth);
+    } catch (err) {
+      console.error("[AssetSheetViewer.aggregatedCells]", err);
+      return new Map();
+    }
+  }, [msdVal, fy, expenses, startMonth]);
+  const weekBudgetByCatMonth = useMemo(() => {
+    const map = new Map();
+    for (const line of linesForBudget) {
+      if (line && line.row_type === "category" && line.category_id) {
+        map.set(
+          line.category_id,
+          deriveFutureWeekBudgetForCategory(weekCatBudgetRows, line.category_id, { fiscalYear: fy, startMonth, msd: msdVal, todayStr }),
+        );
+      }
+    }
+    return map;
+  }, [linesForBudget, weekCatBudgetRows, fy, startMonth, msdVal, todayStr]);
+  const expenseBudgetCtx = useMemo(
+    () => ({ currentYear: fy, msdVal, todayStr, startMonth, settledMonths, weekBudgetByCatMonth, aggregatedCells }),
+    [fy, msdVal, todayStr, startMonth, settledMonths, weekBudgetByCatMonth, aggregatedCells],
+  );
+  // 下段(青) = 全月予算経路 (admin L178-181 と同式)
+  const expenseBudgetMonthly = useMemo(
+    () => computeMonthlyExpenseBudgetTotals(linesForBudget, expenseBudgetCtx, startMonth, { budgetOnly: true }).monthly,
+    [linesForBudget, expenseBudgetCtx, startMonth],
+  );
+  // 上段(金) = 既定経路、settledMonths で月セル時にゲート (admin L187-190 と同式)
+  const expenseResolvedMonthly = useMemo(
+    () => computeMonthlyExpenseBudgetTotals(linesForBudget, expenseBudgetCtx, startMonth, {}).monthly,
+    [linesForBudget, expenseBudgetCtx, startMonth],
+  );
+
   const { rows, summary } = useMemo(
     () => computeAssetSheet({ incomeLines, expenseLines, months, initialAsset: initialAssetValue }),
     [incomeLines, expenseLines, months, initialAssetValue],
@@ -235,10 +305,6 @@ export default function AssetSheetViewer({ clientId }) {
     () => rows.map((r) => ({ label: `${r.month}月`, forecast: r.forecastCum, actual: r.actualCum })),
     [rows],
   );
-
-  // 表示用 year ラベル (writer 引数にもこの値を使う)。
-  const yearLabel = currentYear ?? data?.fiscal_year ?? new Date().getFullYear();
-  const fy = Number(yearLabel);
 
   // ── スタイル定数 (admin 1-D-3g と同形) ────────────────
   const gridCols = "260px repeat(12, minmax(84px, 1fr)) 80px 110px";
