@@ -99,6 +99,10 @@ function EditableCell({
   readOnly = false,
   emptyAsNull = false,
   commaFormat = false,
+  // Phase G-4 (2026-06-12): 非 focus 時の表示のみ任意のフォーマッタで上書きするためのフック。
+  //   null → 従来の fmtComma を使用。fmtC を渡すと万表記表示になるが、編集時 (focus 時) と
+  //   commit ロジックは raw 数値のまま (生値編集を維持)。null/空は fmtComma フォールバック。
+  displayFormatter = null,
 }) {
   const [local, setLocal] = useState(value ?? "");
   const [focused, setFocused] = useState(false);
@@ -116,10 +120,18 @@ function EditableCell({
     const n = Number(String(v).replace(/,/g, ""));
     return Number.isFinite(n) && String(v).trim() !== "" ? n.toLocaleString() : String(v);
   };
+  // 非 focus 表示用: displayFormatter が指定されかつ値が数値化できるならそれを通す、それ以外は fmtComma。
+  const fmtDisplay = (v) => {
+    if (displayFormatter && v != null && String(v).trim() !== "") {
+      const n = Number(String(v).replace(/,/g, ""));
+      if (Number.isFinite(n)) return displayFormatter(n);
+    }
+    return fmtComma(v);
+  };
 
   if (readOnly) {
     const isPlaceholder = value == null || value === "";
-    const display = isPlaceholder ? (placeholder ?? "—") : fmtComma(value);
+    const display = isPlaceholder ? (placeholder ?? "—") : fmtDisplay(value);
     return (
       <span style={{
         display: "inline-block", width: "100%", boxSizing: "border-box",
@@ -156,7 +168,7 @@ function EditableCell({
       className="editable-cell-input"
       type={commaFormat ? "text" : type}
       inputMode={commaFormat ? "numeric" : undefined}
-      value={focused ? local : fmtComma(local)}
+      value={focused ? local : fmtDisplay(local)}
       onChange={(e) => setLocal(commaFormat ? e.target.value.replace(/,/g, "") : e.target.value)}
       onFocus={() => setFocused(true)}
       onBlur={() => { setFocused(false); commit(); }}
@@ -709,23 +721,25 @@ export default function AssetSheetViewer({ clientId }) {
                       <EditableCell
                         type="number" commaFormat emptyAsNull
                         value={aVal}
+                        displayFormatter={fmtC}
                         placeholder="—"
                         onCommit={(v) => setIncomeMonthlyActual?.(fy, l.id, i, v)}
                         style={{
                           color: GOLD, fontWeight: 700,
                           fontSize: aFontFor(aVal),
-                          textAlign: "right", padding: "2px 4px", lineHeight: 1.1,
+                          textAlign: "right", padding: "2px 4px", lineHeight: 1.0,
                         }}
                       />
                       <EditableCell
                         type="number" commaFormat emptyAsNull
                         value={tVal}
+                        displayFormatter={fmtC}
                         placeholder="—"
                         onCommit={(v) => setIncomeMonthlyTarget?.(fy, l.id, i, v)}
                         style={{
                           color: BUDGET_BLUE, fontWeight: 500,
                           fontSize: tFontFor(tVal),
-                          textAlign: "right", padding: "2px 4px", lineHeight: 1.1,
+                          textAlign: "right", padding: "2px 4px", lineHeight: 1.0,
                         }}
                       />
                     </div>
