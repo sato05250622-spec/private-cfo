@@ -471,10 +471,18 @@ export default function AssetSheetViewer({ clientId }) {
     fontSize: isLandscape ? 9 : 11, fontWeight: 700, textAlign: "center",
     borderRadius: 6, minWidth: 0, whiteSpace: "nowrap",
   };
+  // Phase G-3 (2026-06-12): 支出シート (AnnualBudgetViewer L893-900) 方式を移植。
+  //   列幅から確定計算でフォントを縮めるための avail (列幅 − 横padding) 定数。
+  //   landscape 月列: 5.5% × ~798 ≈ 44 − pad 4 = 40
+  //   landscape grand 列: 11% × ~798 ≈ 88 − pad 4 = 84
+  //   portrait は tableLayout 相当が無いため控えめなデフォルト (60 / 100)。
+  const monthAvail = isLandscape ? 40 : 60;
+  const grandAvail = isLandscape ? 84 : 100;
+  // Phase G-3: cellStyle に overflow:'hidden' を追加し、隣セルへの物理侵入を遮断 (支出シート td 仕様と一致)。
   const cellStyle = {
     padding: isLandscape ? "4px 2px" : "6px 6px",
     background: NAVY2, borderRadius: 6,
-    minWidth: 0, whiteSpace: "nowrap",
+    minWidth: 0, overflow: 'hidden', whiteSpace: "nowrap",
     border: `1px solid ${BORDER}`, fontSize: isLandscape ? 9 : 11,
   };
   const labelCellStyle = {
@@ -491,17 +499,20 @@ export default function AssetSheetViewer({ clientId }) {
   //   累計残高行で目標残 <0 のとき RED に切替えるため。既存呼出 (引数 2 個) は default で挙動不変。
   // Phase F-1 (2026-06-12): 上段(金) を実測<0 のとき RED に切替 (累計残高がマイナスに沈んだ月で視認性確保)。
   //   支出合計 上段は値が常に >=0 のため挙動不変。
-  const renderTwoValCell = (actualVal, refVal, refColor = BUDGET_BLUE) => {
-    const actualSize = actualVal == null ? 13 : Math.max(10, Math.min(13, cellFontSize(fmtC(actualVal)) + 3));
-    const refSize    = refVal    == null ? 8  : Math.max(7, Math.min(8, cellFontSize(fmtC(refVal)) - 3));
+  // Phase G-3 (2026-06-12): 支出シート (AnnualBudgetViewer L893-900 cellFontSize(text, avail)) 方式を移植。
+  //   列幅 avail に応じて確定計算でフォントを縮める。月セル既定は monthAvail、grand 列は呼出側が grandAvail を渡す。
+  //   外側 div に overflow:'hidden' を付与、lineHeight:1.0 + gap:0 で 2 段スタックの縦侵入も抑制。
+  const renderTwoValCell = (actualVal, refVal, refColor = BUDGET_BLUE, avail = monthAvail) => {
+    const actualSize = actualVal == null ? 12 : Math.max(7, Math.min(13, Math.floor(avail / (String(fmtC(actualVal)).length * 0.85))));
+    const refSize    = refVal    == null ? 8  : Math.max(6, Math.min(9,  Math.floor(avail / (String(fmtC(refVal)).length * 0.95))));
     const actualColor = (actualVal != null && actualVal < 0) ? RED : GOLD;
     return (
-      <div style={{ ...cellStyle, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
-        <span style={{ color: actualColor, fontSize: actualSize, fontWeight: 700, lineHeight: 1.1 }}>
-          {actualVal == null ? "—" : fmtC(actualVal)}
+      <div style={{ ...cellStyle, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0, overflow: 'hidden' }}>
+        <span style={{ color: actualColor, fontSize: actualSize, fontWeight: 700, lineHeight: 1.0, whiteSpace: 'nowrap' }}>
+          {actualVal == null ? '—' : fmtC(actualVal)}
         </span>
-        <span style={{ color: refColor, fontSize: refSize, fontWeight: 500, lineHeight: 1.1 }}>
-          {refVal == null ? "—" : fmtC(refVal)}
+        <span style={{ color: refColor, fontSize: refSize, fontWeight: 500, lineHeight: 1.0, whiteSpace: 'nowrap' }}>
+          {refVal == null ? '—' : fmtC(refVal)}
         </span>
       </div>
     );
