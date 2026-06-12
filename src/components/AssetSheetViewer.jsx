@@ -287,15 +287,95 @@ export default function AssetSheetViewer({ clientId }) {
 
   // Phase 1-D-3h (2026-06-11): 累計残高行「目標合計」列の派生計算 (案②: UI 側のみ)。
   //   admin AssetSheetTab.jsx と同式・同意味:
-  //   expenseTargetTotal = Σ lines.target_value (= 支出管理繰越票 targetGrandTotal と完全一致)
+  //   expenseTargetTotal = Σ linesForBudget.target_value (固定費込み、admin L218-221 と完全一致)
   //   targetNetTotal     = 年間目標差額 (初期資産抜き) = 目標収入 − 目標支出
   //   ※ 既存 summary.forecastCumTotal は「年末予想残高 (初期資産起点・monthly_budget ベース)」で別物。
   //      グラフ (forecastCum/actualCum) や月次累計表示には影響させない。
-  const expenseTargetTotal = (expenseLines || []).reduce(
+  // Phase E-2 (2026-06-12): 集計スコープを expenseLines → linesForBudget (固定費込み) に拡張。
+  //   admin AssetSheetTab.jsx L218-221 と 1 円一致 (= AnnualBudgetTab targetGrandTotal と同経路)。
+  const expenseTargetTotal = (linesForBudget || []).reduce(
     (s, l) => s + (Number(l?.target_value) || 0),
     0,
   );
   const targetNetTotal = summary.incomeTargetTotal - expenseTargetTotal;
+
+  // ── Phase E-2 (2026-06-12): admin AssetSheetTab.jsx L228-300 をバイト一致移植 ─────
+  //   E-1 で構築した settledMonths / expenseResolvedMonthly / expenseBudgetMonthly /
+  //   rows / targetNetTotal を消費。シンボル名は admin と同名で一致するため
+  //   コードは 1 文字も改変せず append (1 円一致の肝)。
+  const expenseActualSettledTotal = useMemo(() => {
+    let s = 0;
+    for (let i = 0; i < months.length; i++) {
+      const cm = Number(months[i]);
+      const settled = settledMonths.includes(cm) || settledMonths.includes(String(cm));
+      if (!settled) continue;
+      const v = expenseResolvedMonthly?.[cm];
+      const n = Number(v);
+      if (v != null && Number.isFinite(n)) s += n;
+    }
+    return s;
+  }, [months, settledMonths, expenseResolvedMonthly]);
+
+  // Phase D (2026-06-11): 累計残高行を「目標管理ビュー」に刷新 (UI 派生、computeAssetSheet 無改変)。
+  //   - actualNetByIdx[i]    : 月 i の純損益 (確定月のみ、未確定月は null)
+  //                            = rows[i].incomeActual − expenseResolvedMonthly[cm]
+  //                              (★初期資産抜き、★支出固定費込み = Phase C 上段と同経路)
+  //   - actualCumByIdx[i]    : 累計実測 (確定月のみ伸ばし、未確定月は前月までの累計を維持)
+  //                            ※決定2-b: 未確定月でも前月累計を表示し続け、視覚的に連続させる
+  //                            ※startMonth より前 (未スタート) のみ null
+  //   - budgetRemainByIdx[i] : 目標残 = targetNetTotal − (累計実測 ?? 0)
+  //                            <0 で RED 切替 (決定6)
+  //   - progressLandingNew   : 着地見込み = Σ(settled ? actualNetNew : forecastNetNew)
+  //                            forecastNetNew = rows[i].incomeTarget − expenseBudgetMonthly[cm]
+  //                            (★初期資産抜き、★固定費込み = 行と同経路)
+  //   グラフ chartData は決定1-β で旧 rows.forecastCum/actualCum を温存 (無改変)。
+  const actualNetByIdx = useMemo(() => {
+    return months.map((m, i) => {
+      const cm = Number(m);
+      const settled = settledMonths.includes(cm) || settledMonths.includes(String(cm));
+      if (!settled) return null;
+      const inc = Number(rows[i]?.incomeActual) || 0;
+      const exp = Number(expenseResolvedMonthly?.[cm]) || 0;
+      return inc - exp;
+    });
+  }, [months, rows, settledMonths, expenseResolvedMonthly]);
+  const actualCumByIdx = useMemo(() => {
+    const out = [];
+    let run = 0;
+    let started = false;
+    for (let i = 0; i < months.length; i++) {
+      const v = actualNetByIdx[i];
+      if (v != null) {
+        run += v;
+        started = true;
+        out.push(run);
+      } else {
+        out.push(started ? run : null);
+      }
+    }
+    return out;
+  }, [months, actualNetByIdx]);
+  const budgetRemainByIdx = useMemo(
+    () => actualCumByIdx.map((cum) => targetNetTotal - (cum ?? 0)),
+    [actualCumByIdx, targetNetTotal],
+  );
+  const progressLandingNew = useMemo(() => {
+    let s = 0;
+    for (let i = 0; i < months.length; i++) {
+      const cm = Number(months[i]);
+      const settled = settledMonths.includes(cm) || settledMonths.includes(String(cm));
+      if (settled) {
+        const inc = Number(rows[i]?.incomeActual) || 0;
+        const exp = Number(expenseResolvedMonthly?.[cm]) || 0;
+        s += inc - exp;
+      } else {
+        const inc = Number(rows[i]?.incomeTarget) || 0;
+        const exp = Number(expenseBudgetMonthly?.[cm]) || 0;
+        s += inc - exp;
+      }
+    }
+    return s;
+  }, [months, rows, settledMonths, expenseResolvedMonthly, expenseBudgetMonthly]);
 
   // Phase 2-4c: 累計残高推移グラフ用データ。
   //   - label   : `${r.month}月` (fiscal 順、startMonth=4 なら 4月..3月)
@@ -328,7 +408,9 @@ export default function AssetSheetViewer({ clientId }) {
   };
 
   // 月セル 2 値 read-only 表示 (支出合計 / 累計残高 行用)。
-  const renderTwoValCell = (actualVal, refVal) => {
+  // Phase E-2 (2026-06-12): refColor を第3引数で受け取り (default=BUDGET_BLUE)。
+  //   累計残高行で目標残 <0 のとき RED に切替えるため。既存呼出 (引数 2 個) は default で挙動不変。
+  const renderTwoValCell = (actualVal, refVal, refColor = BUDGET_BLUE) => {
     const actualSize = actualVal == null ? 15 : Math.max(10, cellFontSize(fmtN(actualVal)) + 5);
     const refSize    = refVal    == null ? 8  : Math.max(7, Math.min(8, cellFontSize(fmtN(refVal)) - 3));
     return (
@@ -336,7 +418,7 @@ export default function AssetSheetViewer({ clientId }) {
         <span style={{ color: GOLD, fontSize: actualSize, fontWeight: 700, lineHeight: 1.1 }}>
           {actualVal == null ? "—" : fmtN(actualVal)}
         </span>
-        <span style={{ color: BUDGET_BLUE, fontSize: refSize, fontWeight: 500, lineHeight: 1.1 }}>
+        <span style={{ color: refColor, fontSize: refSize, fontWeight: 500, lineHeight: 1.1 }}>
           {refVal == null ? "—" : fmtN(refVal)}
         </span>
       </div>
@@ -564,21 +646,24 @@ export default function AssetSheetViewer({ clientId }) {
           {/* 行3: − 支出合計 (read-only 維持) */}
           <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4, marginTop: 6 }}>
             <div style={labelCellStyle}>− 支出合計</div>
-            {rows.map((r, idx) => (
-              <div key={idx}>
-                {renderTwoValCell(
-                  r.expenseActual === 0 ? null : r.expenseActual,
-                  r.expenseBudget === 0 ? null : r.expenseBudget,
-                )}
-              </div>
-            ))}
+            {/* Phase E-2 (2026-06-12): 上段(金)=確定月のみ実測(固定費込み, expenseResolvedMonthly)、
+                下段(青)=月別予算 (expenseBudgetMonthly)。admin AssetSheetTab.jsx L620-627 と完全同形。 */}
+            {rows.map((r, idx) => {
+              const cm = Number(months[idx]);
+              const isSettledM = settledMonths.includes(cm) || settledMonths.includes(String(cm));
+              const upperVal  = isSettledM ? (expenseResolvedMonthly?.[cm] ?? null) : null;
+              const budgetVal = expenseBudgetMonthly?.[cm] ?? null;
+              return <div key={idx}>{renderTwoValCell(upperVal, budgetVal)}</div>;
+            })}
+            {/* 進捗列: Σ実測支出 (固定費込み) — admin L628-635 と同経路 */}
             <div style={{
               ...cellStyle, textAlign: "right",
               color: GOLD, fontWeight: 700,
-              fontSize: Math.max(9, cellFontSize(fmtN(summary.expenseActualTotal)) + 2),
+              fontSize: Math.max(9, cellFontSize(fmtN(expenseActualSettledTotal)) + 2),
             }}>
-              {fmtN(summary.expenseActualTotal)}
+              {fmtN(expenseActualSettledTotal)}
             </div>
+            {/* 目標合計列: Σ予算支出 (BLUE, 600) — admin L640-643 と同じく summary.expenseBudgetTotal を温存 */}
             <div style={{
               ...cellStyle, textAlign: "right",
               color: BUDGET_BLUE, fontWeight: 600,
@@ -594,15 +679,22 @@ export default function AssetSheetViewer({ clientId }) {
             borderTop: `2px solid ${GOLD}55`, paddingTop: 4,
           }}>
             <div style={{ ...labelCellStyle, color: GOLD }}>💎 累計残高</div>
-            {rows.map((r, idx) => (
-              <div key={idx}>{renderTwoValCell(r.actualCum, r.forecastCum)}</div>
-            ))}
+            {/* Phase E-2 (2026-06-12): admin AssetSheetTab.jsx L658-663 と完全同形 (定数名のみ
+                customer ローカル BUDGET_BLUE に置換、色値は admin BLUE と一致 #5BA8FF)。
+                上段(金)=累計実測 (固定費込み・初期資産抜き)、下段(青)=目標残、<0 で RED 切替。 */}
+            {rows.map((_r, idx) => {
+              const upperVal = actualCumByIdx[idx];
+              const lowerVal = budgetRemainByIdx[idx];
+              const lowerColor = (lowerVal != null && lowerVal < 0) ? RED : BUDGET_BLUE;
+              return <div key={idx}>{renderTwoValCell(upperVal, lowerVal, lowerColor)}</div>;
+            })}
+            {/* 進捗列: 着地見込み (progressLandingNew, GOLD/RED) — admin L665-671 と同経路 */}
             <div style={{
               ...cellStyle, textAlign: "right", fontWeight: 700,
-              color: summary.progressLanding >= 0 ? GOLD : RED,
-              fontSize: Math.max(9, cellFontSize(fmtN(summary.progressLanding)) + 2),
+              color: progressLandingNew >= 0 ? GOLD : RED,
+              fontSize: Math.max(9, cellFontSize(fmtN(progressLandingNew)) + 2),
             }}>
-              {fmtN(summary.progressLanding)}
+              {fmtN(progressLandingNew)}
             </div>
             {/* 目標合計列: 年間目標差額 (= 目標収入 − 目標支出、初期資産抜き) BLUE/RED, 600, 自動縮小。
                 Phase 1-D-3h: 旧「年末予想残高 (summary.forecastCumTotal、初期資産起点・monthly_budget ベース)」
