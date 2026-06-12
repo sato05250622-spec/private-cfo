@@ -716,9 +716,13 @@ export default function AssetSheetViewer({ clientId }) {
                 「予想累計 (forecastCumByIdx)」に差替 (settled ゲート無し・全月予算ベース累積)。
                 グランド目標列も同様に forecastNetTotal へ差替。
                 旧 budgetRemainByIdx / targetNetTotal の定義は無使用扱いだが残す (最小差分)。 */}
+            {/* Phase F-2 (2026-06-12): 月セル下段を「予想累計 (forecastCumByIdx)」から
+                「単月予想 (forecastNetByIdx, =本収入予算−支出予算)」に差替。累積廃止。
+                グランド目標列は forecastNetTotal (=Σ単月) を温存 → 行/列で意味が一致。
+                forecastCumByIdx の定義は無使用扱いだが残す (最小差分)。 */}
             {rows.map((_r, idx) => {
               const upperVal = actualCumByIdx[idx];
-              const lowerVal = forecastCumByIdx[idx];
+              const lowerVal = forecastNetByIdx[idx];
               const lowerColor = (lowerVal != null && lowerVal < 0) ? RED : BUDGET_BLUE;
               return <div key={idx}>{renderTwoValCell(upperVal, lowerVal, lowerColor)}</div>;
             })}
