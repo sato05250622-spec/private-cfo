@@ -492,7 +492,7 @@ export default function AssetSheetViewer({ clientId }) {
   // Phase F-1 (2026-06-12): 上段(金) を実測<0 のとき RED に切替 (累計残高がマイナスに沈んだ月で視認性確保)。
   //   支出合計 上段は値が常に >=0 のため挙動不変。
   const renderTwoValCell = (actualVal, refVal, refColor = BUDGET_BLUE) => {
-    const actualSize = actualVal == null ? 15 : Math.max(10, cellFontSize(fmtC(actualVal)) + 5);
+    const actualSize = actualVal == null ? 13 : Math.max(10, Math.min(13, cellFontSize(fmtC(actualVal)) + 3));
     const refSize    = refVal    == null ? 8  : Math.max(7, Math.min(8, cellFontSize(fmtC(refVal)) - 3));
     const actualColor = (actualVal != null && actualVal < 0) ? RED : GOLD;
     return (
@@ -651,7 +651,7 @@ export default function AssetSheetViewer({ clientId }) {
             const aArr = Array.isArray(l?.monthly_actuals) ? l.monthly_actuals : Array(12).fill(0);
             const tSum = tArr.reduce((s, v) => s + (Number.isFinite(Number(v)) ? Number(v) : 0), 0);
             const aSum = aArr.reduce((s, v) => s + (Number.isFinite(Number(v)) ? Number(v) : 0), 0);
-            const aFontFor = (v) => v == null ? 15 : Math.max(10, cellFontSize(fmtN(v)) + 5);
+            const aFontFor = (v) => v == null ? 13 : Math.max(10, Math.min(13, cellFontSize(fmtN(v)) + 3));
             const tFontFor = (v) => v == null ? 8 : Math.max(7, Math.min(8, cellFontSize(fmtN(v)) - 3));
             return (
               <div key={l.id ?? l.category_name} style={{
@@ -726,7 +726,7 @@ export default function AssetSheetViewer({ clientId }) {
                   color: GOLD, fontWeight: 700,
                   fontSize: aFontFor(aSum), padding: "6px 6px",
                 }}>
-                  {fmtN(aSum)}
+                  {fmtC(aSum)}
                 </div>
                 {/* 目標合計列: Σ目標 (read-only) */}
                 <div style={{
@@ -735,7 +735,7 @@ export default function AssetSheetViewer({ clientId }) {
                   fontSize: Math.max(9, cellFontSize(fmtN(tSum)) + 1),
                   padding: "6px 6px",
                 }}>
-                  {fmtN(tSum)}
+                  {fmtC(tSum)}
                 </div>
               </div>
             );
