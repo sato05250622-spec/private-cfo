@@ -197,6 +197,26 @@ export default function AssetSheetViewer({ clientId }) {
     setLocalInitialAsset(Number(authInitialAsset) || 0);
   }, [authInitialAsset]);
 
+  // ── Phase G-2 (2026-06-12): 横画面検出 (AnnualBudgetViewer L227-241 と同形) ─
+  //   landscape のとき:
+  //     - 4 行テーブル全体を viewport 全幅へ position:fixed で breakout (S.overlay maxWidth:430 を逃れる)
+  //     - gridCols を 12% + 12×minmax(0,5.5%) + 11% + 11% = 100% の厳密配分に切替
+  //     - overflowX を hidden、minWidth:0、width:100% で 12 ヶ月フィット
+  //     - 縦線 left を calc(12% + 2px) に追従
+  //     - セル padding/fontSize を圧縮 (8/6/11 → 6/2/9)
+  //   portrait は従来通り (gridCols 160px / overflowX:auto / left:162)。
+  const [isLandscape, setIsLandscape] = useState(
+    typeof window !== "undefined"
+      && window.matchMedia("(orientation: landscape)").matches,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const mq = window.matchMedia("(orientation: landscape)");
+    const handler = (e) => setIsLandscape(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
   const initialAssetValue = Number(localInitialAsset) || 0;
 
   const handleInitialAssetCommit = async (v) => {
@@ -416,16 +436,25 @@ export default function AssetSheetViewer({ clientId }) {
   // ── スタイル定数 (admin 1-D-3g と同形) ────────────────
   // Phase G-1.5 (2026-06-12): ラベル列を 260→160 に縮小し左寄せ密着レイアウトに。
   //   月セル minmax / 進捗 80 / 目標 110 は不変 (数字ロジック・固定列幅は temas)。
-  const gridCols = "160px repeat(12, minmax(84px, 1fr)) 80px 110px";
+  // Phase G-2 (2026-06-12): landscape では 12 ヶ月フィット用に厳密 % 配分へ切替。
+  //   12% + 12×minmax(0,5.5%) + 11% + 11% = 100%。column-gap 4 × 14 ギャップ = 56px は
+  //   minmax(0, 5.5%) の 0 下限が吸収して overflowX:hidden 下でも目標列が溢れない。
+  //   ※ "5.5%" 直書きフォールバックは禁止 (column-gap 56px を吸収できず右端クリップ)。
+  const gridCols = isLandscape
+    ? "12% repeat(12, minmax(0, 5.5%)) 11% 11%"
+    : "160px repeat(12, minmax(84px, 1fr)) 80px 110px";
+  // Phase G-2: landscape ではセル padding / フォントを圧縮 (AnnualBudgetViewer の cellPadX/baseCellFontSize 思想)。
   const headerCellStyle = {
-    padding: "8px 6px", background: NAVY3, color: TEXT_SECONDARY,
-    fontSize: 11, fontWeight: 700, textAlign: "center",
+    padding: isLandscape ? "6px 2px" : "8px 6px",
+    background: NAVY3, color: TEXT_SECONDARY,
+    fontSize: isLandscape ? 9 : 11, fontWeight: 700, textAlign: "center",
     borderRadius: 6, minWidth: 0, whiteSpace: "nowrap",
   };
   const cellStyle = {
-    padding: "6px 6px", background: NAVY2, borderRadius: 6,
+    padding: isLandscape ? "4px 2px" : "6px 6px",
+    background: NAVY2, borderRadius: 6,
     minWidth: 0, whiteSpace: "nowrap",
-    border: `1px solid ${BORDER}`, fontSize: 11,
+    border: `1px solid ${BORDER}`, fontSize: isLandscape ? 9 : 11,
   };
   const labelCellStyle = {
     ...cellStyle, color: TEXT_SECONDARY, fontWeight: 700, textAlign: "left",
@@ -457,7 +486,10 @@ export default function AssetSheetViewer({ clientId }) {
     );
   };
 
-  return (
+  // Phase G-2 (2026-06-12): 既存 JSX 全体を card 変数に格納し、
+  //   landscape 時は viewport 全幅へ position:fixed で breakout する (AnnualBudgetViewer L1792-1805 同形)。
+  //   portrait 時はそのまま card を return → 挙動完全不変。
+  const card = (
     <div style={{
       background: CARD_BG, borderRadius: 16, border: `1px solid ${BORDER}`,
       padding: 16, color: TEXT_PRIMARY,
@@ -513,12 +545,24 @@ export default function AssetSheetViewer({ clientId }) {
         </div>
       </div>
 
-      {/* ③ 4 行テーブル (1-D-3g レイアウト・編集可) */}
-      <div style={{ overflowX: "auto" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: "fit-content", position: "relative" }}>
+      {/* ③ 4 行テーブル (1-D-3g レイアウト・編集可)
+          Phase G-2 (2026-06-12): landscape では overflowX:hidden + 内側 width:100% で
+            grid を viewport 幅に追従させ、横スクロール無しで 12 ヶ月フィット。 */}
+      <div style={{ overflowX: isLandscape ? "hidden" : "auto" }}>
+        <div style={{
+          display: "flex", flexDirection: "column", gap: 4,
+          minWidth: isLandscape ? 0 : "fit-content",
+          width: isLandscape ? "100%" : undefined,
+          position: "relative",
+        }}>
           {/* Phase G-1 / G-1.5 (2026-06-12): ラベル列 (col1=160px) と月セル群 (col2..) の境界に縦線を 1 本敷く。
-              位置 left:162 = col1(160px) + gap4 の中央。スクロール内側に置くので月セルと一緒に水平スクロールする。 */}
-          <div style={{ position: "absolute", left: 162, top: 0, bottom: 0, width: 1, background: BORDER, pointerEvents: "none" }} />
+              位置 left:162 = col1(160px) + gap4 の中央。スクロール内側に置くので月セルと一緒に水平スクロールする。
+              Phase G-2 (2026-06-12): landscape では col1=12% に追従させるため left=calc(12% + 2px)。 */}
+          <div style={{
+            position: "absolute",
+            left: isLandscape ? "calc(12% + 2px)" : 162,
+            top: 0, bottom: 0, width: 1, background: BORDER, pointerEvents: "none",
+          }} />
 
           {/* 行1: 初期資産 (月見出し兼用) — 初期資産セルを EditableCell 化 */}
           <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
@@ -759,4 +803,24 @@ export default function AssetSheetViewer({ clientId }) {
       </div>
     </div>
   );
+
+  // Phase G-2: landscape 時のみ viewport 全幅 breakout (S.overlay maxWidth:430 を逃れる)。
+  //   親 (App.jsx の menuScreen==="assetSheet" wrapper / S.overlay) には transform が無いため
+  //   position:fixed が viewport 基準で解決し、確実に全幅に乗る。
+  //   env(safe-area-inset-*) でノッチ・ダイナミックアイランドを回避。
+  if (isLandscape) {
+    return (
+      <div style={{
+        position: "fixed", inset: 0, zIndex: 400, background: NAVY2,
+        overflow: "auto", padding: 8, boxSizing: "border-box",
+        paddingTop: "calc(8px + env(safe-area-inset-top))",
+        paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
+        paddingLeft: "calc(8px + env(safe-area-inset-left))",
+        paddingRight: "calc(8px + env(safe-area-inset-right))",
+      }}>
+        {card}
+      </div>
+    );
+  }
+  return card;
 }
