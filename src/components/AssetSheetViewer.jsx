@@ -514,17 +514,19 @@ export default function AssetSheetViewer({ clientId }) {
   // Phase G-3 (2026-06-12): 支出シート (AnnualBudgetViewer L893-900 cellFontSize(text, avail)) 方式を移植。
   //   列幅 avail に応じて確定計算でフォントを縮める。月セル既定は monthAvail、grand 列は呼出側が grandAvail を渡す。
   //   外側 div に overflow:'hidden' を付与、lineHeight:1.0 + gap:0 で 2 段スタックの縦侵入も抑制。
+  // Phase G-5 (2026-06-12): 1 円フル桁 fmtN 表示に戻し、avail 連動式の下限を 5px まで開放
+  //   (支出シート AnnualBudgetViewer L893-897 と同流儀)。長桁でも文字化けせず収まる。
   const renderTwoValCell = (actualVal, refVal, refColor = BUDGET_BLUE, avail = monthAvail) => {
-    const actualSize = actualVal == null ? 12 : Math.max(7, Math.min(13, Math.floor(avail / (String(fmtC(actualVal)).length * 0.85))));
-    const refSize    = refVal    == null ? 8  : Math.max(6, Math.min(9,  Math.floor(avail / (String(fmtC(refVal)).length * 0.95))));
+    const actualSize = actualVal == null ? 12 : Math.max(5, Math.min(13, Math.floor(avail / (String(fmtN(actualVal)).length * 0.85))));
+    const refSize    = refVal    == null ? 8  : Math.max(5, Math.min(9,  Math.floor(avail / (String(fmtN(refVal)).length * 0.95))));
     const actualColor = (actualVal != null && actualVal < 0) ? RED : GOLD;
     return (
       <div style={{ ...cellStyle, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0, overflow: 'hidden' }}>
         <span style={{ color: actualColor, fontSize: actualSize, fontWeight: 700, lineHeight: 1.0, whiteSpace: 'nowrap' }}>
-          {actualVal == null ? '—' : fmtC(actualVal)}
+          {actualVal == null ? '—' : fmtN(actualVal)}
         </span>
         <span style={{ color: refColor, fontSize: refSize, fontWeight: 500, lineHeight: 1.0, whiteSpace: 'nowrap' }}>
-          {refVal == null ? '—' : fmtC(refVal)}
+          {refVal == null ? '—' : fmtN(refVal)}
         </span>
       </div>
     );
@@ -674,8 +676,9 @@ export default function AssetSheetViewer({ clientId }) {
             const aArr = Array.isArray(l?.monthly_actuals) ? l.monthly_actuals : Array(12).fill(0);
             const tSum = tArr.reduce((s, v) => s + (Number.isFinite(Number(v)) ? Number(v) : 0), 0);
             const aSum = aArr.reduce((s, v) => s + (Number.isFinite(Number(v)) ? Number(v) : 0), 0);
-            const aFontFor = (v) => v == null ? 13 : Math.max(10, Math.min(13, cellFontSize(fmtN(v)) + 3));
-            const tFontFor = (v) => v == null ? 8 : Math.max(7, Math.min(8, cellFontSize(fmtN(v)) - 3));
+            // Phase G-5 (2026-06-12): monthAvail 連動・下限 5px / 上限 13(上段)/9(下段)。長桁フル桁でも縮みきって収まる。
+            const aFontFor = (v) => v == null ? 11 : Math.max(5, Math.min(13, Math.floor(monthAvail / (String(fmtN(v)).length * 0.85))));
+            const tFontFor = (v) => v == null ? 8 : Math.max(5, Math.min(9, Math.floor(monthAvail / (String(fmtN(v)).length * 0.95))));
             return (
               <div key={l.id ?? l.category_name} style={{
                 display: "grid", gridTemplateColumns: gridCols, gap: 4,
@@ -721,7 +724,6 @@ export default function AssetSheetViewer({ clientId }) {
                       <EditableCell
                         type="number" commaFormat emptyAsNull
                         value={aVal}
-                        displayFormatter={fmtC}
                         placeholder="—"
                         onCommit={(v) => setIncomeMonthlyActual?.(fy, l.id, i, v)}
                         style={{
@@ -733,7 +735,6 @@ export default function AssetSheetViewer({ clientId }) {
                       <EditableCell
                         type="number" commaFormat emptyAsNull
                         value={tVal}
-                        displayFormatter={fmtC}
                         placeholder="—"
                         onCommit={(v) => setIncomeMonthlyTarget?.(fy, l.id, i, v)}
                         style={{
@@ -745,22 +746,23 @@ export default function AssetSheetViewer({ clientId }) {
                     </div>
                   );
                 })}
-                {/* 進捗列: Σ実測 (read-only) */}
+                {/* 進捗列: Σ実測 (read-only) — Phase G-5: grandAvail 連動, min5 */}
                 <div style={{
                   ...cellStyle, textAlign: "right",
                   color: GOLD, fontWeight: 700,
-                  fontSize: aFontFor(aSum), padding: "6px 6px",
+                  fontSize: Math.max(5, Math.min(13, Math.floor(grandAvail / (String(fmtN(aSum)).length * 0.85)))),
+                  padding: "6px 6px",
                 }}>
-                  {fmtC(aSum)}
+                  {fmtN(aSum)}
                 </div>
-                {/* 目標合計列: Σ目標 (read-only) */}
+                {/* 目標合計列: Σ目標 (read-only) — Phase G-5: grandAvail 連動, min5 */}
                 <div style={{
                   ...cellStyle, textAlign: "right",
                   color: BUDGET_BLUE, fontWeight: 600,
-                  fontSize: Math.max(9, cellFontSize(fmtN(tSum)) + 1),
+                  fontSize: Math.max(5, Math.min(9, Math.floor(grandAvail / (String(fmtN(tSum)).length * 0.95)))),
                   padding: "6px 6px",
                 }}>
-                  {fmtC(tSum)}
+                  {fmtN(tSum)}
                 </div>
               </div>
             );
@@ -785,17 +787,17 @@ export default function AssetSheetViewer({ clientId }) {
             <div style={{
               ...cellStyle, textAlign: "right",
               color: GOLD, fontWeight: 700,
-              fontSize: Math.max(9, cellFontSize(fmtC(expenseActualSettledTotal)) + 2),
+              fontSize: Math.max(5, Math.min(13, Math.floor(grandAvail / (String(fmtN(expenseActualSettledTotal)).length * 0.85)))),
             }}>
-              {fmtC(expenseActualSettledTotal)}
+              {fmtN(expenseActualSettledTotal)}
             </div>
-            {/* 目標合計列: Σ予算支出 (BLUE, 600) — admin L640-643 と同じく summary.expenseBudgetTotal を温存 */}
+            {/* 目標合計列: Σ予算支出 (BLUE, 600) — admin L640-643 と同じく summary.expenseBudgetTotal を温存。Phase G-5: grandAvail 連動, min5 */}
             <div style={{
               ...cellStyle, textAlign: "right",
               color: BUDGET_BLUE, fontWeight: 600,
-              fontSize: Math.max(9, cellFontSize(fmtC(summary.expenseBudgetTotal)) + 1),
+              fontSize: Math.max(5, Math.min(9, Math.floor(grandAvail / (String(fmtN(summary.expenseBudgetTotal)).length * 0.95)))),
             }}>
-              {fmtC(summary.expenseBudgetTotal)}
+              {fmtN(summary.expenseBudgetTotal)}
             </div>
           </div>
 
@@ -826,9 +828,9 @@ export default function AssetSheetViewer({ clientId }) {
             <div style={{
               ...cellStyle, textAlign: "right", fontWeight: 700,
               color: progressLandingNew >= 0 ? GOLD : RED,
-              fontSize: Math.max(9, cellFontSize(fmtC(progressLandingNew)) + 2),
+              fontSize: Math.max(5, Math.min(13, Math.floor(grandAvail / (String(fmtN(progressLandingNew)).length * 0.85)))),
             }}>
-              {fmtC(progressLandingNew)}
+              {fmtN(progressLandingNew)}
             </div>
             {/* 目標合計列: Phase F-1 (2026-06-12) で年間予想差額 (forecastNetTotal)
                 = Σ(月予想 = 目標収入 − 予算支出、初期資産抜き、全月累計) に差替。
@@ -838,10 +840,10 @@ export default function AssetSheetViewer({ clientId }) {
               style={{
                 ...cellStyle, textAlign: "right", fontWeight: 600,
                 color: forecastNetTotal >= 0 ? BUDGET_BLUE : RED,
-                fontSize: Math.max(9, cellFontSize(fmtC(forecastNetTotal)) + 1),
+                fontSize: Math.max(5, Math.min(9, Math.floor(grandAvail / (String(fmtN(forecastNetTotal)).length * 0.95)))),
               }}
             >
-              {fmtC(forecastNetTotal)}
+              {fmtN(forecastNetTotal)}
             </div>
           </div>
 
