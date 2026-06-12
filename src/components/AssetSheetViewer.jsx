@@ -466,36 +466,22 @@ export default function AssetSheetViewer({ clientId }) {
   // Phase 2-4c: 累計残高推移グラフ用データは forecastNetByIdx / actualCumByIdx 定義後に
   //   組み立てる (定義より上に書くと TDZ で参照不可)。下の useMemo 群末尾に移設済。
 
-  // ── スタイル定数 (admin 1-D-3g と同形) ────────────────
-  // Phase G-1.5 (2026-06-12): ラベル列を 260→160 に縮小し左寄せ密着レイアウトに。
-  //   月セル minmax / 進捗 80 / 目標 110 は不変 (数字ロジック・固定列幅は temas)。
-  // Phase G-2 (2026-06-12): landscape では 12 ヶ月フィット用に厳密 % 配分へ切替。
-  //   12% + 12×minmax(0,5.5%) + 11% + 11% = 100%。column-gap 4 × 14 ギャップ = 56px は
-  //   minmax(0, 5.5%) の 0 下限が吸収して overflowX:hidden 下でも目標列が溢れない。
-  //   ※ "5.5%" 直書きフォールバックは禁止 (column-gap 56px を吸収できず右端クリップ)。
-  const gridCols = isLandscape
-    ? "12% repeat(12, minmax(0, 5.5%)) 11% 11%"
-    : "160px repeat(12, minmax(84px, 1fr)) 80px 110px";
-  // Phase G-2: landscape ではセル padding / フォントを圧縮 (AnnualBudgetViewer の cellPadX/baseCellFontSize 思想)。
+  // ── スタイル定数 ────────────────
+  // Phase G-7 (2026-06-12): 縦横問わず固定列幅で「2行分割 → 1セル2段重ね」に作り替え。
+  //   col1=128px (ラベル) / 月セル 96px × 12 (avail 84) / 進捗 92px (avail 80) / 目標合計 108px (avail 96)。
+  //   landscape の % 配分・avail 圧縮分岐は撤去。コンテナ overflowX:auto で横スクロール許容。
+  const gridCols = "128px repeat(12, 96px) 92px 108px";
   const headerCellStyle = {
-    padding: isLandscape ? "6px 2px" : "8px 6px",
+    padding: "8px 6px",
     background: NAVY3, color: TEXT_SECONDARY,
-    fontSize: isLandscape ? 9 : 11, fontWeight: 700, textAlign: "center",
+    fontSize: 11, fontWeight: 700, textAlign: "center",
     borderRadius: 6, minWidth: 0, whiteSpace: "nowrap",
   };
-  // Phase G-3 (2026-06-12): 支出シート (AnnualBudgetViewer L893-900) 方式を移植。
-  //   列幅から確定計算でフォントを縮めるための avail (列幅 − 横padding) 定数。
-  //   landscape 月列: 5.5% × ~798 ≈ 44 − pad 4 = 40
-  //   landscape grand 列: 11% × ~798 ≈ 88 − pad 4 = 84
-  //   portrait は tableLayout 相当が無いため控えめなデフォルト (60 / 100)。
-  const monthAvail = isLandscape ? 40 : 60;
-  const grandAvail = isLandscape ? 84 : 100;
-  // Phase G-3: cellStyle に overflow:'hidden' を追加し、隣セルへの物理侵入を遮断 (支出シート td 仕様と一致)。
   const cellStyle = {
-    padding: isLandscape ? "4px 2px" : "6px 6px",
-    background: NAVY2, borderRadius: 6,
+    padding: "4px 4px", background: NAVY2, borderRadius: 6,
     minWidth: 0, overflow: 'hidden', whiteSpace: "nowrap",
-    border: `1px solid ${BORDER}`, fontSize: isLandscape ? 9 : 11,
+    border: `1px solid ${BORDER}`, fontSize: 11,
+    display: "flex", alignItems: "center",
   };
   const labelCellStyle = {
     ...cellStyle, color: TEXT_SECONDARY, fontWeight: 700, textAlign: "left",
@@ -506,15 +492,36 @@ export default function AssetSheetViewer({ clientId }) {
     cursor: "pointer", whiteSpace: "nowrap",
   };
 
-  // Phase G-6 (2026-06-12): 実測行/目標行の 2 行分割に伴い 1 セル = 1 値の単純ヘルパに刷新。
-  //   avail 連動・下限 5px・上限 13px (上下スタックが消えたので上限を引上)。
-  //   旧 renderTwoValCell (上下 2 段) は廃止 (未使用)。
-  const renderOneValCell = (val, color, avail = monthAvail) => {
-    const size = val == null ? 12 : Math.max(5, Math.min(13, Math.floor(avail / (String(fmtN(val)).length * 0.85))));
+  // Phase G-7 (2026-06-12): 1 セル 2 段重ね (上=実測 GOLD 大 / 下=目標 BLUE 小)。
+  //   avail 連動・min5・各段で上限 (上 aMax=15, 下 tMax=9)。tv<0 で下段 RED 切替。
+  const renderTwoStackCell = (av, tv, { avail = 84, aMax = 15, tMax = 9 } = {}) => {
+    const sz = (v, max) =>
+      v == null ? Math.min(max, 12)
+      : Math.max(5, Math.min(max, Math.floor(avail / (String(fmtN(v)).length * 0.85))));
+    const tNeg = tv != null && tv < 0;
     return (
-      <div style={{ ...cellStyle, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', overflow: 'hidden' }}>
-        <span style={{ color, fontSize: size, fontWeight: 700, lineHeight: 1.0, whiteSpace: 'nowrap' }}>
-          {val == null ? '—' : fmtN(val)}
+      <div style={{ ...cellStyle, display: "flex", flexDirection: "column",
+                    alignItems: "flex-end", justifyContent: "center", overflow: "hidden" }}>
+        <span style={{ display: "block", width: "100%", textAlign: "right", whiteSpace: "nowrap",
+                       overflow: "hidden", color: GOLD, fontWeight: 800,
+                       fontSize: sz(av, aMax), lineHeight: 1.08 }}>{av == null ? "—" : fmtN(av)}</span>
+        <span style={{ display: "block", width: "100%", textAlign: "right", whiteSpace: "nowrap",
+                       overflow: "hidden", marginTop: 2, color: tNeg ? RED : BUDGET_BLUE, fontWeight: 800,
+                       fontSize: sz(tv, tMax), lineHeight: 1.08 }}>{tv == null ? "—" : fmtN(tv)}</span>
+      </div>
+    );
+  };
+
+  // Phase G-7 (2026-06-12): 単値 grand セル (進捗 / 目標合計)。負値は RED に切替。
+  const renderEndCell = (val, color, { avail = 88, max = 16 } = {}) => {
+    const isNeg = val != null && val < 0;
+    const size = val == null ? Math.min(max, 12)
+      : Math.max(5, Math.min(max, Math.floor(avail / (String(fmtN(val)).length * 0.85))));
+    return (
+      <div style={{ ...cellStyle, justifyContent: "center", overflow: "hidden" }}>
+        <span style={{ display: "block", width: "100%", textAlign: "right", whiteSpace: "nowrap",
+                       overflow: "hidden", color: isNeg ? RED : color, fontWeight: 800, fontSize: size }}>
+          {val == null ? "—" : fmtN(val)}
         </span>
       </div>
     );
@@ -579,22 +586,17 @@ export default function AssetSheetViewer({ clientId }) {
         </div>
       </div>
 
-      {/* ③ 4 行テーブル (1-D-3g レイアウト・編集可)
-          Phase G-2 (2026-06-12): landscape では overflowX:hidden + 内側 width:100% で
-            grid を viewport 幅に追従させ、横スクロール無しで 12 ヶ月フィット。 */}
-      <div style={{ overflowX: isLandscape ? "hidden" : "auto" }}>
+      {/* ③ テーブル — Phase G-7: 縦横問わず固定列幅 + overflowX:auto で横スクロール許容。 */}
+      <div style={{ overflowX: "auto" }}>
         <div style={{
           display: "flex", flexDirection: "column", gap: 4,
-          minWidth: isLandscape ? 0 : "fit-content",
-          width: isLandscape ? "100%" : undefined,
+          minWidth: "fit-content",
           position: "relative",
         }}>
-          {/* Phase G-1 / G-1.5 (2026-06-12): ラベル列 (col1=160px) と月セル群 (col2..) の境界に縦線を 1 本敷く。
-              位置 left:162 = col1(160px) + gap4 の中央。スクロール内側に置くので月セルと一緒に水平スクロールする。
-              Phase G-2 (2026-06-12): landscape では col1=12% に追従させるため left=calc(12% + 2px)。 */}
+          {/* ラベル列 (col1=128px) と月セル群の境界に縦線を 1 本。left:130 = col1(128) + gap4 の中央。 */}
           <div style={{
             position: "absolute",
-            left: isLandscape ? "calc(12% + 2px)" : 162,
+            left: 130,
             top: 0, bottom: 0, width: 1, background: BORDER, pointerEvents: "none",
           }} />
 
@@ -617,7 +619,7 @@ export default function AssetSheetViewer({ clientId }) {
                 onCommit={handleInitialAssetCommit}
                 style={{
                   color: GOLD, fontWeight: 700, textAlign: "right",
-                  fontSize: Math.max(5, Math.min(13, Math.floor((isLandscape ? 89 : 156) / (Math.max(1, String(fmtN(initialAssetValue || 0)).length) * 0.85)))),
+                  fontSize: Math.max(5, Math.min(15, Math.floor(120 / (Math.max(1, String(fmtN(initialAssetValue || 0)).length) * 0.85)))),
                   padding: "0 2px", border: "none", lineHeight: 1.0,
                 }}
               />
@@ -661,42 +663,33 @@ export default function AssetSheetViewer({ clientId }) {
               </div>
             </div>
           )}
-          {/* Phase G-6 (2026-06-12): 各 line を「実測行 + 目標行」の連続 2 grid 行に分割。
-              1 セル = 1 EditableCell で input の二重 padding/border 問題を解消、avail 連動 min5/上限 13。
-              React import 無し環境のため Fragment 不可 → 2 要素の配列を返す (各要素に key)。 */}
+          {/* Phase G-7 (2026-06-12): 各 line を 1 grid 行に統合し、月セルは renderTwoStackCell で
+              上=実測GOLD大 / 下=目標BLUE小 の 2 段重ね編集 UI。進捗=実測Σ、目標合計=目標Σ。
+              月セルは EditableCell ペアを内包する縦スタック (一目で実測/目標を確認・編集できる)。 */}
           {incomeLines.map((l) => {
             const tArr = Array.isArray(l?.monthly_targets) ? l.monthly_targets : Array(12).fill(0);
             const aArr = Array.isArray(l?.monthly_actuals) ? l.monthly_actuals : Array(12).fill(0);
             const tSum = tArr.reduce((s, v) => s + (Number.isFinite(Number(v)) ? Number(v) : 0), 0);
             const aSum = aArr.reduce((s, v) => s + (Number.isFinite(Number(v)) ? Number(v) : 0), 0);
-            const aFontFor = (v) => v == null ? 11 : Math.max(5, Math.min(13, Math.floor(monthAvail / (String(fmtN(v)).length * 0.85))));
-            const tFontFor = (v) => v == null ? 11 : Math.max(5, Math.min(13, Math.floor(monthAvail / (String(fmtN(v)).length * 0.85))));
-            const grandASize = Math.max(5, Math.min(13, Math.floor(grandAvail / (String(fmtN(aSum)).length * 0.85))));
-            const grandTSize = Math.max(5, Math.min(13, Math.floor(grandAvail / (String(fmtN(tSum)).length * 0.85))));
-            const keyBase = l.id ?? l.category_name;
+            const aFontFor = (v) => v == null ? 12 : Math.max(5, Math.min(15, Math.floor(84 / (String(fmtN(v)).length * 0.85))));
+            const tFontFor = (v) => v == null ? 9  : Math.max(5, Math.min(9,  Math.floor(84 / (String(fmtN(v)).length * 0.85))));
             const lineName = l?.category_name ?? "";
-            const subLabel = (text, color) => (
-              <span style={{ color, fontSize: 9, fontWeight: 700, opacity: 0.8, marginLeft: 4, whiteSpace: "nowrap" }}>{text}</span>
-            );
-            const blankCell = <div style={{ ...cellStyle, background: "transparent", border: "none" }} />;
-            return [
-              /* === 実測行 === */
-              <div key={`${keyBase}_a`} style={{
+            return (
+              <div key={l.id ?? l.category_name} style={{
                 display: "grid", gridTemplateColumns: gridCols, gap: 4,
                 borderTop: `1px dashed ${BORDER}`, paddingTop: 2,
               }}>
-                {/* col1: 行名 EditableCell + (実測) + × */}
-                <div style={{ ...cellStyle, display: "flex", alignItems: "center", gap: 4, padding: "2px 4px" }}>
+                {/* col1: 行名 EditableCell + × */}
+                <div style={{ ...cellStyle, display: "flex", alignItems: "center", gap: 4, padding: "4px 6px" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <EditableCell
                       type="text"
                       value={lineName}
                       placeholder="収入項目名"
                       onCommit={(v) => setIncomeLineName?.(fy, l.id, v)}
-                      style={{ color: GOLD, fontWeight: 700, fontSize: 11, padding: "0 2px", border: "none", lineHeight: 1.0 }}
+                      style={{ color: TEXT_PRIMARY, fontWeight: 700, fontSize: 12, padding: "0 2px", border: "none", lineHeight: 1.0 }}
                     />
                   </div>
-                  {subLabel("実測", GOLD)}
                   <button
                     onClick={() => {
                       const name = l?.category_name || "(無題)";
@@ -708,195 +701,89 @@ export default function AssetSheetViewer({ clientId }) {
                     style={{
                       background: "transparent", color: RED,
                       border: `1px solid ${RED}55`, borderRadius: 4,
-                      fontSize: 9, fontWeight: 700, padding: "0 4px",
+                      fontSize: 10, fontWeight: 700, padding: "0 6px",
                       cursor: "pointer", whiteSpace: "nowrap",
                     }}
                   >×</button>
                 </div>
-                {/* col2-13: 月セル × 12 (実測のみ、1 セル = 1 EditableCell) */}
+                {/* col2-13: 月セル × 12 (1 セル内に 上=実測GOLD大 / 下=目標BLUE小 の編集スタック) */}
                 {months.map((_m, i) => {
                   const aRaw = Number(aArr[i]);
+                  const tRaw = Number(tArr[i]);
                   const aVal = Number.isFinite(aRaw) && aRaw !== 0 ? aRaw : null;
+                  const tVal = Number.isFinite(tRaw) && tRaw !== 0 ? tRaw : null;
                   return (
-                    <div key={`a${i}`} style={{ ...cellStyle, padding: "1px 2px" }}>
+                    <div key={`s${i}`} style={{
+                      ...cellStyle, display: "flex", flexDirection: "column",
+                      alignItems: "stretch", justifyContent: "center",
+                      gap: 2, padding: "2px 3px",
+                    }}>
                       <EditableCell
                         type="number" commaFormat emptyAsNull
                         value={aVal}
                         placeholder="—"
                         onCommit={(v) => setIncomeMonthlyActual?.(fy, l.id, i, v)}
                         style={{
-                          color: GOLD, fontWeight: 700,
+                          color: GOLD, fontWeight: 800,
                           fontSize: aFontFor(aVal),
-                          textAlign: "right", padding: "0 2px", border: "none", lineHeight: 1.0,
+                          textAlign: "right", padding: "0 2px", border: "none", lineHeight: 1.08,
                         }}
                       />
-                    </div>
-                  );
-                })}
-                {/* col14 進捗列: Σ実測 (GOLD) */}
-                <div style={{
-                  ...cellStyle, textAlign: "right",
-                  color: GOLD, fontWeight: 700,
-                  fontSize: grandASize,
-                  display: "flex", alignItems: "center", justifyContent: "flex-end",
-                }}>
-                  {fmtN(aSum)}
-                </div>
-                {/* col15 目標合計列: 空 (目標は次の行へ) */}
-                {blankCell}
-              </div>,
-              /* === 目標行 === */
-              <div key={`${keyBase}_t`} style={{
-                display: "grid", gridTemplateColumns: gridCols, gap: 4,
-              }}>
-                {/* col1: 行名 (read-only) + (目標) */}
-                <div style={{ ...cellStyle, display: "flex", alignItems: "center", gap: 4, padding: "2px 4px" }}>
-                  <span style={{ color: BUDGET_BLUE, fontWeight: 700, fontSize: 11, flex: 1, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {lineName || "—"}
-                  </span>
-                  {subLabel("目標", BUDGET_BLUE)}
-                </div>
-                {/* col2-13: 月セル × 12 (目標のみ) */}
-                {months.map((_m, i) => {
-                  const tRaw = Number(tArr[i]);
-                  const tVal = Number.isFinite(tRaw) && tRaw !== 0 ? tRaw : null;
-                  return (
-                    <div key={`t${i}`} style={{ ...cellStyle, padding: "1px 2px" }}>
                       <EditableCell
                         type="number" commaFormat emptyAsNull
                         value={tVal}
                         placeholder="—"
                         onCommit={(v) => setIncomeMonthlyTarget?.(fy, l.id, i, v)}
                         style={{
-                          color: BUDGET_BLUE, fontWeight: 700,
+                          color: BUDGET_BLUE, fontWeight: 800,
                           fontSize: tFontFor(tVal),
-                          textAlign: "right", padding: "0 2px", border: "none", lineHeight: 1.0,
+                          textAlign: "right", padding: "0 2px", border: "none", lineHeight: 1.08,
                         }}
                       />
                     </div>
                   );
                 })}
-                {/* col14 空 (実測は前の行) */}
-                {blankCell}
+                {/* col14 進捗列: Σ実測 (GOLD) */}
+                {renderEndCell(aSum, GOLD, { avail: 80, max: 17 })}
                 {/* col15 目標合計列: Σ目標 (BLUE) */}
-                <div style={{
-                  ...cellStyle, textAlign: "right",
-                  color: BUDGET_BLUE, fontWeight: 700,
-                  fontSize: grandTSize,
-                  display: "flex", alignItems: "center", justifyContent: "flex-end",
-                }}>
-                  {fmtN(tSum)}
-                </div>
-              </div>,
-            ];
+                {renderEndCell(tSum, BUDGET_BLUE, { avail: 96, max: 16 })}
+              </div>
+            );
           })}
 
           {/* Phase G-1.5 (2026-06-12): 旧 standalone「＋ 収入項目を追加」ボタンは撤去。
               代わりに 本収入 ヘッダー内に小さい ＋ ボタンを配置 (上 ⊕ 本収入 セクション参照)。 */}
 
-          {/* 行3: − 支出合計 (Phase G-6: 実測/目標 2 行分割) */}
-          {/* 実測行 */}
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4, marginTop: 6 }}>
-            <div style={{ ...labelCellStyle, display: "flex", alignItems: "center", gap: 4 }}>
-              <span>− 支出合計</span>
-              <span style={{ color: GOLD, fontSize: 9, fontWeight: 700, opacity: 0.8 }}>実測</span>
-            </div>
+          {/* 行: − 支出合計 (Phase G-7: 2 段重ね 1 行)
+              月セル 上=settled月実測(他null→「—」, GOLD大) / 下=予算 (BLUE小)。
+              進捗=実測Σ (GOLD), 目標合計=予算Σ (BLUE)。 */}
+          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4,
+                        marginTop: 6, borderTop: `1px solid ${BORDER}`, paddingTop: 4 }}>
+            <div style={labelCellStyle}>− 支出合計</div>
             {rows.map((r, idx) => {
               const cm = Number(months[idx]);
               const isSettledM = settledMonths.includes(cm) || settledMonths.includes(String(cm));
               const upperVal = isSettledM ? (expenseResolvedMonthly?.[cm] ?? null) : null;
-              return <div key={`xa${idx}`}>{renderOneValCell(upperVal, GOLD)}</div>;
-            })}
-            {/* col14 進捗列: Σ実測支出 (固定費込み) */}
-            <div style={{
-              ...cellStyle, textAlign: "right",
-              color: GOLD, fontWeight: 700,
-              fontSize: Math.max(5, Math.min(13, Math.floor(grandAvail / (String(fmtN(expenseActualSettledTotal)).length * 0.85)))),
-              display: "flex", alignItems: "center", justifyContent: "flex-end",
-            }}>
-              {fmtN(expenseActualSettledTotal)}
-            </div>
-            {/* col15 空 */}
-            <div style={{ ...cellStyle, background: "transparent", border: "none" }} />
-          </div>
-          {/* 目標行 */}
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
-            <div style={{ ...labelCellStyle, display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ color: BUDGET_BLUE }}>− 支出合計</span>
-              <span style={{ color: BUDGET_BLUE, fontSize: 9, fontWeight: 700, opacity: 0.8 }}>目標</span>
-            </div>
-            {rows.map((_r, idx) => {
-              const cm = Number(months[idx]);
               const budgetVal = expenseBudgetMonthly?.[cm] ?? null;
-              return <div key={`xt${idx}`}>{renderOneValCell(budgetVal, BUDGET_BLUE)}</div>;
+              return <div key={`x${idx}`}>{renderTwoStackCell(upperVal, budgetVal)}</div>;
             })}
-            {/* col14 空 */}
-            <div style={{ ...cellStyle, background: "transparent", border: "none" }} />
-            {/* col15 目標合計列: Σ予算支出 */}
-            <div style={{
-              ...cellStyle, textAlign: "right",
-              color: BUDGET_BLUE, fontWeight: 700,
-              fontSize: Math.max(5, Math.min(13, Math.floor(grandAvail / (String(fmtN(summary.expenseBudgetTotal)).length * 0.85)))),
-              display: "flex", alignItems: "center", justifyContent: "flex-end",
-            }}>
-              {fmtN(summary.expenseBudgetTotal)}
-            </div>
+            {renderEndCell(expenseActualSettledTotal, GOLD, { avail: 80, max: 17 })}
+            {renderEndCell(summary.expenseBudgetTotal, BUDGET_BLUE, { avail: 96, max: 16 })}
           </div>
 
-          {/* 行4: 💎 累計残高 (Phase G-6: 実測/目標 2 行分割)
-              実測 = actualCumByIdx (確定月のみ伸び、未確定月は前月累計維持、★初期資産抜き・固定費込み)
-              目標 = forecastNetByIdx (単月予想 = 本収入予算 − 支出予算) */}
-          {/* 実測行 */}
+          {/* 行: 💎 累計残高 (Phase G-7: 2 段重ね 1 行)
+              月セル 上=actualCumByIdx (確定月のみ伸び、★初期資産抜き・固定費込み) / 下=forecastNetByIdx (単月予想、負RED)。
+              進捗=progressLandingNew (負RED) / 目標合計=forecastNetTotal (負RED)。 */}
           <div style={{
             display: "grid", gridTemplateColumns: gridCols, gap: 4,
-            borderTop: `2px solid ${GOLD}55`, paddingTop: 4,
+            borderTop: `2px solid rgba(212,168,67,0.4)`, paddingTop: 4,
           }}>
-            <div style={{ ...labelCellStyle, color: GOLD, display: "flex", alignItems: "center", gap: 4 }}>
-              <span>💎 累計残高</span>
-              <span style={{ color: GOLD, fontSize: 9, fontWeight: 700, opacity: 0.8 }}>実測</span>
-            </div>
+            <div style={{ ...labelCellStyle, color: GOLD }}>💎 累計残高</div>
             {rows.map((_r, idx) => {
-              const v = actualCumByIdx[idx];
-              const color = (v != null && v < 0) ? RED : GOLD;
-              return <div key={`ca${idx}`}>{renderOneValCell(v, color)}</div>;
+              return <div key={`c${idx}`}>{renderTwoStackCell(actualCumByIdx[idx], forecastNetByIdx[idx])}</div>;
             })}
-            {/* col14 進捗列: 着地見込み progressLandingNew */}
-            <div style={{
-              ...cellStyle, textAlign: "right", fontWeight: 700,
-              color: progressLandingNew >= 0 ? GOLD : RED,
-              fontSize: Math.max(5, Math.min(13, Math.floor(grandAvail / (String(fmtN(progressLandingNew)).length * 0.85)))),
-              display: "flex", alignItems: "center", justifyContent: "flex-end",
-            }}>
-              {fmtN(progressLandingNew)}
-            </div>
-            {/* col15 空 */}
-            <div style={{ ...cellStyle, background: "transparent", border: "none" }} />
-          </div>
-          {/* 目標行 */}
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
-            <div style={{ ...labelCellStyle, display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ color: BUDGET_BLUE }}>💎 累計残高</span>
-              <span style={{ color: BUDGET_BLUE, fontSize: 9, fontWeight: 700, opacity: 0.8 }}>目標</span>
-            </div>
-            {rows.map((_r, idx) => {
-              const v = forecastNetByIdx[idx];
-              const color = (v != null && v < 0) ? RED : BUDGET_BLUE;
-              return <div key={`ct${idx}`}>{renderOneValCell(v, color)}</div>;
-            })}
-            {/* col14 空 */}
-            <div style={{ ...cellStyle, background: "transparent", border: "none" }} />
-            {/* col15 目標合計列: 年間予想差額 forecastNetTotal */}
-            <div
-              title="年間予想差額 (Σ(月予想 = 目標収入 − 予算支出)、初期資産抜き)"
-              style={{
-                ...cellStyle, textAlign: "right", fontWeight: 700,
-                color: forecastNetTotal >= 0 ? BUDGET_BLUE : RED,
-                fontSize: Math.max(5, Math.min(13, Math.floor(grandAvail / (String(fmtN(forecastNetTotal)).length * 0.85)))),
-                display: "flex", alignItems: "center", justifyContent: "flex-end",
-              }}
-            >
-              {fmtN(forecastNetTotal)}
-            </div>
+            {renderEndCell(progressLandingNew, GOLD, { avail: 80, max: 17 })}
+            {renderEndCell(forecastNetTotal, BUDGET_BLUE, { avail: 96, max: 16 })}
           </div>
 
         </div>
