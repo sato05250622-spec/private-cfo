@@ -59,6 +59,15 @@ const GREEN = "#43A047";
 
 // ── 共通ヘルパ (admin AssetSheetTab.jsx と同形) ─────
 const fmtN = (n) => (n == null ? "" : Number(n).toLocaleString("ja-JP"));
+// 表示用：1万未満は円フル桁、1万以上は「万」表記（小数1桁）。資産シート 表セル/合計セル/グラフ Tooltip 用。
+const fmtC = (n) => {
+  if (n == null) return "";
+  const num = Number(n);
+  if (!Number.isFinite(num)) return "";
+  if (Math.abs(num) < 10000) return num.toLocaleString("ja-JP");
+  const m = Math.round((num / 10000) * 10) / 10;
+  return m.toLocaleString("ja-JP") + "万";
+};
 const cellFontSize = (text) => {
   const len = String(text ?? "").length;
   if (len <= 1) return 11;
@@ -424,14 +433,26 @@ export default function AssetSheetViewer({ clientId }) {
     ? forecastCumByIdx[forecastCumByIdx.length - 1]
     : 0;
 
-  // Phase 2-4c: 累計残高推移グラフ用データ。
-  //   - label   : `${r.month}月` (fiscal 順、startMonth=4 なら 4月..3月)
-  //   - forecast: r.forecastCum (常に number)
-  //   - actual  : r.actualCum   (未確定月は null → Line connectNulls={false} で線が切れる)
-  const chartData = useMemo(
-    () => rows.map((r) => ({ label: `${r.month}月`, forecast: r.forecastCum, actual: r.actualCum })),
-    [rows],
-  );
+  // LineChart 用 chartData。表の「累計残高」行と同じ derive ソースに繋ぎ替え:
+  //   - actual   = actualCumByIdx[i] (確定月のみ伸びる純累計、初期資産抜き、未確定月は前月までを維持)
+  //   - forecast = Σ forecastNetByIdx (= 初期資産抜きの予想累計)。actualCumByIdx と同じ土俵に揃える。
+  //   累計残高行コメント (本ファイル下部) 通り actualCumByIdx は「固定費込み・初期資産抜き」なので、
+  //   予想線も initialAssetValue を足さず fcum のみで表示する（両線とも表と同じ単位）。
+  const chartData = useMemo(() => {
+    let fcum = 0;
+    return rows.map((r, i) => {
+      const fn = Number(forecastNetByIdx[i]);
+      fcum += Number.isFinite(fn) ? fn : 0;
+      return {
+        label: `${r.month}月`,
+        actual: actualCumByIdx[i],
+        forecast: fcum,
+      };
+    });
+  }, [rows, forecastNetByIdx, actualCumByIdx]);
+
+  // Phase 2-4c: 累計残高推移グラフ用データは forecastNetByIdx / actualCumByIdx 定義後に
+  //   組み立てる (定義より上に書くと TDZ で参照不可)。下の useMemo 群末尾に移設済。
 
   // ── スタイル定数 (admin 1-D-3g と同形) ────────────────
   // Phase G-1.5 (2026-06-12): ラベル列を 260→160 に縮小し左寄せ密着レイアウトに。
@@ -471,16 +492,16 @@ export default function AssetSheetViewer({ clientId }) {
   // Phase F-1 (2026-06-12): 上段(金) を実測<0 のとき RED に切替 (累計残高がマイナスに沈んだ月で視認性確保)。
   //   支出合計 上段は値が常に >=0 のため挙動不変。
   const renderTwoValCell = (actualVal, refVal, refColor = BUDGET_BLUE) => {
-    const actualSize = actualVal == null ? 15 : Math.max(10, cellFontSize(fmtN(actualVal)) + 5);
-    const refSize    = refVal    == null ? 8  : Math.max(7, Math.min(8, cellFontSize(fmtN(refVal)) - 3));
+    const actualSize = actualVal == null ? 15 : Math.max(10, cellFontSize(fmtC(actualVal)) + 5);
+    const refSize    = refVal    == null ? 8  : Math.max(7, Math.min(8, cellFontSize(fmtC(refVal)) - 3));
     const actualColor = (actualVal != null && actualVal < 0) ? RED : GOLD;
     return (
       <div style={{ ...cellStyle, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
         <span style={{ color: actualColor, fontSize: actualSize, fontWeight: 700, lineHeight: 1.1 }}>
-          {actualVal == null ? "—" : fmtN(actualVal)}
+          {actualVal == null ? "—" : fmtC(actualVal)}
         </span>
         <span style={{ color: refColor, fontSize: refSize, fontWeight: 500, lineHeight: 1.1 }}>
-          {refVal == null ? "—" : fmtN(refVal)}
+          {refVal == null ? "—" : fmtC(refVal)}
         </span>
       </div>
     );
@@ -739,17 +760,17 @@ export default function AssetSheetViewer({ clientId }) {
             <div style={{
               ...cellStyle, textAlign: "right",
               color: GOLD, fontWeight: 700,
-              fontSize: Math.max(9, cellFontSize(fmtN(expenseActualSettledTotal)) + 2),
+              fontSize: Math.max(9, cellFontSize(fmtC(expenseActualSettledTotal)) + 2),
             }}>
-              {fmtN(expenseActualSettledTotal)}
+              {fmtC(expenseActualSettledTotal)}
             </div>
             {/* 目標合計列: Σ予算支出 (BLUE, 600) — admin L640-643 と同じく summary.expenseBudgetTotal を温存 */}
             <div style={{
               ...cellStyle, textAlign: "right",
               color: BUDGET_BLUE, fontWeight: 600,
-              fontSize: Math.max(9, cellFontSize(fmtN(summary.expenseBudgetTotal)) + 1),
+              fontSize: Math.max(9, cellFontSize(fmtC(summary.expenseBudgetTotal)) + 1),
             }}>
-              {fmtN(summary.expenseBudgetTotal)}
+              {fmtC(summary.expenseBudgetTotal)}
             </div>
           </div>
 
@@ -780,9 +801,9 @@ export default function AssetSheetViewer({ clientId }) {
             <div style={{
               ...cellStyle, textAlign: "right", fontWeight: 700,
               color: progressLandingNew >= 0 ? GOLD : RED,
-              fontSize: Math.max(9, cellFontSize(fmtN(progressLandingNew)) + 2),
+              fontSize: Math.max(9, cellFontSize(fmtC(progressLandingNew)) + 2),
             }}>
-              {fmtN(progressLandingNew)}
+              {fmtC(progressLandingNew)}
             </div>
             {/* 目標合計列: Phase F-1 (2026-06-12) で年間予想差額 (forecastNetTotal)
                 = Σ(月予想 = 目標収入 − 予算支出、初期資産抜き、全月累計) に差替。
@@ -792,10 +813,10 @@ export default function AssetSheetViewer({ clientId }) {
               style={{
                 ...cellStyle, textAlign: "right", fontWeight: 600,
                 color: forecastNetTotal >= 0 ? BUDGET_BLUE : RED,
-                fontSize: Math.max(9, cellFontSize(fmtN(forecastNetTotal)) + 1),
+                fontSize: Math.max(9, cellFontSize(fmtC(forecastNetTotal)) + 1),
               }}
             >
-              {fmtN(forecastNetTotal)}
+              {fmtC(forecastNetTotal)}
             </div>
           </div>
 
