@@ -377,6 +377,33 @@ export default function AssetSheetViewer({ clientId }) {
     return s;
   }, [months, rows, settledMonths, expenseResolvedMonthly, expenseBudgetMonthly]);
 
+  // ── Phase F-1 (2026-06-12): 「予想ロジック」3 本 ─────
+  //   累計残高 月セル下段を「目標残 (budgetRemainByIdx)」から「予想累計 (forecastCumByIdx)」に
+  //   置換するため。settled ゲート無し、全月一律で
+  //     forecastNet = incomeTarget − expenseBudgetMonthly (固定費込み・予算経路)
+  //   を累積。グランド目標列にも forecastNetTotal を表示する。
+  //   ※ .at() / findLast は iOS 互換ガードに引っかかるため [length-1] で末尾取得。
+  const forecastNetByIdx = useMemo(() => {
+    return months.map((m, i) => {
+      const cm = Number(m);
+      const inc = Number(rows[i]?.incomeTarget) || 0;
+      const exp = Number(expenseBudgetMonthly?.[cm]) || 0;
+      return inc - exp;
+    });
+  }, [months, rows, expenseBudgetMonthly]);
+  const forecastCumByIdx = useMemo(() => {
+    const out = [];
+    let run = 0;
+    for (let i = 0; i < forecastNetByIdx.length; i++) {
+      run += (Number(forecastNetByIdx[i]) || 0);
+      out.push(run);
+    }
+    return out;
+  }, [forecastNetByIdx]);
+  const forecastNetTotal = (forecastCumByIdx.length > 0)
+    ? forecastCumByIdx[forecastCumByIdx.length - 1]
+    : 0;
+
   // Phase 2-4c: 累計残高推移グラフ用データ。
   //   - label   : `${r.month}月` (fiscal 順、startMonth=4 なら 4月..3月)
   //   - forecast: r.forecastCum (常に number)
@@ -410,12 +437,15 @@ export default function AssetSheetViewer({ clientId }) {
   // 月セル 2 値 read-only 表示 (支出合計 / 累計残高 行用)。
   // Phase E-2 (2026-06-12): refColor を第3引数で受け取り (default=BUDGET_BLUE)。
   //   累計残高行で目標残 <0 のとき RED に切替えるため。既存呼出 (引数 2 個) は default で挙動不変。
+  // Phase F-1 (2026-06-12): 上段(金) を実測<0 のとき RED に切替 (累計残高がマイナスに沈んだ月で視認性確保)。
+  //   支出合計 上段は値が常に >=0 のため挙動不変。
   const renderTwoValCell = (actualVal, refVal, refColor = BUDGET_BLUE) => {
     const actualSize = actualVal == null ? 15 : Math.max(10, cellFontSize(fmtN(actualVal)) + 5);
     const refSize    = refVal    == null ? 8  : Math.max(7, Math.min(8, cellFontSize(fmtN(refVal)) - 3));
+    const actualColor = (actualVal != null && actualVal < 0) ? RED : GOLD;
     return (
       <div style={{ ...cellStyle, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
-        <span style={{ color: GOLD, fontSize: actualSize, fontWeight: 700, lineHeight: 1.1 }}>
+        <span style={{ color: actualColor, fontSize: actualSize, fontWeight: 700, lineHeight: 1.1 }}>
           {actualVal == null ? "—" : fmtN(actualVal)}
         </span>
         <span style={{ color: refColor, fontSize: refSize, fontWeight: 500, lineHeight: 1.1 }}>
@@ -682,9 +712,13 @@ export default function AssetSheetViewer({ clientId }) {
             {/* Phase E-2 (2026-06-12): admin AssetSheetTab.jsx L658-663 と完全同形 (定数名のみ
                 customer ローカル BUDGET_BLUE に置換、色値は admin BLUE と一致 #5BA8FF)。
                 上段(金)=累計実測 (固定費込み・初期資産抜き)、下段(青)=目標残、<0 で RED 切替。 */}
+            {/* Phase F-1 (2026-06-12): 月セル下段を「目標残 (budgetRemainByIdx)」から
+                「予想累計 (forecastCumByIdx)」に差替 (settled ゲート無し・全月予算ベース累積)。
+                グランド目標列も同様に forecastNetTotal へ差替。
+                旧 budgetRemainByIdx / targetNetTotal の定義は無使用扱いだが残す (最小差分)。 */}
             {rows.map((_r, idx) => {
               const upperVal = actualCumByIdx[idx];
-              const lowerVal = budgetRemainByIdx[idx];
+              const lowerVal = forecastCumByIdx[idx];
               const lowerColor = (lowerVal != null && lowerVal < 0) ? RED : BUDGET_BLUE;
               return <div key={idx}>{renderTwoValCell(upperVal, lowerVal, lowerColor)}</div>;
             })}
@@ -696,19 +730,18 @@ export default function AssetSheetViewer({ clientId }) {
             }}>
               {fmtN(progressLandingNew)}
             </div>
-            {/* 目標合計列: 年間目標差額 (= 目標収入 − 目標支出、初期資産抜き) BLUE/RED, 600, 自動縮小。
-                Phase 1-D-3h: 旧「年末予想残高 (summary.forecastCumTotal、初期資産起点・monthly_budget ベース)」
-                  から targetNetTotal (案② UI 派生、admin AssetSheetTab.jsx と同式) に差替。
-                  目標差額の正負で色を判定 (≥0=BLUE / <0=RED)。 */}
+            {/* 目標合計列: Phase F-1 (2026-06-12) で年間予想差額 (forecastNetTotal)
+                = Σ(月予想 = 目標収入 − 予算支出、初期資産抜き、全月累計) に差替。
+                BLUE/RED, 600, 自動縮小。正負で色を判定 (≥0=BLUE / <0=RED)。 */}
             <div
-              title="年間目標差額 (目標収入 − 目標支出、初期資産抜き)"
+              title="年間予想差額 (Σ(月予想 = 目標収入 − 予算支出)、初期資産抜き)"
               style={{
                 ...cellStyle, textAlign: "right", fontWeight: 600,
-                color: targetNetTotal >= 0 ? BUDGET_BLUE : RED,
-                fontSize: Math.max(9, cellFontSize(fmtN(targetNetTotal)) + 1),
+                color: forecastNetTotal >= 0 ? BUDGET_BLUE : RED,
+                fontSize: Math.max(9, cellFontSize(fmtN(forecastNetTotal)) + 1),
               }}
             >
-              {fmtN(targetNetTotal)}
+              {fmtN(forecastNetTotal)}
             </div>
           </div>
 
