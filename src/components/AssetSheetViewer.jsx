@@ -513,7 +513,10 @@ export default function AssetSheetViewer({ clientId }) {
 
       {/* ③ 4 行テーブル (1-D-3g レイアウト・編集可) */}
       <div style={{ overflowX: "auto" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: "fit-content" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: "fit-content", position: "relative" }}>
+          {/* Phase G-1 (2026-06-12): ラベル列 (col1=260px) と月セル群 (col2..) の境界に縦線を 1 本敷く。
+              位置 left:262 = col1(260px) + gap4 の中央。スクロール内側に置くので月セルと一緒に水平スクロールする。 */}
+          <div style={{ position: "absolute", left: 262, top: 0, bottom: 0, width: 1, background: BORDER, pointerEvents: "none" }} />
 
           {/* 行1: 初期資産 (月見出し兼用) — 初期資産セルを EditableCell 化 */}
           <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
@@ -657,16 +660,17 @@ export default function AssetSheetViewer({ clientId }) {
             );
           })}
 
-          {/* ＋ 収入項目を追加 */}
+          {/* ＋ 収入項目を追加 — Phase G-1 (2026-06-12): 左寄せ小ボタン化 (gridColumn col1 のみ・justifySelf:start)。 */}
           <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
             <button
               onClick={() => addIncomeRow?.(fy)}
               style={{
-                gridColumn: "1 / -1",
+                gridColumn: "1 / 2",
+                justifySelf: "start",
                 background: "transparent", color: GREEN,
                 border: `1px dashed ${GREEN}66`, borderRadius: 8,
-                padding: "8px 12px", fontSize: 12, fontWeight: 700,
-                cursor: "pointer", textAlign: "center",
+                padding: "4px 10px", fontSize: 11, fontWeight: 700,
+                cursor: "pointer", textAlign: "center", whiteSpace: "nowrap",
               }}
             >
               ＋ 収入項目を追加
