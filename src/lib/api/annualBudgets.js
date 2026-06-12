@@ -43,15 +43,20 @@ export async function getCommittedByClient(clientId, fiscalYear) {
   if (!clientId) return null;
   if (fiscalYear != null) {
     const { data, error } = await supabase
-      .from(TABLE)
-      .select('fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at, committed_income_lines, income_committed_at, income_lines, lines, annual_total_target')
+      // Phase G 反映バグ Fix (2026-06-12): settled_months (LIVE) を追加。
+      //   D-B で useAnnualBudgets.js:54 が `settled_months: row.settled_months ?? []` を露出した際に
+      //   SELECT 側への追加が抜けて、AssetSheetViewer の settledMonths が常に [] にフォールバックしていた。
+      //   admin AssetSheetTab L148-151 が currentBudget?.settled_months を参照するのと同源 (LIVE 列)。
+      //   committed_settled_months は別カラム (snapshot 用)、これは無改変。
+      .select('fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at, committed_income_lines, income_committed_at, income_lines, lines, annual_total_target, settled_months')
       .eq('client_id', clientId)
       .eq('fiscal_year', fiscalYear)
       .maybeSingle();
     if (error) throw error;
     return withCamel(data);
   }
-  const SELECT = 'fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at, committed_income_lines, income_committed_at, income_lines, lines, annual_total_target';
+  // Phase G 反映バグ Fix (2026-06-12): settled_months (LIVE) を追加 (同上理由)。
+  const SELECT = 'fiscal_year, fiscal_year_start_month, committed_lines, committed_totals, committed_settled_months, committed_annual_total_target, last_committed_at, committed_income_lines, income_committed_at, income_lines, lines, annual_total_target, settled_months';
   // 既定: 反映済み (last_committed_at not null) の最新年度を優先。
   const committed = await supabase
     .from(TABLE)
