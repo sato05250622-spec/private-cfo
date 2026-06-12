@@ -414,7 +414,9 @@ export default function AssetSheetViewer({ clientId }) {
   );
 
   // ── スタイル定数 (admin 1-D-3g と同形) ────────────────
-  const gridCols = "260px repeat(12, minmax(84px, 1fr)) 80px 110px";
+  // Phase G-1.5 (2026-06-12): ラベル列を 260→160 に縮小し左寄せ密着レイアウトに。
+  //   月セル minmax / 進捗 80 / 目標 110 は不変 (数字ロジック・固定列幅は temas)。
+  const gridCols = "160px repeat(12, minmax(84px, 1fr)) 80px 110px";
   const headerCellStyle = {
     padding: "8px 6px", background: NAVY3, color: TEXT_SECONDARY,
     fontSize: 11, fontWeight: 700, textAlign: "center",
@@ -514,9 +516,9 @@ export default function AssetSheetViewer({ clientId }) {
       {/* ③ 4 行テーブル (1-D-3g レイアウト・編集可) */}
       <div style={{ overflowX: "auto" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: "fit-content", position: "relative" }}>
-          {/* Phase G-1 (2026-06-12): ラベル列 (col1=260px) と月セル群 (col2..) の境界に縦線を 1 本敷く。
-              位置 left:262 = col1(260px) + gap4 の中央。スクロール内側に置くので月セルと一緒に水平スクロールする。 */}
-          <div style={{ position: "absolute", left: 262, top: 0, bottom: 0, width: 1, background: BORDER, pointerEvents: "none" }} />
+          {/* Phase G-1 / G-1.5 (2026-06-12): ラベル列 (col1=160px) と月セル群 (col2..) の境界に縦線を 1 本敷く。
+              位置 left:162 = col1(160px) + gap4 の中央。スクロール内側に置くので月セルと一緒に水平スクロールする。 */}
+          <div style={{ position: "absolute", left: 162, top: 0, bottom: 0, width: 1, background: BORDER, pointerEvents: "none" }} />
 
           {/* 行1: 初期資産 (月見出し兼用) — 初期資産セルを EditableCell 化 */}
           <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
@@ -547,10 +549,24 @@ export default function AssetSheetViewer({ clientId }) {
             <div style={headerCellStyle}>目標合計</div>
           </div>
 
-          {/* セクション見出し: ⊕ 本収入 */}
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
-            <div style={{ ...labelCellStyle, color: GREEN, background: "transparent", border: "none" }}>
-              ⊕ 本収入
+          {/* セクション見出し: ⊕ 本収入 — Phase G-1.5 (2026-06-12): 初期資産直下に密着 (marginTop:-2)、
+              右隣に小さい ＋ 行追加ボタンを配置。旧 standalone「＋ 収入項目を追加」ボタンは撤去。 */}
+          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4, marginTop: -2 }}>
+            <div style={{
+              ...labelCellStyle, color: GREEN, background: "transparent", border: "none",
+              display: "flex", alignItems: "center", gap: 8,
+            }}>
+              <span>⊕ 本収入</span>
+              <button
+                onClick={() => addIncomeRow?.(fy)}
+                title="収入項目を追加"
+                style={{
+                  background: "transparent", color: GREEN,
+                  border: `1px dashed ${GREEN}66`, borderRadius: 4,
+                  fontSize: 11, fontWeight: 700, padding: "1px 8px",
+                  cursor: "pointer", whiteSpace: "nowrap", lineHeight: 1.2,
+                }}
+              >＋</button>
             </div>
           </div>
 
@@ -561,7 +577,7 @@ export default function AssetSheetViewer({ clientId }) {
                 ...cellStyle, gridColumn: "1 / -1", background: CARD_BG,
                 color: TEXT_MUTED, fontSize: 11, textAlign: "center", padding: "14px",
               }}>
-                （収入行はまだありません。下の「＋ 収入項目を追加」から行を追加してください）
+                （収入行はまだありません。本収入の ＋ から行を追加してください）
               </div>
             </div>
           )}
@@ -660,22 +676,8 @@ export default function AssetSheetViewer({ clientId }) {
             );
           })}
 
-          {/* ＋ 収入項目を追加 — Phase G-1 (2026-06-12): 左寄せ小ボタン化 (gridColumn col1 のみ・justifySelf:start)。 */}
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4 }}>
-            <button
-              onClick={() => addIncomeRow?.(fy)}
-              style={{
-                gridColumn: "1 / 2",
-                justifySelf: "start",
-                background: "transparent", color: GREEN,
-                border: `1px dashed ${GREEN}66`, borderRadius: 8,
-                padding: "4px 10px", fontSize: 11, fontWeight: 700,
-                cursor: "pointer", textAlign: "center", whiteSpace: "nowrap",
-              }}
-            >
-              ＋ 収入項目を追加
-            </button>
-          </div>
+          {/* Phase G-1.5 (2026-06-12): 旧 standalone「＋ 収入項目を追加」ボタンは撤去。
+              代わりに 本収入 ヘッダー内に小さい ＋ ボタンを配置 (上 ⊕ 本収入 セクション参照)。 */}
 
           {/* 行3: − 支出合計 (read-only 維持) */}
           <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4, marginTop: 6 }}>
