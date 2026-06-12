@@ -128,3 +128,15 @@ body {
   /* PDFボタン・no-print 要素は非表示 */
   .no-print { display: none !important; }
 }
+
+/* =============================================================
+ * iOS 入力ズーム防止 (focus 時 font-size 16px 強制)
+ * -------------------------------------------------------------
+ * iOS Safari は input/textarea/select の computed font-size が 16px 未満
+ * のとき focus 時に自動ズームインする仕様。資産シートの EditableCell input は
+ * 値の桁数で動的に 5-15px に縮めて表示の収まりを担保しているため、
+ * blur 中の見た目は維持しつつ focus 中のみ 16px に底上げしてズームを止める。
+ * ============================================================= */
+.editable-cell-input:focus {
+  font-size: 16px !important;
+}

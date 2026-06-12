@@ -63,7 +63,7 @@ const S = {
     color: TEXT_PRIMARY,
     border: `1px solid ${BORDER}`,
     borderRadius: 8,
-    fontSize: 14,
+    fontSize: 16,
     outline: 'none',
     boxSizing: 'border-box',
   },
