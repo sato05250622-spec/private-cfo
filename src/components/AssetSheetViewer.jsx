@@ -614,7 +614,7 @@ export default function AssetSheetViewer({ clientId }) {
                 type="number"
                 commaFormat
                 emptyAsNull
-                value={initialAssetValue === 0 ? null : initialAssetValue}
+                value={initialAssetValue}
                 placeholder="0"
                 onCommit={handleInitialAssetCommit}
                 style={{
@@ -708,10 +708,8 @@ export default function AssetSheetViewer({ clientId }) {
                 </div>
                 {/* col2-13: 月セル × 12 (1 セル内に 上=実測GOLD大 / 下=目標BLUE小 の編集スタック) */}
                 {months.map((_m, i) => {
-                  const aRaw = Number(aArr[i]);
-                  const tRaw = Number(tArr[i]);
-                  const aVal = Number.isFinite(aRaw) && aRaw !== 0 ? aRaw : null;
-                  const tVal = Number.isFinite(tRaw) && tRaw !== 0 ? tRaw : null;
+                  const aVal = (aArr[i] == null || aArr[i] === '') ? null : (Number.isFinite(Number(aArr[i])) ? Number(aArr[i]) : null);
+                  const tVal = (tArr[i] == null || tArr[i] === '') ? null : (Number.isFinite(Number(tArr[i])) ? Number(tArr[i]) : null);
                   return (
                     <div key={`s${i}`} style={{
                       ...cellStyle, display: "flex", flexDirection: "column",
@@ -780,7 +778,7 @@ export default function AssetSheetViewer({ clientId }) {
           }}>
             <div style={{ ...labelCellStyle, color: GOLD }}>💎 累計残高</div>
             {rows.map((_r, idx) => {
-              return <div key={`c${idx}`}>{renderTwoStackCell(actualCumByIdx[idx], forecastNetByIdx[idx])}</div>;
+              return <div key={`c${idx}`}>{renderTwoStackCell(actualCumByIdx[idx], forecastCumByIdx[idx])}</div>;
             })}
             {renderEndCell(progressLandingNew, GOLD, { avail: 80, max: 17 })}
             {renderEndCell(forecastNetTotal, BUDGET_BLUE, { avail: 96, max: 16 })}
