@@ -1686,9 +1686,9 @@ export default function App() {
                 <button style={S.typeBtn(progressTab==="operation")} onClick={()=>requestFeature(utilizationEnabled, ()=>setProgressTab("operation"))}>稼働進捗{utilizationEnabled?"":" 🔒"}</button>
               </div>
             </div>
-            {progressTab === "budget" ? (<>
-            {/* #11: 固定費 込み/分ける トグル (pill型・SummaryBar 直上)。'split'=既定(カテゴリのみ)。
-                2026-06-05: fixedCostsEnabled OFF のときは丸ごと非表示 (メニューの「固定費」と整合)。 */}
+            {/* #11: 固定費 込み/分ける トグル (pill型・子タブ枠直下、両タブ共通)。'split'=既定(カテゴリのみ)。
+                2026-06-05: fixedCostsEnabled OFF のときは丸ごと非表示 (メニューの「固定費」と整合)。
+                2026-06-14: 予算進捗タブ内から両タブ共通スコープへ昇格 (稼働進捗タブにも反映するため)。 */}
             {fixedCostsEnabled && (
             <div style={{padding:"0 14px 8px",background:CARD_BG}}>
               <div style={{display:"inline-flex",background:NAVY3,border:`1px solid ${BORDER}`,borderRadius:999,padding:2}}>
@@ -1702,6 +1702,7 @@ export default function App() {
               </div>
             </div>
             )}
+            {progressTab === "budget" ? (<>
             <SummaryBar spent={dispSpent} budget={dispBudget} remain={dispBudget-dispSpent} labelBudget={inclFixed?"月の予算 (固定費込)":"月の予算"} labelSpent={inclFixed?"月の支出 (固定費込)":"月の支出"} labelRemain="月の残予算"/>
 
             {/* ★ 円グラフはそのまま維持 */}
@@ -1817,7 +1818,11 @@ export default function App() {
                 expenseCats.reduce((s, cat) => s + (weekCatBudgets[`${y}-${m+1}-w${N}_${cat.id}`] || 0), 0)
               );
               const selectedSum = [...selectedWeeks].reduce((s, N) => s + (weekBudgets[N-1] || 0), 0);
-              const futureTotal = reportExpense + selectedSum;
+              // 2026-06-14: 固定費トグル ON のときは「既使用額」「未来支出予定金額」両方に loans 月額合計を加算。
+              // 週別チップ (weekBudgets) は loans の週按分が無いため無改修 (admin MonthSummary 稼働進捗と同方針)。
+              const opFixedAdd = inclFixed ? fixedCostMonthTotal : 0;
+              const opUsed = reportExpense + opFixedAdd;
+              const futureTotal = opUsed + selectedSum;
               const toggleWeek = (N) => {
                 setSelectedWeeks(prev => {
                   const next = new Set(prev);
@@ -1827,11 +1832,11 @@ export default function App() {
               };
               return (
                 <div style={{display:"flex",flexDirection:"column",gap:10,padding:"14px 18px",background:CARD_BG}}>
-                  {/* ブロック 1: 既使用額 (cycle 範囲の reportExpense そのまま) */}
+                  {/* ブロック 1: 既使用額 (cycle 範囲の reportExpense + 固定費込みなら loans 月額合計)。 */}
                   <div style={{background:NAVY2,borderRadius:14,padding:"14px 18px",border:`1px solid ${BORDER}`}}>
-                    <div style={{fontSize:11,color:TEXT_SECONDARY,marginBottom:4}}>既使用額</div>
+                    <div style={{fontSize:11,color:TEXT_SECONDARY,marginBottom:4}}>既使用額{inclFixed?" (固定費込)":""}</div>
                     <div style={{fontSize:28,fontWeight:700,color:RED}}>
-                      ¥{reportExpense.toLocaleString()}
+                      ¥{opUsed.toLocaleString()}
                     </div>
                   </div>
                   {/* ブロック 2: 第1〜4週チップ (multi-select、選択時 GOLD 強調、週予算金額併記) */}
@@ -1855,15 +1860,15 @@ export default function App() {
                       );
                     })}
                   </div>
-                  {/* ブロック 3: 未来支出予定金額 (= 既使用額 + 選択週予算合計) */}
+                  {/* ブロック 3: 未来支出予定金額 (= 既使用額 + 選択週予算合計、固定費込みなら既使用額側に加算済) */}
                   <div style={{background:NAVY2,borderRadius:14,padding:"14px 18px",border:`1px solid ${BORDER}`}}>
-                    <div style={{fontSize:11,color:TEXT_SECONDARY,marginBottom:4}}>未来支出予定金額</div>
+                    <div style={{fontSize:11,color:TEXT_SECONDARY,marginBottom:4}}>未来支出予定金額{inclFixed?" (固定費込)":""}</div>
                     <div style={{fontSize:28,fontWeight:700,color:GOLD}}>
                       ¥{futureTotal.toLocaleString()}
                     </div>
                     {selectedWeeks.size > 0 && (
                       <div style={{fontSize:10,color:TEXT_MUTED,marginTop:4}}>
-                        既使用額 ¥{reportExpense.toLocaleString()} + 選択週予算 ¥{selectedSum.toLocaleString()}
+                        既使用額{inclFixed?" (固定費込)":""} ¥{opUsed.toLocaleString()} + 選択週予算 ¥{selectedSum.toLocaleString()}
                       </div>
                     )}
                   </div>
