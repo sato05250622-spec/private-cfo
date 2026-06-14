@@ -31,6 +31,10 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState(null);
   const [approved, setApproved] = useState(null);
+  // 2026-06-14: アプリ全体停止フラグ (profiles.app_enabled、boolean NOT NULL DEFAULT true)。
+  //   admin が「アプリ停止」を押すと false になり、AuthGate が AppDisabledMessage に切替。
+  //   未取得 / NULL は true 扱い (既存顧客に影響なし、DEFAULT に揃える)。
+  const [appEnabled, setAppEnabled] = useState(true);
   // Phase E ⑦-2: 顧客自身の編集許可フラグ (profiles.customer_edit_enabled)。
   // 未取得 / 取得失敗 / サインアウト時は false (= ロック) を default とする。
   // App.jsx の requestEdit() がこの値を見て編集導線を許可 / トースト案内に分岐。
@@ -71,7 +75,7 @@ export function AuthProvider({ children }) {
       try {
         const q = supabase
           .from('profiles')
-          .select('role, approved, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit, asset_sheet_enabled, initial_asset')
+          .select('role, approved, app_enabled, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit, asset_sheet_enabled, initial_asset')
           .eq('id', userId)
           .maybeSingle();
         const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles fetch');
@@ -88,6 +92,7 @@ export function AuthProvider({ children }) {
         }
         setRole(data?.role ?? null);
         setApproved(data?.approved ?? null);
+        setAppEnabled(data?.app_enabled ?? true);
         setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
         setIncludeFixedExpenses(data?.include_fixed_expenses ?? true);
         setReportEnabled(data?.report_enabled ?? false);
@@ -238,7 +243,7 @@ export function AuthProvider({ children }) {
     try {
       const q = supabase
         .from('profiles')
-        .select('role, approved, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit, asset_sheet_enabled, initial_asset')
+        .select('role, approved, app_enabled, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit, asset_sheet_enabled, initial_asset')
         .eq('id', session.user.id)
         .maybeSingle();
       const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles refresh');
@@ -248,6 +253,7 @@ export function AuthProvider({ children }) {
       }
       setRole(data?.role ?? null);
       setApproved(data?.approved ?? null);
+      setAppEnabled(data?.app_enabled ?? true);
       setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
       setIncludeFixedExpenses(data?.include_fixed_expenses ?? true);
       setReportEnabled(data?.report_enabled ?? false);
@@ -276,6 +282,7 @@ export function AuthProvider({ children }) {
     loading,
     role,
     approved,
+    appEnabled,
     customerEditEnabled,
     includeFixedExpenses,
     // 2026-06-05: アプリ設定タブ 機能ゲート
