@@ -45,7 +45,7 @@ import {
 } from "@shared/theme";
 // Phase 2-4c: 累計残高推移グラフ (recharts は既存 package.json 導入済 ^2.12.7、App.jsx 等で利用中)。
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { getManagementStartDay } from "../utils/cycle";
 import { toDateStr } from "@shared/format";
@@ -380,22 +380,19 @@ export default function AssetSheetViewer({ clientId }) {
       return inc - exp;
     });
   }, [months, rows, settledMonths, expenseResolvedMonthly]);
+  // 2026-06-14: 累計を「資産残高」表示に。run を initialAssetValue 起点で開始し、
+  //   未開始月 (最初の settled 月より前) も run (= initialAssetValue) を表示し、
+  //   年初から残高ラインを引く。未確定月の先は最後の残高で横ばい (実測は足さない)。
   const actualCumByIdx = useMemo(() => {
     const out = [];
-    let run = 0;
-    let started = false;
+    let run = initialAssetValue;
     for (let i = 0; i < months.length; i++) {
       const v = actualNetByIdx[i];
-      if (v != null) {
-        run += v;
-        started = true;
-        out.push(run);
-      } else {
-        out.push(started ? run : null);
-      }
+      if (v != null) run += v;
+      out.push(run);
     }
     return out;
-  }, [months, actualNetByIdx]);
+  }, [months, actualNetByIdx, initialAssetValue]);
   const budgetRemainByIdx = useMemo(
     () => actualCumByIdx.map((cum) => targetNetTotal - (cum ?? 0)),
     [actualCumByIdx, targetNetTotal],
@@ -432,15 +429,16 @@ export default function AssetSheetViewer({ clientId }) {
       return inc - exp;
     });
   }, [months, rows, expenseBudgetMonthly]);
+  // 2026-06-14: 目標累計も「資産残高」表示。run を initialAssetValue 起点で開始。
   const forecastCumByIdx = useMemo(() => {
     const out = [];
-    let run = 0;
+    let run = initialAssetValue;
     for (let i = 0; i < forecastNetByIdx.length; i++) {
       run += (Number(forecastNetByIdx[i]) || 0);
       out.push(run);
     }
     return out;
-  }, [forecastNetByIdx]);
+  }, [forecastNetByIdx, initialAssetValue]);
   const forecastNetTotal = (forecastCumByIdx.length > 0)
     ? forecastCumByIdx[forecastCumByIdx.length - 1]
     : 0;
@@ -450,8 +448,10 @@ export default function AssetSheetViewer({ clientId }) {
   //   - forecast = Σ forecastNetByIdx (= 初期資産抜きの予想累計)。actualCumByIdx と同じ土俵に揃える。
   //   累計残高行コメント (本ファイル下部) 通り actualCumByIdx は「固定費込み・初期資産抜き」なので、
   //   予想線も initialAssetValue を足さず fcum のみで表示する（両線とも表と同じ単位）。
+  // 2026-06-14: グラフ chartData も初期資産起点。actual 側は actualCumByIdx で既に初期資産込み、
+  //   forecast 側は fcum を initialAssetValue から開始して同期させる。
   const chartData = useMemo(() => {
-    let fcum = 0;
+    let fcum = initialAssetValue;
     return rows.map((r, i) => {
       const fn = Number(forecastNetByIdx[i]);
       fcum += Number.isFinite(fn) ? fn : 0;
@@ -461,7 +461,7 @@ export default function AssetSheetViewer({ clientId }) {
         forecast: fcum,
       };
     });
-  }, [rows, forecastNetByIdx, actualCumByIdx]);
+  }, [rows, forecastNetByIdx, actualCumByIdx, initialAssetValue]);
 
   // Phase 2-4c: 累計残高推移グラフ用データは forecastNetByIdx / actualCumByIdx 定義後に
   //   組み立てる (定義より上に書くと TDZ で参照不可)。下の useMemo 群末尾に移設済。
@@ -494,11 +494,14 @@ export default function AssetSheetViewer({ clientId }) {
 
   // Phase G-7 (2026-06-12): 1 セル 2 段重ね (上=実測 GOLD 大 / 下=目標 BLUE 小)。
   //   avail 連動・min5・各段で上限 (上 aMax=15, 下 tMax=9)。tv<0 で下段 RED 切替。
-  const renderTwoStackCell = (av, tv, { avail = 84, aMax = 15, tMax = 9 } = {}) => {
+  // 2026-06-14: tThreshold は目標 (下段) を赤判定する閾値。
+  //   - 支出合計行 (上段=実支出, 下段=予算): 0 で OK (両値 ≥ 0)
+  //   - 累計残高行 (上段=実測残高, 下段=目標残高): initialAssetValue (初期資産を割ったら赤)
+  const renderTwoStackCell = (av, tv, { avail = 84, aMax = 15, tMax = 9, tThreshold = 0 } = {}) => {
     const sz = (v, max) =>
       v == null ? Math.min(max, 12)
       : Math.max(5, Math.min(max, Math.floor(avail / (String(fmtN(v)).length * 0.85))));
-    const tNeg = tv != null && tv < 0;
+    const tNeg = tv != null && tv < tThreshold;
     return (
       <div style={{ ...cellStyle, display: "flex", flexDirection: "column",
                     alignItems: "flex-end", justifyContent: "center", overflow: "hidden" }}>
@@ -579,6 +582,9 @@ export default function AssetSheetViewer({ clientId }) {
                 formatter={(v) => fmtN(v)}
               />
               <Legend wrapperStyle={{ fontSize: 11, color: TEXT_SECONDARY }} />
+              {/* 2026-06-14: 初期資産の基準線 (点線)。資産が初期値より増えたか減ったか視覚化。 */}
+              <ReferenceLine y={initialAssetValue} stroke="rgba(212,168,67,0.55)" strokeDasharray="4 4"
+                label={{ value: "初期資産", position: "insideTopLeft", fill: "rgba(212,168,67,0.85)", fontSize: 11 }} />
               <Line dataKey="forecast" name="予想" stroke={BUDGET_BLUE} dot={false} />
               <Line dataKey="actual" name="実測" stroke={GOLD} dot={false} connectNulls={false} />
             </LineChart>
@@ -778,9 +784,12 @@ export default function AssetSheetViewer({ clientId }) {
           }}>
             <div style={{ ...labelCellStyle, color: GOLD }}>💎 累計残高</div>
             {rows.map((_r, idx) => {
-              return <div key={`c${idx}`}>{renderTwoStackCell(actualCumByIdx[idx], forecastCumByIdx[idx])}</div>;
+              return <div key={`c${idx}`}>{renderTwoStackCell(actualCumByIdx[idx], forecastCumByIdx[idx], { tThreshold: initialAssetValue })}</div>;
             })}
-            {renderEndCell(progressLandingNew, GOLD, { avail: 80, max: 17 })}
+            {/* 2026-06-14: グランドも資産残高表示に。
+                 進捗(GOLD) = 着地見込み (progressLandingNew) + initialAssetValue で「年末予想資産残高」。
+                 目標合計(BLUE) = forecastNetTotal は forecastCumByIdx[last] 由来なので既に初期資産込み (二重加算しない)。 */}
+            {renderEndCell(progressLandingNew + initialAssetValue, GOLD, { avail: 80, max: 17 })}
             {renderEndCell(forecastNetTotal, BUDGET_BLUE, { avail: 96, max: 16 })}
           </div>
 
