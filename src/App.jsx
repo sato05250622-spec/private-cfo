@@ -959,7 +959,7 @@ export default function App() {
         }
         */
       })
-      .catch((e) => { console.error(e); alert("支出の保存に失敗しました\n" + (e?.code || "") + " " + (e?.message || "") + "\n" + (e?.details || "") + "\n" + (e?.hint || "")); });
+      .catch((e) => { console.error(e); alert("支出の保存に失敗しました。"); });
   };
   // 固定ゴールドボタンの onClick を参照固定化する(jitter 対策)。
   // addTransaction は複数 state を閉包するため毎レンダ新規関数 → そのまま渡すと
