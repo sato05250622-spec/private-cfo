@@ -23,6 +23,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // 2026-06-14: plugin の auto inject を止めて src/main.jsx の手動 registerSW に一本化
+      //   (二重登録防止 + 定期/復帰時 update チェックを差し込めるようにする)。
+      injectRegister: null,
       includeAssets: [
         'favicon.ico',
         'favicon-16x16.png',
