@@ -87,12 +87,12 @@ export default function PendingApprovalMessage() {
     <div style={S.wrap}>
       <div style={S.card}>
         <div style={S.brand}>PRIVATE CFO</div>
-        <div style={S.icon}>⏳</div>
-        <div style={S.title}>承認待ち</div>
+        <div style={S.icon}>✅</div>
+        <div style={S.title}>ご登録が完了しました</div>
         <div style={S.body}>
-          ご登録ありがとうございます。<br />
-          本部による承認後にご利用いただけます。<br />
-          承認が完了したらお知らせいたします。
+          ありがとうございます。<br />
+          本部の承認後にご利用いただけます。<br />
+          承認まで少々お待ちください。
         </div>
         {user?.email && (
           <div style={S.emailBox}>登録メール: {user.email}</div>

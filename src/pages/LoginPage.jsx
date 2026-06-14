@@ -112,6 +112,9 @@ export default function LoginPage() {
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  // 2026-06-14: 送信連打防止。busy と独立に持つことで「未来 await 中にもう一度クリック」を
+  //   厳密にブロックする (busy は state 更新のフレーム遅延で次クリックを取りこぼす場合がある)。
+  const [isSubmitting, setIsSubmitting] = useState(false);
   // ⑦-E: forgot モードでのリセットメール送信完了表示用。mode 切替時にリセット。
   const [forgotSent, setForgotSent] = useState(false);
 
@@ -127,7 +130,8 @@ export default function LoginPage() {
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (busy) return;
+    // 2026-06-14: 連打防止。isSubmitting 中は二重実行禁止。
+    if (isSubmitting || busy) return;
     setError(null);
 
     if (mode === 'signup') {
@@ -141,6 +145,7 @@ export default function LoginPage() {
       }
     }
 
+    setIsSubmitting(true);
     setBusy(true);
     try {
       if (mode === 'signup') {
@@ -161,7 +166,10 @@ export default function LoginPage() {
     } catch (err) {
       setError(translateAuthError(err, mode));
     } finally {
+      // 成功時は SIGNED_IN で AuthGate がアンマウントするため state 更新が捨てられても問題なし。
+      // エラー時に必ず再試行可能なよう両方戻す。
       setBusy(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -265,7 +273,7 @@ export default function LoginPage() {
               </label>
             )}
             {error && <div style={S.errorBox}>{error}</div>}
-            <button type="submit" disabled={busy} style={S.submit(busy)}>
+            <button type="submit" disabled={busy || isSubmitting} style={S.submit(busy || isSubmitting)}>
               {submitLabel}
             </button>
             {/* ⑦-E: login モードのみ「パスワードを忘れた」リンクを submit 直後に表示。 */}
@@ -336,6 +344,7 @@ export default function LoginPage() {
 
 function translateAuthError(err, mode) {
   const msg = err?.message || '';
+  const code = err?.code || '';
   if (/invalid login credentials/i.test(msg)) {
     return 'メールアドレスまたはパスワードが正しくありません。';
   }
@@ -351,7 +360,15 @@ function translateAuthError(err, mode) {
   if (/password.*6|weak password|should be at least/i.test(msg)) {
     return 'パスワードが弱すぎます。6 文字以上を入れてください。';
   }
-  // ⑦-E: forgot モード用フォールバック文言。
-  if (mode === 'forgot') return msg || 'リセットメールの送信に失敗しました。';
-  return msg || (mode === 'signup' ? '新規登録に失敗しました。' : 'ログインに失敗しました。');
+  // 2026-06-14: メールアドレスが Supabase 側に弾かれたケース (無効/許可外ドメイン等)。
+  //   error.code === 'email_address_invalid' or message に "is invalid" / "invalid email" を含む。
+  if (code === 'email_address_invalid' || /(is invalid|invalid email)/i.test(msg)) {
+    return 'このメールアドレスは登録できません。別のアドレスをお試しください。';
+  }
+  // ⑦-E: forgot モード用フォールバック文言 (生英語を返さず日本語で統一)。
+  if (mode === 'forgot') return 'リセットメールの送信に失敗しました。時間をおいて再度お試しください。';
+  // 2026-06-14: 未知エラーの最終フォールバックも生英語ではなく日本語固定にする。
+  return mode === 'signup'
+    ? '新規登録に失敗しました。時間をおいて再度お試しください。'
+    : 'ログインに失敗しました。時間をおいて再度お試しください。';
 }
