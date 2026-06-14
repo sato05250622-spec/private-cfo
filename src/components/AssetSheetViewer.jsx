@@ -571,7 +571,7 @@ export default function AssetSheetViewer({ clientId }) {
           <ResponsiveContainer>
             <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
               <CartesianGrid stroke={BORDER} strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="label" stroke={TEXT_SECONDARY} tick={{ fill: TEXT_SECONDARY, fontSize: 10 }} />
+              <XAxis dataKey="label" stroke={TEXT_SECONDARY} tick={{ fill: TEXT_SECONDARY, fontSize: 10 }} interval={0} />
               <YAxis
                 stroke={TEXT_SECONDARY}
                 tick={{ fill: TEXT_SECONDARY, fontSize: 10 }}
