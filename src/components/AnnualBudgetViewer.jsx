@@ -421,7 +421,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         let w = contentWmm;
         let h = (canvas.height * w) / canvas.width;
         if (h > contentHmm) { h = contentHmm; w = (canvas.width * h) / canvas.height; }
-        doc.addImage(canvas.toDataURL("image/png"), "PNG", (pageW - w) / 2, marginMm, w, h);
+        doc.addImage(canvas.toDataURL("image/jpeg", 0.85), "JPEG", (pageW - w) / 2, marginMm, w, h);
       };
 
       // テーブルページ (thead は各ページ自動的に含まれる = 見出し繰り返し)。
@@ -634,8 +634,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
-      const imgData = canvas.toDataURL("image/png");
-      doc.addImage(imgData, "PNG", 0, 0, pageW, pageH);
+      const imgData = canvas.toDataURL("image/jpeg", 0.85);
+      doc.addImage(imgData, "JPEG", 0, 0, pageW, pageH);
       doc.save(`支出管理繰越票_1枚_${data?.fiscal_year ?? ""}年度.pdf`);
     } catch (err) {
       console.error("[handlePrintOnePage]", err);

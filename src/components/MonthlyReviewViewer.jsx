@@ -359,7 +359,7 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
         let w = contentWmm;
         let h = (canvas.height * w) / canvas.width;
         if (h > contentHmm) { h = contentHmm; w = (canvas.width * h) / canvas.height; }
-        doc.addImage(canvas.toDataURL("image/png"), "PNG", (pageW - w) / 2, marginMm, w, h);
+        doc.addImage(canvas.toDataURL("image/jpeg", 0.85), "JPEG", (pageW - w) / 2, marginMm, w, h);
       };
 
       // テーブルページ (thead は table 内に常にあるので各ページ自動的に含まれる)。
