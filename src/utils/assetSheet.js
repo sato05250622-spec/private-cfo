@@ -547,7 +547,17 @@ export function resolveExpenseCellPure(line, m, ctx, opts = {}) {
   // 固定費分岐 (両モード共通) — resolveCell と同実装。
   // 2026-06-15: 年間目標 (target_value) / 12 の自動月割りフォールバックを撤去 (admin と同期)。
   //   月セルは「手入力 monthly_amounts[m]」→「基準月額 monthly_amount」の 2 段のみ。
+  // 2026-06-15: opts.fixedSettledOnly=true (資産残高繰越票 専用) のとき、
+  //   未確定月では固定費を null で返す (= 「支出を入れてないのに残高が減る」を解消)。
+  //   既定 (= 横棒バー 等) では従来通り全月で値を返す。admin と同形。
   if (line.row_type === 'fixed_cost') {
+    if (opts?.fixedSettledOnly === true) {
+      const isSettled = (ctx?.settledMonths || []).includes(m)
+        || (ctx?.settledMonths || []).includes(String(m));
+      if (!isSettled) {
+        return { value: null, isOverride: false, isSettled: false, kind: 'fixed' };
+      }
+    }
     const ma = line.monthly_amounts;
     const mv = ma ? (ma[m] ?? ma[String(m)]) : null;
     const amt = mv != null ? Number(mv) : (Number(line.monthly_amount) || 0);

@@ -311,13 +311,16 @@ export default function AssetSheetViewer({ clientId }) {
     [fy, msdVal, todayStr, startMonth, settledMonths, weekBudgetByCatMonth, aggregatedCells],
   );
   // 下段(青) = 全月予算経路 (admin L178-181 と同式)
+  // 2026-06-15: fixedSettledOnly:true で固定費を確定月のみ反映 (= 未確定月では固定費 null)。
+  //   「支出を入れてないのに残高が減る」を解消する資産シート専用ゲート (admin と同形)。
   const expenseBudgetMonthly = useMemo(
-    () => computeMonthlyExpenseBudgetTotals(linesForBudget, expenseBudgetCtx, startMonth, { budgetOnly: true }).monthly,
+    () => computeMonthlyExpenseBudgetTotals(linesForBudget, expenseBudgetCtx, startMonth, { budgetOnly: true, fixedSettledOnly: true }).monthly,
     [linesForBudget, expenseBudgetCtx, startMonth],
   );
   // 上段(金) = 既定経路、settledMonths で月セル時にゲート (admin L187-190 と同式)
+  // 2026-06-15: fixedSettledOnly:true で固定費を確定月のみ反映 (累計残高計算でも未確定月の固定費を 0 化)。
   const expenseResolvedMonthly = useMemo(
-    () => computeMonthlyExpenseBudgetTotals(linesForBudget, expenseBudgetCtx, startMonth, {}).monthly,
+    () => computeMonthlyExpenseBudgetTotals(linesForBudget, expenseBudgetCtx, startMonth, { fixedSettledOnly: true }).monthly,
     [linesForBudget, expenseBudgetCtx, startMonth],
   );
 
