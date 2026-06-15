@@ -135,12 +135,13 @@ function resolveCell(line, m) {
   //   ② 無ければ 年間目標 (target_value=loans.annual_target) / 12 を表示 (Math.round で端数丸め)
   //   ③ それも無ければ monthly_amount (基準月額)
   //   admin AnnualBudgetTab.jsx resolveCell 固定費分岐と完全同一ロジック。
+  // 2026-06-15: 年間目標 (target_value) / 12 の自動月割りフォールバックを撤去 (admin と同期)。
+  //   月セルは「手入力 monthly_amounts[m]」→「基準月額 monthly_amount」の 2 段のみ。
+  //   未入力月は null (= 空欄) になる。
   if (line?.row_type === "fixed_cost") {
     const ma = line.monthly_amounts;
     const mv = ma ? (ma[m] ?? ma[String(m)]) : null;
-    const tv = Number(line.target_value);
-    const perMonth = (Number.isFinite(tv) && tv > 0) ? Math.round(tv / 12) : null;
-    const a = mv != null ? Number(mv) : (perMonth != null ? perMonth : Number(line.monthly_amount));
+    const a = mv != null ? Number(mv) : Number(line.monthly_amount);
     return Number.isFinite(a) && a !== 0 ? a : null;
   }
   const ov = pickMonth(line?.monthly_overrides, m);

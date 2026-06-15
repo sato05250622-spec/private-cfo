@@ -544,13 +544,13 @@ export function resolveExpenseCellPure(line, m, ctx, opts = {}) {
 
   if (!line) return { value: null, isOverride: false, isSettled: false, kind: 'none' };
 
-  // 固定費分岐 (両モード共通) — resolveCell L429-435 と同実装。
+  // 固定費分岐 (両モード共通) — resolveCell と同実装。
+  // 2026-06-15: 年間目標 (target_value) / 12 の自動月割りフォールバックを撤去 (admin と同期)。
+  //   月セルは「手入力 monthly_amounts[m]」→「基準月額 monthly_amount」の 2 段のみ。
   if (line.row_type === 'fixed_cost') {
     const ma = line.monthly_amounts;
     const mv = ma ? (ma[m] ?? ma[String(m)]) : null;
-    const tv = Number(line.target_value);
-    const perMonth = (Number.isFinite(tv) && tv > 0) ? Math.round(tv / 12) : null;
-    const amt = mv != null ? Number(mv) : (perMonth != null ? perMonth : (Number(line.monthly_amount) || 0));
+    const amt = mv != null ? Number(mv) : (Number(line.monthly_amount) || 0);
     return { value: amt > 0 ? amt : null, isOverride: false, isSettled: false, kind: 'fixed' };
   }
 
