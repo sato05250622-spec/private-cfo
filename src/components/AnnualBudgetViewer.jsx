@@ -1143,9 +1143,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         const targetLine = annualTargetTotal > 0
           ? (annualTargetTotal / 12) * (currentMonthIdx + 1)
           : 0;
-        const budgetPct = targetLine > 0 ? (budgetTotal / targetLine) * 100 : 0;
-        const actualPct = targetLine > 0 ? (actualTotal / targetLine) * 100 : 0;
-        const isOver = actualTotal > targetLine && targetLine > 0;
+        // 2026-06-15 (admin 仕様統一): 100% 分母を annualTargetTotal (年間目標満額) に変更。
+        //   予算バー = 経過月ペース ((currentMonthIdx+1)/12 × 100)
+        //   実測バー = 確定月累計 / 年間目標 × 100
+        //   targetLine / budgetTotal の計算は他参照用に残置。
+        const budgetPct = Math.round(((currentMonthIdx + 1) / 12) * 100);
+        const actualPct = annualTargetTotal > 0
+          ? Math.round((actualTotal / annualTargetTotal) * 100)
+          : 0;
+        const isOver = actualTotal > annualTargetTotal && annualTargetTotal > 0;
         const actualGrad = isOver
           ? 'linear-gradient(90deg, #FF5252 0%, #C62828 100%)'
           : 'linear-gradient(90deg, #D4A843 0%, #B88E33 100%)';
@@ -1161,15 +1167,13 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             <div style={{ fontSize: 14, fontWeight: 600, color: GOLD, marginBottom: 8 }}>
               年間累計
             </div>
-            {/* 数値表示: 予算 / 実測 / 目標線 + 目標線に対する実測 % */}
+            {/* 2026-06-15 (admin 仕様統一): 経過月ペース予算 / 確定月累計実測 + 年間消化 % の3値表示 */}
             <div style={{ marginBottom: 10, lineHeight: 1.4, fontWeight: 700, fontSize: 13 }}>
-              <span style={{ color: BUDGET_BLUE }}>予算 ¥{Math.round(budgetTotal).toLocaleString()}</span>
+              <span style={{ color: BUDGET_BLUE }}>予算 ¥{Math.round((annualTargetTotal / 12) * (currentMonthIdx + 1)).toLocaleString()}</span>
               <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400 }}>／</span>
               <span style={{ color: isOver ? RED : TEXT_PRIMARY }}>実測 ¥{Math.round(actualTotal).toLocaleString()}</span>
-              <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400 }}>／</span>
-              <span style={{ color: TEXT_MUTED }}>目標線 ¥{Math.round(targetLine).toLocaleString()}</span>
               <span style={{ color: isOver ? RED : GOLD, marginLeft: 12 }}>
-                目標線に対して実測 {Math.round(actualPct)}%
+                年間消化 {actualPct}%
               </span>
             </div>
             {/* ラベル列 (40px、予算/実測の 2 行) + バーラッパ (flex:1)。
