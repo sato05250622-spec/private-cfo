@@ -690,6 +690,16 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   //     ※ 本部はライブ expenses で判定するが、顧客 viewer は committed の monthly_spent を
   //       実測有無の根拠にする (反映後に整合。反映前の当月実測は次回反映で反映)。
   const resolveCellDisplay = (line, m) => {
+    // 束E-3 (2026-06-15): archived (削除済) カテゴリは未来/当月未確定 (= 予算扱い) を
+    //   表示しない。admin AnnualBudgetTab.jsx の resolveCell wrapper (kind:'budget' → null)
+    //   と同方針。過去・確定月の実測値は下の通常パスで kind:'actual' を返すため変更なし。
+    //   ※ stored monthly_values が残っていても無視 (OLD snapshot の予算projection を遮断)。
+    if (line?.archived && line?.row_type === "category") {
+      const cls = classifyMonth(fyYear, m, msd, todayStr, startMonth);
+      if (cls === "future" || (cls === "current" && !isMonthSettled(m))) {
+        return { value: null, kind: "none" };
+      }
+    }
     if (line?.row_type === "category" && line?.category_id) {
       const wb = weekBudgetByCat[line.category_id];
       const liveBudget = wb && wb[m] != null ? wb[m] : null;
@@ -716,7 +726,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // 月合計行の目標列 = 全 line の target_value 合計 (= 年間目標合計)。
   // Phase 3 (固定費): committed 由来 (sortedLines) に加え、固定費行 (loans 由来) の
   // 目標 (annual_target → target_value) も加算する → displayLines で集計。
-  const targetGrandTotal = displayLines.reduce((s, l) => s + (Number(l?.target_value) || 0), 0);
+  // 束E-3 (2026-06-15): archived (削除済) カテゴリは予算合計から除外 (admin と同期)。
+  const targetGrandTotal = displayLines.reduce((s, l) => (l?.archived ? s : s + (Number(l?.target_value) || 0)), 0);
 
   // Phase 1: 本部が確定した月 (committed_settled_months)。該当月セルを赤塗りする。
   const committedSettledMonths = Array.isArray(data?.committedSettledMonths)
@@ -816,6 +827,13 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       let any = false;
       for (const line of displayLines) {
         if (!line || !predicate(line)) continue;
+        // 束E-3 (2026-06-15): archived (削除済) カテゴリは未来/当月未確定 (= 予算扱い) を
+        //   加算しない。過去・確定月の値は resolveCell の committed 値を実測として加算。
+        //   admin の resolveCell wrapper と同方針 (kind:'budget' をスキップ)。
+        if (line.archived && line.row_type === "category") {
+          const cls = classifyMonth(fyYear, m, msd, todayStr, startMonth);
+          if (cls === "future" || (cls === "current" && !isMonthSettled(m))) continue;
+        }
         const v = resolveCell(line, m);
         if (v == null) continue;
         s += Number(v) || 0;
@@ -827,6 +845,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     let target = 0;
     for (const line of displayLines) {
       if (!line || !predicate(line)) continue;
+      // 束E-3: archived は予算合計 (= target) から除外。
+      if (line.archived) continue;
       target += Number(line?.target_value) || 0;
     }
     return { monthly, grand, target };
@@ -1139,7 +1159,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             actualTotal += actualSum;
           }
         }
-        const annualTargetTotal = displayLines.reduce((s, l) => s + (Number(l?.target_value) || 0), 0);
+        // 束E-3 (2026-06-15): archived (削除済) カテゴリは年間消化バー基準から除外 (admin と同期)。
+        const annualTargetTotal = displayLines.reduce((s, l) => (l?.archived ? s : s + (Number(l?.target_value) || 0)), 0);
         const targetLine = annualTargetTotal > 0
           ? (annualTargetTotal / 12) * (currentMonthIdx + 1)
           : 0;
@@ -1562,7 +1583,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             // 総予算 = 全行 summaryBudget 合計、実績 = 全行 settledLineSpent 合計 (確定月のみ)。
             // タスク⑭: lineYearSpent (着地見込み) → settledLineSpent (確定月実績のみ) に変更。
             //   本部 admin の rowSettledActual と同方針。
-            const totalBudget = displayLines.reduce((s, l) => s + (summaryBudget(l) || 0), 0);
+            // 束E-3 (2026-06-15): archived (削除済) カテゴリは消化サマリー予算合計から除外。
+            //   実測 (totalActual = settledLineSpent) は触らない (過去・確定月の実数はそのまま計上)。
+            const totalBudget = displayLines.reduce((s, l) => (l?.archived ? s : s + (summaryBudget(l) || 0)), 0);
             const totalActual = displayLines.reduce((s, l) => s + (settledLineSpent(l) || 0), 0);
             const tPct = totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0;
             const tColor = tPct >= 100 ? RED : tPct >= 80 ? GOLD : TEAL;
