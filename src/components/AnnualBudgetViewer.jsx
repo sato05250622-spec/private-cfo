@@ -1167,14 +1167,15 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             <div style={{ fontSize: 14, fontWeight: 600, color: GOLD, marginBottom: 8 }}>
               年間累計
             </div>
-            {/* 2026-06-15 (admin 仕様統一): 経過月ペース予算 / 確定月累計実測 + 年間消化 % の3値表示 */}
+            {/* 2026-06-15: ヘッダ 1 行目 = 経過月ペース予算 / 確定月累計実測 (2 値) */}
             <div style={{ marginBottom: 10, lineHeight: 1.4, fontWeight: 700, fontSize: 13 }}>
               <span style={{ color: BUDGET_BLUE }}>予算 ¥{Math.round((annualTargetTotal / 12) * (currentMonthIdx + 1)).toLocaleString()}</span>
               <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400 }}>／</span>
               <span style={{ color: isOver ? RED : TEXT_PRIMARY }}>実測 ¥{Math.round(actualTotal).toLocaleString()}</span>
-              <span style={{ color: isOver ? RED : GOLD, marginLeft: 12 }}>
-                年間消化 {actualPct}%
-              </span>
+            </div>
+            {/* 2026-06-15: 年間消化 % をグラフ直上に独立行で表示 */}
+            <div style={{ fontSize: 14, color: isOver ? RED : GOLD, marginBottom: 4 }}>
+              年間消化 {actualPct}%
             </div>
             {/* ラベル列 (40px、予算/実測の 2 行) + バーラッパ (flex:1)。
                 上段 = 予算バー (BUDGET_BLUE、幅 budgetPct%)、下段 = 実測バー (GOLD/RED、幅 actualPct%)。
