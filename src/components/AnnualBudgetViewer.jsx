@@ -1188,9 +1188,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             <div style={{ fontSize: 14, fontWeight: 600, color: GOLD, marginBottom: 8 }}>
               年間累計
             </div>
-            {/* 2026-06-15: ヘッダ 1 行目 = 経過月ペース予算 / 確定月累計実測 (2 値) */}
+            {/* 2026-06-16: ヘッダ 1 行目 = 年間目標満額予算 / 確定月累計実測 (2 値)。
+                admin ①修正 (AnnualBudgetTab.jsx L1477) と同方針: 予算 "数字" は
+                targetGrandTotal (L730、archived 除外済、年間目標合計列と同額) を表示。
+                ※ 青「予算」バーの width は budgetPct (= 経過月割合) のままで挙動不変。 */}
             <div style={{ marginBottom: 10, lineHeight: 1.4, fontWeight: 700, fontSize: 13 }}>
-              <span style={{ color: BUDGET_BLUE }}>予算 ¥{Math.round((annualTargetTotal / 12) * (currentMonthIdx + 1)).toLocaleString()}</span>
+              <span style={{ color: BUDGET_BLUE }}>予算 ¥{Math.round(targetGrandTotal).toLocaleString()}</span>
               <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400 }}>／</span>
               <span style={{ color: isOver ? RED : TEXT_PRIMARY }}>実測 ¥{Math.round(actualTotal).toLocaleString()}</span>
             </div>
