@@ -1132,8 +1132,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         };
         let budgetTotal = 0;
         let actualTotal = 0;
+        // 2026-06-17 B方式 (本部 AnnualBudgetTab.jsx ミラー): 「確定月の実額予算合計」を
+        //   actualTotal と同じ確定月ループ・同じ displayLines reduce で算出し、
+        //   apples-to-apples で比較可能にする (archived/スコープ対称)。
+        let settledBudgetTotal = 0;
         for (const m of monthsToNow) {
-          // 予算累計 (確定/未確定問わず、純関数の budgetOnly モード)
+          // 予算累計 (確定/未確定問わず、純関数の budgetOnly モード) — 他参照用に温存。
           const budgetSum = displayLines.reduce((s, l) => {
             const c = resolveExpenseCellPure(l, m, _ctx, { budgetOnly: true });
             const v = Number(c?.value);
@@ -1157,6 +1161,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               return s + (Number.isFinite(x) && x > 0 ? x : 0);
             }, 0);
             actualTotal += actualSum;
+            // B方式: 確定月の実額予算 = budgetOnly 経路で全行合算 (上の budgetSum と同式)。
+            //   apples-to-apples で actualTotal と対比させるため、確定月ループ内で
+            //   settledBudgetTotal に加算する。
+            settledBudgetTotal += budgetSum;
           }
         }
         // 束E-3 (2026-06-15): archived (削除済) カテゴリは年間消化バー基準から除外 (admin と同期)。
@@ -1169,10 +1177,18 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         //   実測バー = 確定月累計 / 年間目標 × 100
         //   targetLine / budgetTotal の計算は他参照用に残置。
         const budgetPct = Math.round(((currentMonthIdx + 1) / 12) * 100);
+        void budgetPct; // 旧経過月バー (現バーから除却、他参照用に温存)。
+        // 2026-06-17 B方式 (本部ミラー): 青「予算」バー = 確定月実額予算累計 / 年間目標 × 100。
+        const settledBudgetPct = annualTargetTotal > 0
+          ? Math.round((settledBudgetTotal / annualTargetTotal) * 100)
+          : 0;
         const actualPct = annualTargetTotal > 0
           ? Math.round((actualTotal / annualTargetTotal) * 100)
           : 0;
-        const isOver = actualTotal > annualTargetTotal && annualTargetTotal > 0;
+        // 2026-06-17 B方式: isOver は「実測が確定月予算を超えたか」で判定 (本部と同方針)。
+        const isOver = actualTotal > settledBudgetTotal && settledBudgetTotal > 0;
+        // 予実差 (±): 実測 - 確定月実額予算。+ = オーバー (赤)、- = 余り (青)、0 = 同額。
+        const diff = actualTotal - settledBudgetTotal;
         const actualGrad = isOver
           ? 'linear-gradient(90deg, #FF5252 0%, #C62828 100%)'
           : 'linear-gradient(90deg, #D4A843 0%, #B88E33 100%)';
@@ -1193,13 +1209,24 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 targetGrandTotal (L730、archived 除外済、年間目標合計列と同額) を表示。
                 ※ 青「予算」バーの width は budgetPct (= 経過月割合) のままで挙動不変。 */}
             <div style={{ marginBottom: 10, lineHeight: 1.4, fontWeight: 700, fontSize: 13 }}>
-              <span style={{ color: BUDGET_BLUE }}>予算 ¥{Math.round(targetGrandTotal).toLocaleString()}</span>
-              <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400 }}>／</span>
               <span style={{ color: isOver ? RED : TEXT_PRIMARY }}>実測 ¥{Math.round(actualTotal).toLocaleString()}</span>
+              <span style={{ color: TEXT_MUTED, margin: '0 8px', fontWeight: 400 }}>／</span>
+              <span style={{ color: BUDGET_BLUE }}>予算 ¥{Math.round(targetGrandTotal).toLocaleString()}</span>
             </div>
-            {/* 2026-06-15: 年間消化 % をグラフ直上に独立行で表示 */}
+            {/* 2026-06-15: 年間消化 % をグラフ直上に独立行で表示。
+                2026-06-17 (本部ミラー): 予実差 ±¥ を消化% の右に小さめ font で添える。 */}
             <div style={{ fontSize: 14, color: isOver ? RED : GOLD, marginBottom: 4 }}>
               年間消化 {actualPct}%
+              <span style={{
+                marginLeft: 10, fontSize: 11, fontWeight: 700,
+                color: diff > 0 ? '#FF5252' : diff < 0 ? '#5BA8FF' : TEXT_SECONDARY,
+              }}>
+                {diff > 0
+                  ? `＋¥${Math.round(diff).toLocaleString()}`
+                  : diff < 0
+                  ? `−¥${Math.round(Math.abs(diff)).toLocaleString()}`
+                  : '±¥0'}
+              </span>
             </div>
             {/* ラベル列 (40px、予算/実測の 2 行) + バーラッパ (flex:1)。
                 上段 = 予算バー (BUDGET_BLUE、幅 budgetPct%)、下段 = 実測バー (GOLD/RED、幅 actualPct%)。
@@ -1212,34 +1239,21 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 lineHeight: 1,
                 whiteSpace: 'nowrap',
               }}>
-                <div style={{ height: 6, display: 'flex', alignItems: 'center', color: BUDGET_BLUE }}>予算</div>
-                <div style={{ height: 3 }} />
                 <div style={{ height: 6, display: 'flex', alignItems: 'center', color: isOver ? RED : GOLD }}>実測</div>
+                <div style={{ height: 3 }} />
+                <div style={{ height: 6, display: 'flex', alignItems: 'center', color: BUDGET_BLUE }}>予算</div>
               </div>
             <div style={{
               position: 'relative',
               flex: 1,
             }}>
-              {/* 上段: 予算バー (BUDGET_BLUE)。幅 = budgetPct% (= budgetTotal/targetLine)。
-                  targetLine>0 のときだけ青 fill を出す (未設定なら NAVY3 のみ)。 */}
+              {/* 上段: 実測バー (GOLD or RED)。幅 = actualPct% (= actualTotal/annualTargetTotal × 100)。
+                  actualTotal > settledBudgetTotal で RED グラデに切替 (本部 isOver と連動)。
+                  100%超ははみ出し許容 (overflow:visible)。
+                  2026-06-17 順入替: marginBottom:3 を上段(実測)に保持 → 2バー間 3px 隙間維持。 */}
               <div style={{
                 width: '100%', height: 6, borderRadius: 3,
                 background: NAVY3, overflow: 'visible', marginBottom: 3,
-              }}>
-                {targetLine > 0 && budgetPct > 0 && (
-                  <div style={{
-                    width: `${budgetPct}%`, height: '100%',
-                    background: BUDGET_BLUE,
-                    borderRadius: 3,
-                    transition: 'width 0.3s',
-                  }} />
-                )}
-              </div>
-              {/* 下段: 実測バー (GOLD or RED)。幅 = actualPct% (= actualTotal/targetLine)。
-                  actualTotal>targetLine で RED グラデに切替。100%超ははみ出し許容 (overflow:visible)。 */}
-              <div style={{
-                width: '100%', height: 6, borderRadius: 3,
-                background: NAVY3, overflow: 'visible',
               }}>
                 {targetLine > 0 && actualPct > 0 && (
                   <div style={{
@@ -1250,50 +1264,24 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   }} />
                 )}
               </div>
-              {/* 月境界 dashed 線 11 本 (12 等分維持、wrapper 全体に被せ 2 本バーを縦断)。 */}
-              {Array.from({ length: 11 }, (_, i) => (
-                <div key={i} style={{
-                  position: 'absolute', top: 0, bottom: 0,
-                  left: `${((i + 1) / 12) * 100}%`, width: 0,
-                  borderLeft: `1px dashed ${GOLD}66`,
-                  pointerEvents: 'none',
-                }} />
-              ))}
-            </div>
-            </div>
-            {/* 月軸: monthOrder の順、刻み線 GOLD 25% 透過 (=`${GOLD}40`)、
-                現在サイクルのみ GOLD 強調 + 上に ▼ マーカー */}
-            {/* タスクF (2026-06-08): 月軸の左端をバーの左端 (ラベル列40px + gap6px) に揃える。
-                外側 flex (gap:6) の子1 = 空スペーサ(width:40)、子2 = 既存月軸div (flex:1 付与)。
-                月軸の内容(monthOrder/刻み線/▼マーカー)は無改修。 */}
-            <div style={{ display: 'flex', gap: 6 }}>
-              <div style={{ width: 40 }} />
-            <div style={{ display: 'flex', paddingTop: 12, position: 'relative', flex: 1 }}>
-              {monthOrder.map((m, i) => {
-                const isCurrent = m === currentCycleMonth;
-                // タスク (2026-06-08): 月軸ラベルは数字のみ、先頭と末尾だけ「○月」を付ける。
-                //   2桁月 (10-12) で「月」が下に折り返さないよう whiteSpace:nowrap を併用。
-                const isEdge = i === 0 || i === monthOrder.length - 1;
-                return (
-                  <div key={m} style={{
-                    position: 'relative', flex: 1, textAlign: 'center',
-                    fontSize: 10,
-                    color: isCurrent ? GOLD : TEXT_SECONDARY,
-                    fontWeight: isCurrent ? 700 : 400,
-                    borderLeft: i === 0 ? 'none' : `1px solid ${GOLD}40`,
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {isCurrent && (
-                      <div style={{
-                        position: 'absolute', top: -10, left: '50%',
-                        transform: 'translateX(-50%)',
-                        fontSize: 9, color: GOLD, lineHeight: 1,
-                      }}>▼</div>
-                    )}
-                    {isEdge ? `${m}月` : `${m}`}
-                  </div>
-                );
-              })}
+              {/* 下段: 予算バー (BUDGET_BLUE)。
+                  2026-06-17 B方式 (本部ミラー): 幅 = settledBudgetPct%
+                  (= settledBudgetTotal/annualTargetTotal × 100、確定月実額予算累計 / 年間目標)。
+                  経過月ペースではなく実額ベース。
+                  targetLine>0 のときだけ青 fill を出す (未設定なら NAVY3 のみ)。 */}
+              <div style={{
+                width: '100%', height: 6, borderRadius: 3,
+                background: NAVY3, overflow: 'visible',
+              }}>
+                {targetLine > 0 && settledBudgetPct > 0 && (
+                  <div style={{
+                    width: `${settledBudgetPct}%`, height: '100%',
+                    background: BUDGET_BLUE,
+                    borderRadius: 3,
+                    transition: 'width 0.3s',
+                  }} />
+                )}
+              </div>
             </div>
             </div>
           </div>
