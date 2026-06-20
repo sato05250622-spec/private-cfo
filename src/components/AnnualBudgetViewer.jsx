@@ -1142,7 +1142,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             </div>
             {/* (c) コメント: 金額とコメントを別々の inline-block(nowrap) に分割し、
                 収まれば 1 行・入らなければコメントが丸ごと次行へ (「ます」だけ孤立しない)。
-                極太ゴシック + 白縁取り (text-shadow 方式、iOS Safari 対応)。
+                極太ゴシック + 白縁取り (text-stroke 方式 + paintOrder で stroke を fill の下に描き、
+                塗りが細らず縁が外側に均一になる。text-shadow の二重・ガタつきを解消)。
                 文字色: diff<0(多く使ってる)=赤 #FF5252 / diff>=0(少なく使えてる)=青 #5BA8FF。 */}
             <div style={{
               lineHeight: 1.3, marginBottom: 14,
@@ -1153,7 +1154,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 fontFamily: FONT_NUM, fontWeight: 900,
                 fontSize: 'clamp(20px, 7vw, 28px)',
                 fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em',
-                textShadow: '-1.5px -1.5px 0 #fff, 1.5px -1.5px 0 #fff, -1.5px 1.5px 0 #fff, 1.5px 1.5px 0 #fff',
+                WebkitTextStroke: '2px #fff', paintOrder: 'stroke fill',
               }}>
                 {diff >= 0
                   ? `¥${Math.round(diff).toLocaleString()}`
@@ -1163,7 +1164,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               <span style={{
                 display: 'inline-block', whiteSpace: 'nowrap',
                 fontFamily: FONT_JP, fontWeight: 900, fontSize: 15,
-                textShadow: '-1.5px -1.5px 0 #fff, 1.5px -1.5px 0 #fff, -1.5px 1.5px 0 #fff, 1.5px 1.5px 0 #fff',
+                WebkitTextStroke: '2px #fff', paintOrder: 'stroke fill',
               }}>
                 {diff >= 0 ? '少なく使えてます' : '多く使ってます'}
               </span>
