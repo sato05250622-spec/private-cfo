@@ -1120,6 +1120,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         const settledCount = monthOrder.filter((m) => isMonthSettled(m)).length;
         const forecast = actualTotal + (monthOrder.length - settledCount) * monthlyBudget;
         const diff = yearBudget - forecast;
+        // 年間累計カード専用フォント (このカード内だけに適用。消化サマリー等には波及させない)。
+        //   金額 = クラシックなセリフ (Playfair Display) + 明朝フォールバック、日本語 = 明朝 (Shippori Mincho)。
+        const FONT_NUM = "'Playfair Display', 'Shippori Mincho', serif";
+        const FONT_JP = "'Shippori Mincho', serif";
         return (
           <div style={{
             padding: '16px 12px',
@@ -1129,40 +1133,57 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             border: `1px solid ${GOLD}45`,
           }}>
             {/* (a) 年度ラベル */}
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#F0EAD6', marginBottom: 6 }}>
+            <div style={{ fontFamily: FONT_JP, fontSize: 13, fontWeight: 600, color: '#F0EAD6', marginBottom: 6 }}>
               {fyYear}年度
             </div>
             {/* (b) 「今のペースなら」ラベル */}
-            <div style={{ fontSize: 12, color: '#F0EAD6', marginBottom: 4 }}>
+            <div style={{ fontFamily: FONT_JP, fontSize: 12, fontWeight: 500, color: '#F0EAD6', marginBottom: 4 }}>
               今のペースなら
             </div>
-            {/* (c) コメント (大・太字): diff>=0 → 少なく使えてます / diff<0 → 多く使ってます */}
+            {/* (c) コメント: 金額とコメントを別々の inline-block(nowrap) に分割し、
+                収まれば 1 行・入らなければコメントが丸ごと次行へ (「ます」だけ孤立しない)。
+                金額 = セリフ大、コメント = 明朝で一段小さくメリハリ。 */}
             <div style={{
-              fontSize: 22, fontWeight: 700, lineHeight: 1.3, marginBottom: 14,
+              lineHeight: 1.3, marginBottom: 14,
               color: diff >= 0 ? '#D4A843' : '#FF5252',
             }}>
-              {diff >= 0
-                ? `¥${Math.round(diff).toLocaleString()} 少なく使えてます`
-                : `¥${Math.round(Math.abs(diff)).toLocaleString()} 多く使ってます`}
+              <span style={{
+                display: 'inline-block', whiteSpace: 'nowrap',
+                fontFamily: FONT_NUM, fontWeight: 700,
+                fontSize: 'clamp(20px, 7vw, 28px)',
+                fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em',
+              }}>
+                {diff >= 0
+                  ? `¥${Math.round(diff).toLocaleString()}`
+                  : `¥${Math.round(Math.abs(diff)).toLocaleString()}`}
+              </span>
+              {' '}
+              <span style={{
+                display: 'inline-block', whiteSpace: 'nowrap',
+                fontFamily: FONT_JP, fontWeight: 600, fontSize: 15,
+              }}>
+                {diff >= 0 ? '少なく使えてます' : '多く使ってます'}
+              </span>
             </div>
             {/* (d) 区切り線 */}
             <div style={{ borderTop: `1px solid ${GOLD}45`, marginBottom: 12 }} />
-            {/* (e) 簡易内訳 (ラベル / 金額 の 2 カラム × 3 行) */}
-            <div style={{ fontSize: 12, color: '#F0EAD6', marginBottom: 8 }}>
+            {/* (e) 簡易内訳 (ラベル / 金額 の 2 カラム × 3 行)。
+                ラベル = 明朝、金額 = セリフ + tabular-nums で桁を揃える。 */}
+            <div style={{ fontFamily: FONT_JP, fontSize: 12, fontWeight: 500, color: '#F0EAD6', marginBottom: 8 }}>
               簡易内訳
             </div>
             <div style={{ fontSize: 13 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ color: TEXT_SECONDARY }}>年予算</span>
-                <span style={{ color: TEXT_PRIMARY, fontWeight: 600 }}>¥{Math.round(yearBudget).toLocaleString()}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                <span style={{ fontFamily: FONT_JP, fontWeight: 500, color: TEXT_SECONDARY }}>年予算</span>
+                <span style={{ fontFamily: FONT_NUM, fontWeight: 600, color: TEXT_PRIMARY, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em' }}>¥{Math.round(yearBudget).toLocaleString()}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ color: TEXT_SECONDARY }}>現在の見込み</span>
-                <span style={{ color: TEXT_PRIMARY, fontWeight: 600 }}>¥{Math.round(forecast).toLocaleString()}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                <span style={{ fontFamily: FONT_JP, fontWeight: 500, color: TEXT_SECONDARY }}>現在の見込み</span>
+                <span style={{ fontFamily: FONT_NUM, fontWeight: 600, color: TEXT_PRIMARY, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em' }}>¥{Math.round(forecast).toLocaleString()}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: TEXT_SECONDARY }}>差額</span>
-                <span style={{ color: diff >= 0 ? '#D4A843' : '#FF5252', fontWeight: 700 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span style={{ fontFamily: FONT_JP, fontWeight: 500, color: TEXT_SECONDARY }}>差額</span>
+                <span style={{ fontFamily: FONT_NUM, fontWeight: 700, color: diff >= 0 ? '#D4A843' : '#FF5252', fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em' }}>
                   {diff >= 0
                     ? `+¥${Math.round(diff).toLocaleString()}`
                     : `-¥${Math.round(Math.abs(diff)).toLocaleString()}`}
