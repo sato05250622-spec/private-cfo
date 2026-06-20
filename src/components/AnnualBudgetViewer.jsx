@@ -1104,55 +1104,21 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           - 0 除算回避: 年間予算 0 → pct=0、バー塗りは描画しない (背景のみ)
       */}
       {(() => {
-        // 2026-06-20: 新仕様カード「今のペースなら」。
-        //   yearBudget(年予算) = 全12ヶ月 (monthOrder) の月予算 (budgetOnly) の合計。
-        //   forecast(現在の見込み) = 各月 m について、確定月 (isMonthSettled) は実測、
-        //     未確定月は月予算 (budgetOnly) を取り、全12ヶ月を合算 (確定=実測ベース・未確定=予算ベース)。
-        //   diff(差額) = yearBudget - forecast。+ = 予算より少なく使えている (余り)、- = 超過。
-        //   予算取得は既存 settledBudgetTotal と同じ resolveExpenseCellPure(budgetOnly) ロジック、
-        //   実測取得は既存 actualTotal と同じ固定費=monthly_amounts[m]??base / 他=monthly_spent[m] ロジックを踏襲。
-        // 顧客の weekBudgetByCat は plain object → Map 化 (resolveExpenseCellPure は Map.get を期待)。
-        // aggregatedCells は budgetOnly モードでは実質スキップされるため空 Map で OK。
-        const _ctx = {
-          currentYear: fyYear,
-          msdVal: msd,
-          todayStr,
-          startMonth,
-          settledMonths: committedSettledMonths,
-          weekBudgetByCatMonth: new Map(Object.entries(weekBudgetByCat)),
-          aggregatedCells: new Map(),
-        };
-        let yearBudget = 0;
-        let forecast = 0;
-        for (const m of monthOrder) {
-          // 月予算 (budgetOnly、純関数): 確定/未確定問わず予算経路の値。null/<=0 は加算しない。
-          const budgetSum = displayLines.reduce((s, l) => {
-            const c = resolveExpenseCellPure(l, m, _ctx, { budgetOnly: true });
-            const v = Number(c?.value);
-            return s + (Number.isFinite(v) && v > 0 ? v : 0);
-          }, 0);
-          yearBudget += budgetSum;
-          if (isMonthSettled(m)) {
-            // 確定月 → 実測 (固定費 = monthly_amounts[m] ?? base、その他 = monthly_spent[m])。
-            const actualSum = displayLines.reduce((s, l) => {
-              if (l?.row_type === "fixed_cost") {
-                const ma = l.monthly_amounts;
-                const base = Number(l.monthly_amount) || 0;
-                const v = ma ? (ma[m] ?? ma[String(m)]) : null;
-                const x = v != null ? Number(v) : base;
-                return s + (Number.isFinite(x) && x > 0 ? x : 0);
-              }
-              const ms = l?.monthly_spent;
-              const v = ms ? (ms[m] ?? ms[String(m)]) : null;
-              const x = Number(v);
-              return s + (Number.isFinite(x) && x > 0 ? x : 0);
-            }, 0);
-            forecast += actualSum;
-          } else {
-            // 未確定月 → 月予算 (budgetOnly)。
-            forecast += budgetSum;
-          }
-        }
+        // 2026-06-21: 予算基準を「年間目標 (annualTargetTotal) の月割」に変更
+        //   (差額が常に +¥0 になる不具合の修正)。従来は確定月の予算ソース
+        //   (monthly_values/weekBudgetByCat) が確定時に消えて実測と相殺されていた。
+        //   - yearBudget(年予算) = annualTargetTotal (archived 除外の target_value 合計、
+        //                          消化サマリーの年間予算合計と同値の年間目標満額)
+        //   - forecast(見込み)   = 確定月は実測 (actualTotal) + 未確定月は月割予算 (monthlyBudget)
+        //   - diff(差額)         = yearBudget - forecast (= 確定月の [月割予算 - 実測] の合計)
+        // annualTargetTotal: 年間目標満額 (L730 targetGrandTotal と同式、archived 除外の target_value 合計)。
+        const annualTargetTotal = displayLines.reduce((s, l) => (l?.archived ? s : s + (Number(l?.target_value) || 0)), 0);
+        // actualTotal: 確定月のみの実測合計 (settledLineSpent = 消化サマリー実測と同源)。
+        const actualTotal = displayLines.reduce((s, l) => s + (settledLineSpent(l) || 0), 0);
+        const yearBudget = annualTargetTotal;
+        const monthlyBudget = annualTargetTotal / monthOrder.length;
+        const settledCount = monthOrder.filter((m) => isMonthSettled(m)).length;
+        const forecast = actualTotal + (monthOrder.length - settledCount) * monthlyBudget;
         const diff = yearBudget - forecast;
         return (
           <div style={{
