@@ -1121,9 +1121,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         const forecast = actualTotal + (monthOrder.length - settledCount) * monthlyBudget;
         const diff = yearBudget - forecast;
         // 年間累計カード専用フォント (このカード内だけに適用。消化サマリー等には波及させない)。
-        //   金額 = クラシックなセリフ (Playfair Display) + 明朝フォールバック、日本語 = 明朝 (Shippori Mincho)。
-        const FONT_NUM = "'Playfair Display', 'Shippori Mincho', serif";
-        const FONT_JP = "'Shippori Mincho', serif";
+        //   極太ゴシック (Noto Sans JP) に統一。
+        const FONT_NUM = "'Noto Sans JP', sans-serif";
+        const FONT_JP = "'Noto Sans JP', sans-serif";
         return (
           <div style={{
             padding: '16px 12px',
@@ -1142,16 +1142,18 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             </div>
             {/* (c) コメント: 金額とコメントを別々の inline-block(nowrap) に分割し、
                 収まれば 1 行・入らなければコメントが丸ごと次行へ (「ます」だけ孤立しない)。
-                金額 = セリフ大、コメント = 明朝で一段小さくメリハリ。 */}
+                極太ゴシック + 白縁取り (text-shadow 方式、iOS Safari 対応)。
+                文字色: diff<0(多く使ってる)=赤 #FF5252 / diff>=0(少なく使えてる)=青 #5BA8FF。 */}
             <div style={{
               lineHeight: 1.3, marginBottom: 14,
-              color: diff >= 0 ? '#D4A843' : '#FF5252',
+              color: diff >= 0 ? '#5BA8FF' : '#FF5252',
             }}>
               <span style={{
                 display: 'inline-block', whiteSpace: 'nowrap',
-                fontFamily: FONT_NUM, fontWeight: 700,
+                fontFamily: FONT_NUM, fontWeight: 900,
                 fontSize: 'clamp(20px, 7vw, 28px)',
                 fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em',
+                textShadow: '-1.5px -1.5px 0 #fff, 1.5px -1.5px 0 #fff, -1.5px 1.5px 0 #fff, 1.5px 1.5px 0 #fff',
               }}>
                 {diff >= 0
                   ? `¥${Math.round(diff).toLocaleString()}`
@@ -1160,7 +1162,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               {' '}
               <span style={{
                 display: 'inline-block', whiteSpace: 'nowrap',
-                fontFamily: FONT_JP, fontWeight: 600, fontSize: 15,
+                fontFamily: FONT_JP, fontWeight: 900, fontSize: 15,
+                textShadow: '-1.5px -1.5px 0 #fff, 1.5px -1.5px 0 #fff, -1.5px 1.5px 0 #fff, 1.5px 1.5px 0 #fff',
               }}>
                 {diff >= 0 ? '少なく使えてます' : '多く使ってます'}
               </span>
@@ -1183,7 +1186,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                 <span style={{ fontFamily: FONT_JP, fontWeight: 500, color: TEXT_SECONDARY }}>差額</span>
-                <span style={{ fontFamily: FONT_NUM, fontWeight: 700, color: diff >= 0 ? '#D4A843' : '#FF5252', fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em' }}>
+                <span style={{ fontFamily: FONT_NUM, fontWeight: 700, color: diff >= 0 ? '#5BA8FF' : '#FF5252', fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em' }}>
                   {diff >= 0
                     ? `+¥${Math.round(diff).toLocaleString()}`
                     : `-¥${Math.round(Math.abs(diff)).toLocaleString()}`}
