@@ -201,6 +201,7 @@ export default function AssetSheetViewer({ clientId }) {
     addIncomeRow, removeIncomeRow, setIncomeLineName,
     setIncomeMonthlyActual, setIncomeMonthlyTarget,
     setInitialAsset: persistInitialAsset,
+    refetch,
   } = useAnnualBudgets(clientId, currentYear);
 
   // 初回 data 着弾時の年度同期。
@@ -558,6 +559,23 @@ export default function AssetSheetViewer({ clientId }) {
           {error && !loading && (
             <span style={{ fontSize: 11, color: RED, whiteSpace: "nowrap" }}>読み込みエラー</span>
           )}
+          <button
+            onClick={() => refetch()}
+            disabled={loading}
+            style={{
+              marginLeft: 8,
+              padding: '4px 10px',
+              fontSize: 11,
+              background: 'transparent',
+              border: '1px solid #5BA8FF',
+              borderRadius: 6,
+              color: '#5BA8FF',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.5 : 1,
+            }}
+          >
+            更新
+          </button>
         </div>
       </div>
 
