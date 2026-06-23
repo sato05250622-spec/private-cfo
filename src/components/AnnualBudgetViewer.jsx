@@ -1104,21 +1104,37 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           - 0 除算回避: 年間予算 0 → pct=0、バー塗りは描画しない (背景のみ)
       */}
       {(() => {
-        // 2026-06-21: 予算基準を「年間目標 (annualTargetTotal) の月割」に変更
-        //   (差額が常に +¥0 になる不具合の修正)。従来は確定月の予算ソース
-        //   (monthly_values/weekBudgetByCat) が確定時に消えて実測と相殺されていた。
-        //   - yearBudget(年予算) = annualTargetTotal (archived 除外の target_value 合計、
-        //                          消化サマリーの年間予算合計と同値の年間目標満額)
-        //   - forecast(見込み)   = 確定月は実測 (actualTotal) + 未確定月は月割予算 (monthlyBudget)
-        //   - diff(差額)         = yearBudget - forecast (= 確定月の [月割予算 - 実測] の合計)
-        // annualTargetTotal: 年間目標満額 (L730 targetGrandTotal と同式、archived 除外の target_value 合計)。
-        const annualTargetTotal = displayLines.reduce((s, l) => (l?.archived ? s : s + (Number(l?.target_value) || 0)), 0);
+        // 2026-06-23: 予算基準を「各月の実際の月予算を全月合計」に統一 (均等割を撤廃)。
+        //   yearBudget と forecast の予算部分は必ず同じ monthlyBudgetForMonth(m) を使う。
+        //   これにより確定が無い月は両方同額で相殺され、差額は「確定月の (月予算 - 実測)
+        //   の合計」になる。予算0の月は両方0で揃う。
+        //   月予算ソース (settle で消えない):
+        //     - 固定費 (row_type==='fixed_cost'): monthly_amounts[m] ?? monthly_amount
+        //     - カテゴリ (row_type==='category'): weekBudgetByCat[category_id][m] (L679-686 構築済)
+        //     - それ以外/取得不能: 0
+        const monthlyBudgetForMonth = (m) => displayLines.reduce((s, l) => {
+          if (!l || l.archived) return s;
+          if (l.row_type === "fixed_cost") {
+            const ma = l.monthly_amounts;
+            const mv = ma ? (ma[m] ?? ma[String(m)]) : null;
+            return s + Number(mv != null ? mv : (l.monthly_amount ?? 0) || 0);
+          }
+          if (l.row_type === "category" && l.category_id != null) {
+            const wb = weekBudgetByCat?.[l.category_id];
+            const v = wb ? (wb[m] ?? wb[String(m)]) : null;
+            return s + (Number(v) || 0);
+          }
+          return s;
+        }, 0);
         // actualTotal: 確定月のみの実測合計 (settledLineSpent = 消化サマリー実測と同源)。
         const actualTotal = displayLines.reduce((s, l) => s + (settledLineSpent(l) || 0), 0);
-        const yearBudget = annualTargetTotal;
-        const monthlyBudget = annualTargetTotal / monthOrder.length;
-        const settledCount = monthOrder.filter((m) => isMonthSettled(m)).length;
-        const forecast = actualTotal + (monthOrder.length - settledCount) * monthlyBudget;
+        // yearBudget(年予算)  = 全月の月予算合計。
+        // forecast(見込み)    = 確定月は実測 (actualTotal) + 未確定月は同じ月予算合計。
+        //   actualTotal が確定月のみの実測合計なので、未確定月の月予算 Σ を足せば等価。
+        // diff(差額)          = yearBudget - forecast (= 確定月の [月予算 - 実測] の合計)。
+        const yearBudget = monthOrder.reduce((s, m) => s + monthlyBudgetForMonth(m), 0);
+        const forecast = actualTotal
+          + monthOrder.reduce((s, m) => s + (isMonthSettled(m) ? 0 : monthlyBudgetForMonth(m)), 0);
         const diff = yearBudget - forecast;
         // 年間累計カード専用フォント (このカード内だけに適用。消化サマリー等には波及させない)。
         //   極太ゴシック (Noto Sans JP) に統一。
