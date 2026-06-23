@@ -314,7 +314,7 @@ export default function AssetSheetViewer({ clientId }) {
   // 2026-06-15: fixedSettledOnly:true で固定費を確定月のみ反映 (= 未確定月では固定費 null)。
   //   「支出を入れてないのに残高が減る」を解消する資産シート専用ゲート (admin と同形)。
   const expenseBudgetMonthly = useMemo(
-    () => computeMonthlyExpenseBudgetTotals(linesForBudget, expenseBudgetCtx, startMonth, { budgetOnly: true, fixedSettledOnly: true }).monthly,
+    () => computeMonthlyExpenseBudgetTotals(linesForBudget, expenseBudgetCtx, startMonth, { budgetOnly: true, fixedSettledOnly: false }).monthly,
     [linesForBudget, expenseBudgetCtx, startMonth],
   );
   // 上段(金) = 既定経路、settledMonths で月セル時にゲート (admin L187-190 と同式)
