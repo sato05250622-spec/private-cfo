@@ -1109,18 +1109,18 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           <div style={{ fontSize: 13, fontWeight: 700, color: TEXT_PRIMARY }}>
             支出管理繰越票 <span style={{ color: TEXT_MUTED, fontSize: 11 }}>{data.fiscal_year}年度</span>
           </div>
-          {committedSettledMonths.length > 0 && (() => {
-            const maxMonth = Math.max(...committedSettledMonths.map((m) => Number(m)));
-            return (
-              <div style={{ fontSize: 11, color: '#5BA8FF', fontWeight: 600, marginTop: 3 }}>
-                {maxMonth}月まで確定分
-              </div>
-            );
-          })()}
           <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 3 }}>
             本部反映: {fmtDateTime(data.last_committed_at)}
           </div>
         </div>
+        {committedSettledMonths.length > 0 && (() => {
+          const maxMonth = Math.max(...committedSettledMonths.map((m) => Number(m)));
+          return (
+            <div style={{ fontSize: 11, color: '#5BA8FF', fontWeight: 600 }}>
+              {maxMonth}月まで確定分
+            </div>
+          );
+        })()}
         <button
           className="no-print"
           onClick={handlePrintOnePage}
