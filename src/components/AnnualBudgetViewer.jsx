@@ -1144,10 +1144,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                 収まれば 1 行・入らなければコメントが丸ごと次行へ (「ます」だけ孤立しない)。
                 極太ゴシック + 白縁取り (text-stroke 方式 + paintOrder で stroke を fill の下に描き、
                 塗りが細らず縁が外側に均一になる。text-shadow の二重・ガタつきを解消)。
-                文字色: diff<0(多く使ってる)=赤 #FF5252 / diff>=0(少なく使えてる)=青 #5BA8FF。 */}
+                文字色: diff<0(多く使ってる)=赤 #FF5252 / diff>=0(少なく使えてる)=青 #1D4ED8。 */}
             <div style={{
               lineHeight: 1.3, marginBottom: 14,
-              color: diff >= 0 ? '#5BA8FF' : '#FF5252',
+              color: diff >= 0 ? '#1D4ED8' : '#FF5252',
             }}>
               <span style={{
                 display: 'inline-block', whiteSpace: 'nowrap',
@@ -1187,7 +1187,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                 <span style={{ fontFamily: FONT_JP, fontWeight: 500, color: TEXT_SECONDARY }}>差額</span>
-                <span style={{ fontFamily: FONT_NUM, fontWeight: 700, color: diff >= 0 ? '#5BA8FF' : '#FF5252', fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em' }}>
+                <span style={{ fontFamily: FONT_NUM, fontWeight: 700, color: diff >= 0 ? '#1D4ED8' : '#FF5252', fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em' }}>
                   {diff >= 0
                     ? `+¥${Math.round(diff).toLocaleString()}`
                     : `-¥${Math.round(Math.abs(diff)).toLocaleString()}`}
@@ -1606,18 +1606,6 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
           </div>
         </div>
       )}
-
-      {/* C-2: 凡例 hasSettled 条件撤去 → 常時表示。赤 (確定月) と 青 (未確定月=予算扱い) を併記。 */}
-      <div data-pdf="legend" style={{ padding: "8px 16px", borderTop: `1px solid ${BORDER}`, fontSize: 10, color: TEXT_MUTED, display: "flex", gap: 16, flexWrap: "wrap" }}>
-        <span>
-          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: `${RED}1A`, border: `1px solid ${RED}`, marginRight: 6, verticalAlign: "middle" }} />
-          赤背景 = 確定月 (凍結実測)
-        </span>
-        <span>
-          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: `${BUDGET_BLUE}1A`, border: `1px solid ${BUDGET_BLUE}66`, marginRight: 6, verticalAlign: "middle" }} />
-          青背景 = 未確定月 (予算扱い)
-        </span>
-      </div>
     </div>
   );
 
