@@ -718,6 +718,31 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       );
     }
   }
+  // 2026-06-23: 年予算の3系統 (テーブル目標列 / 消化サマリー / 年間累計カード) を
+  //   「各行の月別予算 12ヶ月合計」に統一するための行単位ヘルパ。target_value (年間目標の
+  //   直接入力) ではなく月別予算 (週予算 / monthly_amounts の積み上げ) を正とし、3系統を
+  //   恒等的に一致させる。カードの monthlyBudgetForMonth(m) の Σ_m と同値になる:
+  //     - 固定費 (row_type==='fixed_cost'): Σ_m (monthly_amounts[m] ?? monthly_amount)
+  //     - カテゴリ (row_type==='category'): annualWeekBudgetForCategory (全月Σ週、past含む)
+  //       = weekBudgetByCatAll[id] の Σ_m と同値
+  //     - 特殊行 (category_id==null): 0 (カード monthlyBudgetForMonth と同じく対象外)
+  const lineAnnualBudget = (l) => {
+    if (!l || l.archived) return 0;
+    if (l.row_type === "fixed_cost") {
+      const ma = l.monthly_amounts;
+      const base = Number(l.monthly_amount) || 0;
+      let s = 0;
+      for (let m = 1; m <= 12; m++) {
+        const v = ma ? (ma[m] ?? ma[String(m)]) : null;
+        s += (v != null ? Number(v) : base) || 0;
+      }
+      return s;
+    }
+    if (l.row_type === "category" && l.category_id != null) {
+      return annualWeekBudgetForCategory(weekCatBudgets, l.category_id, { fiscalYear: fyYear, startMonth });
+    }
+    return 0;
+  };
   // committed セル解決 (resolveCell) の上に、カテゴリの「当月＋将来月」は週予算 Σ を被せる
   // 表示用リゾルバ。返り値 { value, kind }。kind で色分け (budget=青 / actual=白)。
   //   - 過去月: committed の実測表示 (actual)。
@@ -763,7 +788,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   // Phase 3 (固定費): committed 由来 (sortedLines) に加え、固定費行 (loans 由来) の
   // 目標 (annual_target → target_value) も加算する → displayLines で集計。
   // 束E-3 (2026-06-15): archived (削除済) カテゴリは予算合計から除外 (admin と同期)。
-  const targetGrandTotal = displayLines.reduce((s, l) => (l?.archived ? s : s + (Number(l?.target_value) || 0)), 0);
+  // 2026-06-23: target_value 合計 → lineAnnualBudget (月別予算 12ヶ月合計) に統一。
+  //   archived は lineAnnualBudget が 0 を返すため除外条件は不要 (関数内で担保)。
+  const targetGrandTotal = displayLines.reduce((s, l) => s + lineAnnualBudget(l), 0);
 
   // Phase 1: 本部が確定した月 (committed_settled_months)。該当月セルを赤塗りする。
   const committedSettledMonths = Array.isArray(data?.committedSettledMonths)
@@ -882,8 +909,9 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     for (const line of displayLines) {
       if (!line || !predicate(line)) continue;
       // 束E-3: archived は予算合計 (= target) から除外。
+      // 2026-06-23: target_value → lineAnnualBudget (月別予算合計) に統一。
       if (line.archived) continue;
-      target += Number(line?.target_value) || 0;
+      target += lineAnnualBudget(line);
     }
     return { monthly, grand, target };
   };
@@ -1394,10 +1422,12 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
                   );
                 })()}
                 {(() => {
-                  const txt = fmtCell(line?.target_value);
+                  // 2026-06-23: 目標列も target_value → lineAnnualBudget (月別予算合計) に統一。
+                  const budget = lineAnnualBudget(line) || null;
+                  const txt = fmtCell(budget);
                   return (
                     <td style={{ ...cellStyle, fontWeight: 700,
-                      color: line?.target_value == null ? TEXT_MUTED : BUDGET_BLUE,
+                      color: budget == null ? TEXT_MUTED : BUDGET_BLUE,
                       fontSize: cellFontSize(txt, grandAvail), overflow: 'hidden' }}>
                       {txt}
                     </td>
@@ -1538,23 +1568,10 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             // 消化(実支出)= 本部が焼いた実支出シリーズ monthly_spent の合計。
             // sumLineSpent / lineYearSpent は本部準拠で viewer スコープに引き上げ済み (上 L443/L450)。
             // ここからは両関数を直接参照する (重複定義を削除)。
-            // タスク⑭ (2026-06-02): 本部準拠 summaryBudget に統一 (カテゴリも target_value)。
-            //   年間累計バー側 (L851-869) と完全同一定義。本部 annualTargetTotal と一致。
-            const summaryBudget = (l) => {
-              const tv = Number(l?.target_value);
-              if (Number.isFinite(tv) && tv > 0) return tv;
-              if (l?.row_type === "fixed_cost") {
-                const ma = l?.monthly_amounts;
-                const base = Number(l?.monthly_amount) || 0;
-                let s = 0;
-                for (let m = 1; m <= 12; m++) {
-                  const v = ma ? (ma[m] ?? ma[String(m)]) : null;
-                  s += (v != null ? Number(v) : base) || 0;
-                }
-                return s;
-              }
-              return 0;
-            };
+            // 2026-06-23: 消化サマリーの予算分母も lineAnnualBudget (月別予算 12ヶ月合計) に統一。
+            //   従来の target_value 優先をやめ、テーブル目標列・年間累計カードと同一ソースに揃える
+            //   (3系統が恒等的に一致)。totalBudget・各バー・消化率% も自動で月別ベースに連動。
+            const summaryBudget = (l) => lineAnnualBudget(l);
             // 総予算 = 全行 summaryBudget 合計、実績 = 全行 settledLineSpent 合計 (確定月のみ)。
             // タスク⑭: lineYearSpent (着地見込み) → settledLineSpent (確定月実績のみ) に変更。
             //   本部 admin の rowSettledActual と同方針。
