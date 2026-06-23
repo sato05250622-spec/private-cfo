@@ -65,6 +65,29 @@ function deriveFutureWeekBudgetForCategory(weekCatRecord, categoryId, { fiscalYe
   return out;
 }
 
+// 上の deriveFutureWeekBudgetForCategory は L60-63 で past 月を除外するため、
+// 確定月・過去月の月予算が落ちる。年間累計カードの「各月の目標予算」用には past を
+// 含む全月版が必要なので、classifyMonth フィルタを掛けずに byMonth をそのまま返す版。
+//   返り値: { [m(1-12)]: Σ週 }  (week_cat_budgets に行のある全月。past/current/future 不問)
+//   ※ 表示 (resolveCellDisplay) には使わない。集計専用 (確定月セルは別途実測表示のまま)。
+function deriveAllMonthsWeekBudgetForCategory(weekCatRecord, categoryId, { fiscalYear, startMonth = 1 }) {
+  const out = {};
+  if (!weekCatRecord || typeof weekCatRecord !== "object" || categoryId == null) return out;
+  for (const key of Object.keys(weekCatRecord)) {
+    const mt = key.match(/^(\d+)-(\d+)-w(\d+)_(.+)$/);
+    if (!mt) continue;
+    const year = Number(mt[1]);
+    const cm = Number(mt[2]);
+    const cid = mt[4];
+    if (String(cid) !== String(categoryId)) continue;
+    if (!(cm >= 1 && cm <= 12)) continue;
+    const cy = fiscalMonthCalendarYear(fiscalYear, startMonth, cm);
+    if (year !== cy) continue;
+    out[cm] = (out[cm] || 0) + (Number(weekCatRecord[key]) || 0);
+  }
+  return out;
+}
+
 // 方針A: 指定カテゴリの「全12ヶ月」week_cat_budgets 合計 (年間予算)。消化サマリーの予算用。
 //   過去/当月/将来を問わず設定済みの月予算を全合算。本部 annualWeekBudgetForCategory と同一ロジック
 //   (顧客の weekCatBudgets は Record なのでキーをパースする)。
@@ -684,6 +707,17 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
       );
     }
   }
+  // 年間累計カード集計専用: past 月も含む全月版の月予算マップ ({ categoryId → { m: Σ週 } })。
+  //   weekBudgetByCat (上、past 除外・表示用) とは別建て。確定月・過去月のカテゴリ予算が
+  //   0 に落ちないようにするため (年予算過小バグの再発防止)。
+  const weekBudgetByCatAll = {};
+  for (const line of sortedLines) {
+    if (line?.row_type === "category" && line?.category_id) {
+      weekBudgetByCatAll[line.category_id] = deriveAllMonthsWeekBudgetForCategory(
+        weekCatBudgets, line.category_id, { fiscalYear: fyYear, startMonth },
+      );
+    }
+  }
   // committed セル解決 (resolveCell) の上に、カテゴリの「当月＋将来月」は週予算 Σ を被せる
   // 表示用リゾルバ。返り値 { value, kind }。kind で色分け (budget=青 / actual=白)。
   //   - 過去月: committed の実測表示 (actual)。
@@ -1108,9 +1142,11 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
         //   yearBudget と forecast の予算部分は必ず同じ monthlyBudgetForMonth(m) を使う。
         //   これにより確定が無い月は両方同額で相殺され、差額は「確定月の (月予算 - 実測)
         //   の合計」になる。予算0の月は両方0で揃う。
-        //   月予算ソース (settle で消えない):
+        //   月予算ソース (settle で消えない・past 含む全月):
         //     - 固定費 (row_type==='fixed_cost'): monthly_amounts[m] ?? monthly_amount
-        //     - カテゴリ (row_type==='category'): weekBudgetByCat[category_id][m] (L679-686 構築済)
+        //     - カテゴリ (row_type==='category'): weekBudgetByCatAll[category_id][m]
+        //       (past 含む全月版。表示用 weekBudgetByCat は past 除外なので使わない。
+        //        前回 weekBudgetByCat 使用で確定月・過去月が 0 に落ちた過小バグの再発防止)
         //     - それ以外/取得不能: 0
         const monthlyBudgetForMonth = (m) => displayLines.reduce((s, l) => {
           if (!l || l.archived) return s;
@@ -1120,7 +1156,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
             return s + Number(mv != null ? mv : (l.monthly_amount ?? 0) || 0);
           }
           if (l.row_type === "category" && l.category_id != null) {
-            const wb = weekBudgetByCat?.[l.category_id];
+            const wb = weekBudgetByCatAll?.[l.category_id];
             const v = wb ? (wb[m] ?? wb[String(m)]) : null;
             return s + (Number(v) || 0);
           }
