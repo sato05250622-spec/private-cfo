@@ -1,6 +1,4 @@
 import { Fragment, useState, useEffect, useRef } from "react";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import { listFiscalYearsByClient } from "../lib/api/annualBudgets";
 import { useLoans } from "../hooks/useLoans";
@@ -285,6 +283,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     if (!el || pdfBusy.current) return;
     pdfBusy.current = true;
     try {
+      const { default: jsPDF } = await import("jspdf");
+      const { default: html2canvas } = await import("html2canvas");
       const scale = 2;
       const marginMm = 8;
       const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
@@ -507,6 +507,8 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
     pdfBusy.current = true;
     let container = null;
     try {
+      const { default: jsPDF } = await import("jspdf");
+      const { default: html2canvas } = await import("html2canvas");
       const tableEl = el.querySelector("table");
       const summaryEl = el.querySelector('[data-pdf="summary"]');
       if (!tableEl) { console.warn("[handlePrintOnePage] no table"); return; }
