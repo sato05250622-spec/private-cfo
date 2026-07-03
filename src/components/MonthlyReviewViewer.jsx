@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 import { getPublishedByMonth } from "../lib/api/monthlyReviews";
 import {
   GOLD, NAVY, TEAL, RED, NAVY2, NAVY3, CARD_BG, BORDER, SHADOW,
@@ -232,24 +230,24 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
 
   // PDF 出力 (繰越票 AnnualBudgetViewer.handlePrint と同方式: jsPDF + html2canvas)。
   // 本部 pdf.jsx (window.print) は iOS PWA で不安定 → 採用せず。
-  // multi-page 分割は繰越票準拠: 明細表=行単位 (tablePages)、コメント section=section 単位 (tailPages)。
-  // 月次レビューは縦長 → A4 portrait。
+  // 方針変更 (2026-07): multi-page 分割を撤廃し、コンテンツ全体を 1 回だけキャプチャして
+  //   「幅 210mm 固定・縦は中身に応じた可変サイズ」の 1 ページ PDF に貼る。
+  //   ページまたぎで表・コメントが分断される問題を解消 (縦長 1 枚のレシート状 PDF)。
   const handlePrint = async () => {
     const el = pdfRef.current;
     if (!el || pdfBusy.current) return;
     pdfBusy.current = true;
     try {
-      const scale = 2;
+      // AnnualBudgetViewer.handlePrint と同じく使用直前に動的 import。
+      const { default: jsPDF } = await import("jspdf");
+      const { default: html2canvas } = await import("html2canvas");
+
       const marginMm = 8;
-      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-      const pageW = doc.internal.pageSize.getWidth();   // 210mm
-      const pageH = doc.internal.pageSize.getHeight();  // 297mm
-      const contentWmm = pageW - marginMm * 2;          // 194mm
-      const contentHmm = pageH - marginMm * 2;          // 281mm
+      const pageWmm = 210;                       // A4 幅 (縦は可変にするので高さは後で算出)。
+      const contentWmm = pageWmm - marginMm * 2; // 194mm
 
       // 横幅: ルートの自然幅 (>=480px)。月次レビューは横スクロール不要なので繰越票より単純。
       const captureW = Math.max(el.scrollWidth || 0, el.offsetWidth || 0, 480);
-      const pageContentPx = (contentHmm * captureW) / contentWmm;
 
       // 繰越票 applyPdfLayout の簡略版: 幅展開 + 横スクロールラッパ解除。
       // colgroup 列幅固定 / sticky 解除は不要 (月次レビュー table は 5 列・sticky なし)。
@@ -264,9 +262,9 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
         });
       };
 
-      // 繰越票同様、clone を offscreen に置いて行高/セクション高を再測定。
-      // live DOM (モバイル overflowX:auto) と cloneDoc (展開後 captureW) で
-      // 行高がズレるのを吸収する。
+      // offscreen clone を applyPdfLayout 適用状態で計測し、展開後の全高 (px) を得る。
+      // live DOM (モバイル overflowX:auto) と cloneDoc (展開後 captureW) の高さズレを避け、
+      // かつ scale の安全策 (下記) に使う想定キャプチャ高を先に把握する。
       const measureRoot = el.cloneNode(true);
       measureRoot.style.position = "absolute";
       measureRoot.style.left = "-99999px";
@@ -275,139 +273,44 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
       measureRoot.style.pointerEvents = "none";
       document.body.appendChild(measureRoot);
       applyPdfLayout(measureRoot);
-
-      const headerH = measureRoot.querySelector('[data-pdf="header"]')?.offsetHeight || 0;
-      const diagH = measureRoot.querySelector('[data-pdf-unit="diag-badge"]')?.offsetHeight || 0;
-      const tableTitleH = measureRoot.querySelector('[data-pdf-unit="table-title"]')?.offsetHeight || 0;
-      const tableEl = measureRoot.querySelector('[data-pdf="table-block"] table');
-      const theadH = tableEl?.querySelector("thead")?.offsetHeight || 0;
-      const rowHs = tableEl ? Array.from(tableEl.querySelectorAll("tbody tr")).map((r) => r.offsetHeight || 1) : [];
-
-      const unitH = (sel) => measureRoot.querySelector(sel)?.offsetHeight || 0;
-      const mgmtH         = unitH('[data-pdf-unit="mgmt-summary"]');
-      const nextActionH   = unitH('[data-pdf-unit="next-action"]');
-      const staffCommentH = unitH('[data-pdf-unit="staff-comment"]');
-      const legacySummH   = unitH('[data-pdf-unit="legacy-summary"]');
-      const legacyAdvH    = unitH('[data-pdf-unit="legacy-advice"]');
-      const legacyPlanH   = unitH('[data-pdf-unit="legacy-plan"]');
-
+      const captureH = Math.max(measureRoot.scrollHeight || 0, measureRoot.offsetHeight || 0, 1);
       document.body.removeChild(measureRoot);
 
-      // ---- table pages: 行を「行境界で」チャンク化。
-      //   1ページ目は header + diag + table-title + thead を上に置き、残りで rows 詰め。
-      //   2ページ目以降は thead だけ。
-      const tablePages = [];
-      if (rowHs.length > 0) {
-        let i = 0; let first = true;
-        while (i < rowHs.length) {
-          const overhead = first ? (headerH + diagH + tableTitleH) : 0;
-          const budget = pageContentPx - theadH - overhead;
-          let used = 0; const start = i;
-          while (i < rowHs.length && (used === 0 || used + rowHs[i] <= budget)) {
-            used += rowHs[i]; i += 1;
-          }
-          tablePages.push({ start, end: i, isFirst: first });
-          first = false;
-        }
+      // 安全策: canvas はブラウザの寸法上限 (概ね 16384px 前後) を超えると生成に失敗する。
+      //   希望 scale=2 で captureH*scale が上限に近づく場合は scale を下げて収める。
+      const MAX_CANVAS_PX = 16000;
+      let scale = 2;
+      if (captureH * scale > MAX_CANVAS_PX) {
+        scale = Math.max(1, MAX_CANVAS_PX / captureH);
       }
 
-      // ---- tail pages: 末尾セクションを unit 単位でページ詰め (繰越票 tailPages 準拠)。
-      //   table がない場合は最初の tail page にも header + diag を載せる。
-      const tailFirstNeedsHeader = tablePages.length === 0;
-      const firstTailOverhead = tailFirstNeedsHeader ? (headerH + diagH) : 0;
-      const tailUnits = [];
-      if (mgmtH > 0)         tailUnits.push({ key: 'mgmt-summary',   h: mgmtH });
-      if (nextActionH > 0)   tailUnits.push({ key: 'next-action',    h: nextActionH });
-      if (staffCommentH > 0) tailUnits.push({ key: 'staff-comment',  h: staffCommentH });
-      if (legacySummH > 0)   tailUnits.push({ key: 'legacy-summary', h: legacySummH });
-      if (legacyAdvH > 0)    tailUnits.push({ key: 'legacy-advice',  h: legacyAdvH });
-      if (legacyPlanH > 0)   tailUnits.push({ key: 'legacy-plan',    h: legacyPlanH });
-      const tailPages = [];
-      {
-        let used = 0; let cur = [];
-        for (const u of tailUnits) {
-          const pageBudget = pageContentPx - (tailPages.length === 0 ? firstTailOverhead : 0);
-          if (cur.length > 0 && used + u.h > pageBudget) {
-            tailPages.push(cur); cur = []; used = 0;
-          }
-          cur.push(u.key); used += u.h;
-        }
-        if (cur.length > 0) tailPages.push(cur);
-      }
-
-      const setDisp = (cd, sel, show) => {
-        const n = cd.querySelector(sel);
-        if (n) n.style.display = show ? "" : "none";
-      };
-      // 共通 onclone: applyPdfLayout 適用 + ページごとの表示/非表示は configure で差分指定。
-      const capture = (configure) => html2canvas(el, {
+      // ルート全体を 1 回だけキャプチャ (no-print は除外)。
+      //   onclone で applyPdfLayout のみ適用し、セクション/行の display は一切いじらない
+      //   (= 画面に見えている全内容をそのまま 1 枚に写す)。
+      const canvas = await html2canvas(el, {
         scale, backgroundColor: CARD_BG, useCORS: true,
         width: captureW, windowWidth: captureW + 40,
         ignoreElements: (node) => node.classList?.contains?.("no-print"),
         onclone: (clonedDoc) => {
-          const root = clonedDoc.querySelector(".review-pdf-root");
-          applyPdfLayout(root);
-          configure(clonedDoc);
+          applyPdfLayout(clonedDoc.querySelector(".review-pdf-root"));
         },
       });
 
-      // 各ページの canvas を A4 縦に貼付 (左右に marginMm、横中央寄せ、縦 clamp)。
-      let pageIndex = 0;
-      const addCanvasPage = (canvas) => {
-        if (pageIndex > 0) doc.addPage();
-        pageIndex += 1;
-        let w = contentWmm;
-        let h = (canvas.height * w) / canvas.width;
-        if (h > contentHmm) { h = contentHmm; w = (canvas.width * h) / canvas.height; }
-        doc.addImage(canvas.toDataURL("image/jpeg", 0.85), "JPEG", (pageW - w) / 2, marginMm, w, h);
-      };
+      // 画像実寸 (px) → 幅 194mm 固定で貼ったときの高さ (mm) を算出し、
+      //   その高さ + 上下 margin をページ縦サイズにする (可変サイズ 1 ページ)。
+      const imgHmm = (canvas.height * contentWmm) / canvas.width;
+      const pageHmm = imgHmm + marginMm * 2;
 
-      // テーブルページ (thead は table 内に常にあるので各ページ自動的に含まれる)。
-      for (const tp of tablePages) {
-        // eslint-disable-next-line no-await-in-loop
-        const canvas = await capture((cd) => {
-          setDisp(cd, '[data-pdf="header"]',            tp.isFirst);
-          setDisp(cd, '[data-pdf-unit="diag-badge"]',   tp.isFirst);
-          setDisp(cd, '[data-pdf-unit="table-title"]',  tp.isFirst);
-          setDisp(cd, '[data-pdf="table-block"]',       true);
-          setDisp(cd, '[data-pdf-unit="mgmt-summary"]',  false);
-          setDisp(cd, '[data-pdf-unit="next-action"]',   false);
-          setDisp(cd, '[data-pdf-unit="staff-comment"]', false);
-          setDisp(cd, '[data-pdf-unit="legacy-summary"]', false);
-          setDisp(cd, '[data-pdf-unit="legacy-advice"]',  false);
-          setDisp(cd, '[data-pdf-unit="legacy-plan"]',    false);
-          cd.querySelectorAll('[data-pdf="table-block"] tbody tr').forEach((tr, i) => {
-            tr.style.display = (i >= tp.start && i < tp.end) ? "" : "none";
-          });
-        });
-        addCanvasPage(canvas);
-      }
-
-      // 末尾ページ (管理サマリー / コメント / 旧フォーマット)。
-      for (let pi = 0; pi < tailPages.length; pi++) {
-        const units = tailPages[pi];
-        const set = new Set(units);
-        const isFirstTail = pi === 0 && tailFirstNeedsHeader;
-        // eslint-disable-next-line no-await-in-loop
-        const canvas = await capture((cd) => {
-          setDisp(cd, '[data-pdf="header"]',          isFirstTail);
-          setDisp(cd, '[data-pdf-unit="diag-badge"]', isFirstTail);
-          setDisp(cd, '[data-pdf="table-block"]',     false);
-          setDisp(cd, '[data-pdf-unit="mgmt-summary"]',   set.has('mgmt-summary'));
-          setDisp(cd, '[data-pdf-unit="next-action"]',    set.has('next-action'));
-          setDisp(cd, '[data-pdf-unit="staff-comment"]',  set.has('staff-comment'));
-          setDisp(cd, '[data-pdf-unit="legacy-summary"]', set.has('legacy-summary'));
-          setDisp(cd, '[data-pdf-unit="legacy-advice"]',  set.has('legacy-advice'));
-          setDisp(cd, '[data-pdf-unit="legacy-plan"]',    set.has('legacy-plan'));
-        });
-        addCanvasPage(canvas);
-      }
-
-      // フォールバック: テーブルもセクションも何も無い場合は素のキャプチャを 1 枚だけ。
-      if (pageIndex === 0) {
-        const canvas = await capture(() => {});
-        addCanvasPage(canvas);
-      }
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: [pageWmm, pageHmm],
+      });
+      doc.addImage(
+        canvas.toDataURL("image/jpeg", 0.85),
+        "JPEG",
+        marginMm, marginMm, contentWmm, imgHmm,
+      );
 
       doc.save(`月次レビュー_${year}年${String(month).padStart(2, '0')}月.pdf`);
     } catch (err) {
