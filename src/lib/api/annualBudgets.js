@@ -43,6 +43,7 @@ export async function getCommittedByClient(clientId, fiscalYear) {
   if (!clientId) return null;
   if (fiscalYear != null) {
     const { data, error } = await supabase
+      .from(TABLE)
       // Phase G 反映バグ Fix (2026-06-12): settled_months (LIVE) を追加。
       //   D-B で useAnnualBudgets.js:54 が `settled_months: row.settled_months ?? []` を露出した際に
       //   SELECT 側への追加が抜けて、AssetSheetViewer の settledMonths が常に [] にフォールバックしていた。
