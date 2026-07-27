@@ -23,13 +23,13 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          // recharts は App.jsx / AssetSheetViewer の遅延ロード経由でのみ到達するため、
-          // この 'charts' チャンクは非同期チャンクとしてチャート表示時にのみ取得される
-          // (メインチャンクから分離)。両遅延経路で recharts を 1 チャンク共有し重複を防ぐ。
-          charts: ['recharts'],
           // supabase-js は起動時に eager import されるため初回ロードで取得されるが、
           // アプリコードと分離しておくことでデプロイ間のブラウザキャッシュ効率を上げる。
           supabase: ['@supabase/supabase-js'],
+          // recharts はあえて manualChunks で固定しない。固定すると Vite が index.html に
+          // modulepreload を挿入し初回ロードで先読みされてしまうため、自動コード分割に任せて
+          // (DashboardCharts / AssetSheetViewer の dynamic import 経由の共有 async チャンク)、
+          // チャート表示時に初めて取得されるようにする。
         },
       },
     },
