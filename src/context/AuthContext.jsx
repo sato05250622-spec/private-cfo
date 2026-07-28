@@ -53,8 +53,18 @@ function writeProfileCache(userId, profile) {
 }
 
 function clearProfileCache() {
+  // サインアウト時: profiles / categories / payment_methods の SWR キャッシュを一括破棄。
+  //   本アプリの SWR キャッシュは全て 'pcfo_' プレフィックス (pcfo_profile_cache_v1 /
+  //   pcfo_categories_cache_v1 / pcfo_payment_methods_cache_v1)。他の永続キーは
+  //   'cfo_' / 'monthly_' プレフィックスのため衝突しない。プレフィックス一括削除に
+  //   することで、将来キャッシュを追加しても取りこぼさない。
   try {
-    localStorage.removeItem(PROFILE_CACHE_KEY);
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf('pcfo_') === 0) keys.push(k);
+    }
+    for (const k of keys) localStorage.removeItem(k);
   } catch {
     // 無視。
   }
