@@ -882,13 +882,20 @@ export default function App() {
   };
 
   const getEffectiveMonthBudget = (y, m) => {
-    // 繰越票 (HQ が決めた月予算) を最優先。週予算/手動月予算より上位。
-    const carryover = getCarryoverMonthBudget(y, m);
-    if (carryover > 0) return carryover;
-    const manualTotal = expenseCats.reduce((s,c)=>s+(budgets[`${y}-${m+1}-${c.id}`]||0),0);
-    if(manualTotal>0) return manualTotal;
+    // 案A (2026-07-28 統一完成): week_cat_budgets のライブ週予算積み上げを最優先にし、
+    //   繰越票 (annual_budgets) の committed スナップショットより上位へ置く。これにより
+    //   月間進捗の「月の予算」/ 予算タブ total が、週間サマリー (weekSummary) および
+    //   繰越票ビューア (AnnualBudgetViewer.lineAnnualBudget) と同一の week_cat_budgets 基準で
+    //   一致する。2026-06-23 の統一 (target_value → 月別予算積み上げ) がこの画面へ漏れていた分の完成。
+    //   ※ 各段は従来どおり >0 ゲートでフォールバックする (合計 0 の月は次段へ送る。セル層の
+    //     「0 円も明示予算」扱いは表示専用で、この月次合計の集計には元々影響しない)。
     const weekKeys = [`${y}-${m+1}-w1`,`${y}-${m+1}-w2`,`${y}-${m+1}-w3`,`${y}-${m+1}-w4`];
-    return weekKeys.reduce((total,wKey)=>total+expenseCats.reduce((s,cat)=>s+(weekCatBudgets[`${wKey}_${cat.id}`]||0),0),0);
+    const weeklyTotal = weekKeys.reduce((total,wKey)=>total+expenseCats.reduce((s,cat)=>s+(weekCatBudgets[`${wKey}_${cat.id}`]||0),0),0);
+    if (weeklyTotal > 0) return weeklyTotal;
+    // 週予算未設定の月 (将来月など) は 手動月予算 (budgets) → 繰越票スナップショット の順で表示。
+    const manualTotal = expenseCats.reduce((s,c)=>s+(budgets[`${y}-${m+1}-${c.id}`]||0),0);
+    if (manualTotal > 0) return manualTotal;
+    return getCarryoverMonthBudget(y, m);
   };
 
   // 予算画面の集計範囲もサイクルベース(報酬日未設定時はカレンダー月と等価)
