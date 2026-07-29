@@ -19,6 +19,10 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
+// F: profiles の SELECT 列 (14 列)。loadProfile / refreshProfile の 2 箇所で使うため
+//    定数で 1 箇所定義にする (片方だけ列を足す事故の防止)。
+const PROFILE_COLUMNS = 'role, approved, app_enabled, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit, asset_sheet_enabled, initial_asset';
+
 // -----------------------------------------------------------------
 // profiles の localStorage キャッシュ (stale-while-revalidate)。
 //   起動時に getSession + profiles SELECT の直列待ちのうち後者 (1RTT ~100-400ms) を、
@@ -110,42 +114,58 @@ export function AuthProvider({ children }) {
   // AuthGate がここを最優先で見て ResetPasswordPage に切替。
   // updatePassword 成功時に false に戻し、signOut で通常 LoginPage へ。
   const [recoveryMode, setRecoveryMode] = useState(false);
+  // A (2026-07-29): profiles の機能フラグが「確定済みか」を表す番兵。
+  //   false = まだ権威データ (フェッチ成功 / キャッシュ採用) が一度も入っていない状態。
+  //   機能フラグ系 6 つ (report/meeting/fixed_costs/utilization/category_add/asset_sheet) と
+  //   customer_edit_enabled は未確定時の既定が false = ロックのため、そのまま描画すると
+  //   ログイン直後の 1RTT だけ誤って 🔒 が出る。消費側 (App.jsx) はこのフラグが false の間
+  //   「ロックにも解放にも倒さない」ニュートラル表示にする。
+  //   AuthGate の分岐 (LOADING / 承認 / アプリ停止) はこのフラグを参照しない (挙動不変)。
+  const [profileReady, setProfileReady] = useState(false);
 
   // #6 修正: profile を読み込み済みの userId。onAuthStateChange が同一ユーザーで
   // 再発火 (TOKEN_REFRESHED 等) したとき profile 再取得をスキップするための番兵。
   const loadedUserIdRef = useRef(null);
+  // E (2026-07-29): visibilitychange 再検証の対象 userId。
+  //   loadedUserIdRef は「取得成功済み」の番兵なので、取得に失敗して未確定のまま
+  //   残っているケースを拾えない。復帰時のリトライを取りこぼさないよう別 ref で
+  //   「現在のセッションの userId」を保持する。
+  const sessionUserIdRef = useRef(null);
+
+  // profiles の 14 列 (生 data) を state に反映する共通処理。
+  //   キャッシュ採用時 (起動) / フェッチ成功時 / サインアウト時 (data=null) から呼ぶ。
+  //   B: data=null を渡すと全列 undefined 経由で各 ?? 既定へ戻る (前ユーザーの残留を根絶)。
+  //   profileReady はここでは触らない (確定/未確定の判断は呼び出し側の責務)。
+  const applyProfile = useCallback((data) => {
+    setRole(data?.role ?? null);
+    setApproved(data?.approved ?? null);
+    setAppEnabled(data?.app_enabled ?? true);
+    setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
+    setIncludeFixedExpenses(data?.include_fixed_expenses ?? true);
+    setReportEnabled(data?.report_enabled ?? false);
+    setMeetingEnabled(data?.meeting_enabled ?? false);
+    setFixedCostsEnabled(data?.fixed_costs_enabled ?? false);
+    setUtilizationEnabled(data?.utilization_enabled ?? false);
+    setCategoryAddEnabled(data?.category_add_enabled ?? false);
+    setCardLimit(data?.card_limit ?? null);
+    setAssetSheetEnabled(data?.asset_sheet_enabled ?? false);
+    setInitialAsset(Number(data?.initial_asset ?? 0) || 0);
+    // B-2: profile.msd が non-null かつ localStorage と異なるとき localStorage を上書き。
+    // NULL は no-op (既存 localStorage の値を破壊しない、B-1 未実施ユーザー保護)。
+    // Supabase = source of truth、ただし NULL は「未充填」として扱う。
+    // (data=null のサインアウト経路も no-op = localStorage の msd は保持)。
+    if (data?.management_start_day != null) {
+      const local = getManagementStartDay();
+      if (local !== data.management_start_day) {
+        setManagementStartDay(data.management_start_day);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line no-console
     console.log('[auth] useEffect start');
     let mounted = true;
-
-    // profiles の 14 列 (生 data) を state に反映する共通処理。
-    //   キャッシュ採用時 (起動) とフェッチ成功時の双方から呼ぶ。
-    function applyProfile(data) {
-      setRole(data?.role ?? null);
-      setApproved(data?.approved ?? null);
-      setAppEnabled(data?.app_enabled ?? true);
-      setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
-      setIncludeFixedExpenses(data?.include_fixed_expenses ?? true);
-      setReportEnabled(data?.report_enabled ?? false);
-      setMeetingEnabled(data?.meeting_enabled ?? false);
-      setFixedCostsEnabled(data?.fixed_costs_enabled ?? false);
-      setUtilizationEnabled(data?.utilization_enabled ?? false);
-      setCategoryAddEnabled(data?.category_add_enabled ?? false);
-      setCardLimit(data?.card_limit ?? null);
-      setAssetSheetEnabled(data?.asset_sheet_enabled ?? false);
-      setInitialAsset(Number(data?.initial_asset ?? 0) || 0);
-      // B-2: profile.msd が non-null かつ localStorage と異なるとき localStorage を上書き。
-      // NULL は no-op (既存 localStorage の値を破壊しない、B-1 未実施ユーザー保護)。
-      // Supabase = source of truth、ただし NULL は「未充填」として扱う。
-      if (data?.management_start_day != null) {
-        const local = getManagementStartDay();
-        if (local !== data.management_start_day) {
-          setManagementStartDay(data.management_start_day);
-        }
-      }
-    }
 
     // profiles を SELECT して state / キャッシュを更新する。
     //   opts.background=true: stale-while-revalidate の裏更新。取得失敗時は role/approved を
@@ -158,7 +178,7 @@ export function AuthProvider({ children }) {
       try {
         const q = supabase
           .from('profiles')
-          .select('role, approved, app_enabled, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit, asset_sheet_enabled, initial_asset')
+          .select(PROFILE_COLUMNS)
           .eq('id', userId)
           .maybeSingle();
         const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles fetch');
@@ -184,6 +204,10 @@ export function AuthProvider({ children }) {
         } else {
           applyProfile(data);
         }
+        // A: フェッチが権威的に解決した時点で「確定」とする。data===null (profiles 行なし)
+        //   も "確定した結果として全既定" なので true にする (ニュートラル表示のまま
+        //   固まるのを避ける)。
+        setProfileReady(true);
         // #6 修正: 「取得成功時のみ」ロード済み userId を記録する。
         //   こうすると失敗/タイムアウトしたロードは "未ロード" のまま残り、次の focus
         //   再発火で再試行され、customerEditEnabled の false 張り付きが自己回復する。
@@ -220,6 +244,7 @@ export function AuthProvider({ children }) {
         const s = result?.data?.session ?? null;
         setSession(s);
         const uid = s?.user?.id ?? null;
+        sessionUserIdRef.current = uid;
         if (uid) {
           const cached = readProfileCache();
           if (cached && cached.userId === uid && cached.profile) {
@@ -227,6 +252,8 @@ export function AuthProvider({ children }) {
             //   その後バックグラウンドで再検証する (stale-while-revalidate)。
             //   別ユーザーのキャッシュは userId 不一致で自然に無視される。
             applyProfile(cached.profile);
+            // A: キャッシュも権威データ扱い (stale の可能性はあるが「未確定」ではない)。
+            setProfileReady(true);
             loadedUserIdRef.current = uid;
             setLoading(false);
             // eslint-disable-next-line no-console
@@ -264,6 +291,7 @@ export function AuthProvider({ children }) {
       setSession(next);
       try {
         const nextId = next?.user?.id ?? null;
+        sessionUserIdRef.current = nextId;
         if (nextId) {
           // #6 修正: 同一ユーザーの再発火 (TOKEN_REFRESHED / フォーカス復帰など) では
           //   profile を再取得しない。ログイン/ユーザー変更/初回ロード時のみ取得。
@@ -271,10 +299,17 @@ export function AuthProvider({ children }) {
           if (nextId === loadedUserIdRef.current) return;
           await loadProfile(nextId);
         } else {
-          // サインアウト: 編集フラグを既定 (ロック) に戻し、番兵とキャッシュをクリア。
-          setRole(null);
-          setApproved(null);
-          setCustomerEditEnabled(false);
+          // B (2026-07-29): サインアウト時のリセットを完全化。
+          //   従来は role / approved / customerEditEnabled の 3 つしか戻しておらず、
+          //   report/meeting/fixed_costs/utilization/category_add/asset_sheet /
+          //   card_limit / app_enabled / include_fixed_expenses / initial_asset は
+          //   前ユーザーの値が AuthProvider (root・再マウントされない) に残留していた。
+          //   → 同一端末で別顧客が再ログインすると、profiles 取得完了までの 1RTT だけ
+          //     前顧客のフラグで描画される (誤ロック・誤解放の双方向)。
+          //   applyProfile(null) で全列を ?? 既定へ戻す (initial_asset も 0 に戻る)。
+          applyProfile(null);
+          // A: 次のユーザーの profiles が確定するまで再びニュートラルへ。
+          setProfileReady(false);
           loadedUserIdRef.current = null;
           clearProfileCache();
         }
@@ -283,13 +318,33 @@ export function AuthProvider({ children }) {
       }
     });
 
+    // E (2026-07-29): タブ復帰時に profiles を背景で再検証する。
+    //   HQ がフラグを変更しても、開きっぱなしのアプリには反映されなかった:
+    //     - onAuthStateChange の TOKEN_REFRESHED は loadedUserIdRef 番兵で早期 return
+    //       (この return ロジック自体は #6 の意図どおりなので触らない)
+    //     - refreshProfile は承認待ち画面の「再確認」ボタンからしか呼ばれない
+    //   useClientBudgetRows.js:70-82 / useAnnualBudgets.js:73-83 と同型の DOM イベント
+    //   listener を profiles 専用に足して補完する (realtime/subscribe は使わない)。
+    //   background:true なので失敗しても現在の表示は壊れず、成功しても差分がある時だけ
+    //   再描画される。連打・高速なタブ往復での多重発火は revalidating フラグで抑止。
+    let revalidating = false;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const uid = sessionUserIdRef.current;
+      if (!uid || revalidating) return;
+      revalidating = true;
+      loadProfile(uid, { background: true }).finally(() => { revalidating = false; });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
       // eslint-disable-next-line no-console
       console.log('[auth] cleanup');
       mounted = false;
       subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, []);
+  }, [applyProfile]);
 
   const signIn = async (email, password) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -339,7 +394,7 @@ export function AuthProvider({ children }) {
     try {
       const q = supabase
         .from('profiles')
-        .select('role, approved, app_enabled, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit, asset_sheet_enabled, initial_asset')
+        .select(PROFILE_COLUMNS)
         .eq('id', session.user.id)
         .maybeSingle();
       const { data, error } = await withTimeout(q, PROFILE_FETCH_TIMEOUT_MS, 'profiles refresh');
@@ -347,32 +402,15 @@ export function AuthProvider({ children }) {
         console.error('[auth] refreshProfile error', error);
         return;
       }
-      setRole(data?.role ?? null);
-      setApproved(data?.approved ?? null);
-      setAppEnabled(data?.app_enabled ?? true);
-      setCustomerEditEnabled(data?.customer_edit_enabled ?? false);
-      setIncludeFixedExpenses(data?.include_fixed_expenses ?? true);
-      setReportEnabled(data?.report_enabled ?? false);
-      setMeetingEnabled(data?.meeting_enabled ?? false);
-      setFixedCostsEnabled(data?.fixed_costs_enabled ?? false);
-      setUtilizationEnabled(data?.utilization_enabled ?? false);
-      setCategoryAddEnabled(data?.category_add_enabled ?? false);
-      setCardLimit(data?.card_limit ?? null);
-      setAssetSheetEnabled(data?.asset_sheet_enabled ?? false);
-      setInitialAsset(Number(data?.initial_asset ?? 0) || 0);
-      // B-2: loadProfile と同じ msd sync (refresh 経路でも一貫性を保つ)
-      if (data?.management_start_day != null) {
-        const local = getManagementStartDay();
-        if (local !== data.management_start_day) {
-          setManagementStartDay(data.management_start_day);
-        }
-      }
+      // F: 13 行の手書き setter を applyProfile に集約 (msd sync も内包)。
+      applyProfile(data);
+      setProfileReady(true);
       // 再確認 (承認ポール等) で取得した最新値をキャッシュにも反映しておく。
       if (data) writeProfileCache(session.user.id, data);
     } catch (e) {
       console.error('[auth] refreshProfile exception', e);
     }
-  }, [session]);
+  }, [session, applyProfile]);
 
   const value = {
     session,
@@ -392,6 +430,9 @@ export function AuthProvider({ children }) {
     cardLimit,
     assetSheetEnabled,
     initialAsset,
+    // A: 機能フラグが確定済みか。App.jsx のロック UI (🔒 / requestFeature / requestEdit) が
+    //    false の間はニュートラル表示に倒す。
+    profileReady,
     isAdmin: role === 'admin',
     isApproved: approved === true,
     signIn,

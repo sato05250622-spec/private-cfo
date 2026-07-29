@@ -352,7 +352,16 @@ export default function App() {
     if (featureLockedToastTimer.current) clearTimeout(featureLockedToastTimer.current);
     featureLockedToastTimer.current = setTimeout(() => setFeatureLockedToast(null), 3500);
   };
+  // A (2026-07-29): profiles の機能フラグ未確定 (AuthContext.profileReady === false) の間は
+  //   「ロックにも解放にも倒さない」。未確定時の既定値は false = ロックなので、そのまま
+  //   描画するとログイン直後 / 取得失敗中の 1RTT だけ誤って 🔒 が出ていた。
+  //   - lockMark(): 未確定なら 🔒 を付けない (確定後に本来の 🔒 / 無印へ切り替わる)
+  //   - pendingDim: 未確定の導線を非活性に見せるニュートラル表示 (スケルトン代わり)
+  //   - requestFeature / requestEdit: 未確定ならタップを no-op (誤トーストも出さない)
+  const lockMark = (flag) => ((!profileReady || flag) ? "" : " 🔒");
+  const pendingDim = { opacity: 0.4 };
   const requestFeature = (flag, action, lockedMsg = PLAN_GATE_MSG) => {
+    if (!profileReady) return;
     if (flag) action();
     else showFeatureLockedToast(lockedMsg);
   };
@@ -364,6 +373,8 @@ export default function App() {
   // 編集導線の入口で呼ぶラッパ。フラグ ON なら action 実行、OFF ならトースト案内。
   // フラグは AuthContext.customerEditEnabled = profiles.customer_edit_enabled。
   const requestEdit = (action) => {
+    // A: フラグ未確定の間は編集も「本部管理中」トーストも出さない (誤ロック案内の抑止)。
+    if (!profileReady) return;
     if (customerEditEnabled) action();
     else showEditLockedToast();
   };
@@ -457,7 +468,7 @@ export default function App() {
   // ログイン直後に 1 回だけ実行。冪等 (cfo_paymentsLoansMigrated フラグ + idempotent upsert)。
   // ref ガードで StrictMode 二重起動を抑止。失敗は console.warn のみで UI 阻害しない。
   // 完了後に refetchPaymentMethods / refetchLoans で UI を最新 DB 状態へ同期。
-  const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled, fixedCostsEnabled, utilizationEnabled, categoryAddEnabled, cardLimit, assetSheetEnabled } = useAuth();
+  const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled, fixedCostsEnabled, utilizationEnabled, categoryAddEnabled, cardLimit, assetSheetEnabled, profileReady } = useAuth();
   const authUserId = authUser?.id ?? null;
   // タスク (2026-06-08): メニュー「面談予定」行に次回面談日時を read-only 表示するため、
   //   詳細画面 AppointmentCard と同じ useNextAppointment を top-level で 1 回購読する。
@@ -1706,14 +1717,17 @@ export default function App() {
             <div style={{padding:"8px 14px",background:CARD_BG}}>
               <div style={{display:"flex",background:NAVY3,borderRadius:24,padding:2,border:`1px solid ${BORDER}`,width:"100%"}}>
                 <button style={S.typeBtn(progressTab==="budget")} onClick={()=>setProgressTab("budget")}>予算進捗</button>
-                <button style={S.typeBtn(progressTab==="operation")} onClick={()=>requestFeature(utilizationEnabled, ()=>setProgressTab("operation"))}>稼働進捗{utilizationEnabled?"":" 🔒"}</button>
+                <button style={{...S.typeBtn(progressTab==="operation"), ...(profileReady?null:pendingDim)}} onClick={()=>requestFeature(utilizationEnabled, ()=>setProgressTab("operation"))}>稼働進捗{lockMark(utilizationEnabled)}</button>
               </div>
             </div>
             {/* #11: 固定費 込み/分ける トグル (pill型・子タブ枠直下、両タブ共通)。'split'=既定(カテゴリのみ)。
                 2026-06-05: fixedCostsEnabled OFF のときは丸ごと非表示 (メニューの「固定費」と整合)。
-                2026-06-14: 予算進捗タブ内から両タブ共通スコープへ昇格 (稼働進捗タブにも反映するため)。 */}
-            {fixedCostsEnabled && (
-            <div style={{padding:"0 14px 8px",background:CARD_BG}}>
+                2026-06-14: 予算進捗タブ内から両タブ共通スコープへ昇格 (稼働進捗タブにも反映するため)。
+                2026-07-29 (A): フラグ未確定 (profileReady=false) の間は「非表示」に倒さず、
+                  同じ寸法のトグルを非活性 (dim + pointerEvents:none) で置いてレイアウト移動を防ぐ。
+                  確定後に本来の 表示 / 非表示 へ切り替わる。 */}
+            {(!profileReady || fixedCostsEnabled) && (
+            <div style={{padding:"0 14px 8px",background:CARD_BG,...(profileReady?null:{...pendingDim,pointerEvents:"none"})}}>
               <div style={{display:"inline-flex",background:NAVY3,border:`1px solid ${BORDER}`,borderRadius:999,padding:2}}>
                 {[["split","固定費分ける"],["incl","固定費込み"]].map(([mode,label])=>{
                   const active=fixedCostMode===mode;
@@ -1965,7 +1979,9 @@ export default function App() {
         <div style={S.overlayHeader}><button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button><span style={{fontWeight:400,fontSize:15,color:TEXT_PRIMARY}}>カテゴリ編集</span><span style={{width:40}}></span></div>
         <div style={{height:12,background:CREAM}}/>
         <div style={{background:CARD_BG}}>
-          <div onClick={()=>{ if(expenseCats.length>=9 && !categoryAddEnabled){ showFeatureLockedToast(); return; } setMenuScreen("catNew"); }} style={{...S.listItem,color:ORANGE,fontWeight:600}}><span>＋</span><span style={{flex:1}}>新規カテゴリーの追加</span><span style={{color:"#bbb"}}>›</span></div>
+          {/* A: 上限 9 件のゲートはフラグ未確定の間 no-op (解放もロック案内もしない)。
+              9 件未満なら従来どおりフラグと無関係に追加できる (挙動不変)。 */}
+          <div onClick={()=>{ if(expenseCats.length>=9 && !categoryAddEnabled){ if(profileReady) showFeatureLockedToast(); return; } setMenuScreen("catNew"); }} style={{...S.listItem,color:ORANGE,fontWeight:600}}><span>＋</span><span style={{flex:1}}>新規カテゴリーの追加</span><span style={{color:"#bbb"}}>›</span></div>
           <DndContext
             sensors={dndSensors}
             collisionDetection={closestCenter}
@@ -2647,25 +2663,27 @@ export default function App() {
     // #2+#3: monthlyReport (月リスト) / report_{y}_{m} (個別月) は currentMonthReport の
     //   ダイヤル統合により廃止。導線は currentMonthReport に向け直し済 (下の menuGroups)。
 
+    // A: ゲート付きの行は pending:!profileReady を持たせ、未確定の間は 🔒 を出さず
+    //    dim + タップ no-op のニュートラル表示にする (ゲート無しの行は従来どおり)。
     const menuGroups=[[
-      {icon:"📊",label:"レポート"+(reportEnabled?"":" 🔒"),action:()=>requestFeature(reportEnabled, ()=>setMenuScreen("currentMonthReport"))},
-      {icon:"📈",label:"資産残高繰越票"+(assetSheetEnabled?"":" 🔒"),action:()=>requestFeature(assetSheetEnabled, ()=>setMenuScreen("assetSheet"), '本機能は、追加プランをご契約いただくことでご利用いただけます。')},
-      {icon:"🤝",label:"面談予定"+(meetingEnabled?"":" 🔒"),subLabel:(meetingEnabled && nextAppointment) ? fmtDateTime(nextAppointment.scheduledAt) : '',action:()=>requestFeature(meetingEnabled, ()=>setMenuScreen("appointment"))},
+      {icon:"📊",label:"レポート"+lockMark(reportEnabled),pending:!profileReady,action:()=>requestFeature(reportEnabled, ()=>setMenuScreen("currentMonthReport"))},
+      {icon:"📈",label:"資産残高繰越票"+lockMark(assetSheetEnabled),pending:!profileReady,action:()=>requestFeature(assetSheetEnabled, ()=>setMenuScreen("assetSheet"), '本機能は、追加プランをご契約いただくことでご利用いただけます。')},
+      {icon:"🤝",label:"面談予定"+lockMark(meetingEnabled),subLabel:(meetingEnabled && nextAppointment) ? fmtDateTime(nextAppointment.scheduledAt) : '',pending:!profileReady,action:()=>requestFeature(meetingEnabled, ()=>setMenuScreen("appointment"))},
     ]];
-    const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"固定費"+(fixedCostsEnabled?"":" 🔒"),action:()=>requestFeature(fixedCostsEnabled, ()=>setMenuScreen("loanSetting"))}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
+    const settingsGroups=[[{icon:"📅",label:"週予算設定",action:()=>setMenuScreen("weekBudgetSetting")},{icon:"🎨",label:"カテゴリーアイコン設定",action:()=>setMenuScreen("catEdit")},{icon:"💳",label:"支払い方法 追加編集",action:()=>setMenuScreen("paymentEdit")},{icon:"🔁",label:"固定費"+lockMark(fixedCostsEnabled),pending:!profileReady,action:()=>requestFeature(fixedCostsEnabled, ()=>setMenuScreen("loanSetting"))}],[{icon:"👤",label:"アカウント設定",action:()=>setMenuScreen("accountSetting")},{icon:"✉️",label:"お問い合わせ",action:()=>setMenuScreen("contact")}]];
 
     return(
       <div>
         <div style={{padding:"14px 18px",background:NAVY2,display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${BORDER}`}}><span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>メニュー</span></div>
         {menuGroups.map((group,gi)=>(
           <div key={gi} style={{background:CARD_BG,borderRadius:12,margin:"12px 16px 0",overflow:"hidden"}}>
-            {group.map((item,i)=>(<div key={i} onClick={item.action} style={{...S.menuItem,borderBottom:i<group.length-1?`1px solid ${BORDER}`:"none"}}><span style={{fontSize:18,color:GOLD}}>{item.icon}</span><span style={{flex:1,fontSize:13,fontWeight:500,color:TEXT_PRIMARY}}>{item.label}</span>{item.subLabel?<span style={{fontSize:12,color:TEXT_MUTED,marginRight:8,whiteSpace:"nowrap"}}>{item.subLabel}</span>:null}<span style={{color:TEXT_MUTED}}>›</span></div>))}
+            {group.map((item,i)=>(<div key={i} onClick={item.action} style={{...S.menuItem,borderBottom:i<group.length-1?`1px solid ${BORDER}`:"none",...(item.pending?pendingDim:null)}}><span style={{fontSize:18,color:GOLD}}>{item.icon}</span><span style={{flex:1,fontSize:13,fontWeight:500,color:TEXT_PRIMARY}}>{item.label}</span>{item.subLabel?<span style={{fontSize:12,color:TEXT_MUTED,marginRight:8,whiteSpace:"nowrap"}}>{item.subLabel}</span>:null}<span style={{color:TEXT_MUTED}}>›</span></div>))}
           </div>
         ))}
         <div style={{padding:"20px 16px 8px"}}><span style={{fontSize:12,fontWeight:700,color:TEXT_MUTED,letterSpacing:"0.08em"}}>設定</span></div>
         {settingsGroups.map((group,gi)=>(
           <div key={gi} style={{background:CARD_BG,borderRadius:12,margin:"0 16px 12px",overflow:"hidden",border:`1px solid ${BORDER}`}}>
-            {group.map((item,i)=>(<div key={i} onClick={item.action} style={{...S.menuItem,borderBottom:i<group.length-1?`1px solid ${BORDER}`:"none"}}><span style={{fontSize:18,color:GOLD}}>{item.icon}</span><span style={{flex:1,fontSize:13,fontWeight:500,color:TEXT_PRIMARY}}>{item.label}</span><span style={{color:TEXT_MUTED}}>›</span></div>))}
+            {group.map((item,i)=>(<div key={i} onClick={item.action} style={{...S.menuItem,borderBottom:i<group.length-1?`1px solid ${BORDER}`:"none",...(item.pending?pendingDim:null)}}><span style={{fontSize:18,color:GOLD}}>{item.icon}</span><span style={{flex:1,fontSize:13,fontWeight:500,color:TEXT_PRIMARY}}>{item.label}</span><span style={{color:TEXT_MUTED}}>›</span></div>))}
           </div>
         ))}
         <div onClick={()=>setMenuScreen("pointHistory")} style={{margin:"4px 16px 12px",background:`linear-gradient(135deg,${NAVY2},#1A2C42)`,borderRadius:16,padding:"14px 18px",border:`1px solid ${GOLD}55`,boxShadow:`0 4px 20px ${GOLD}22`,cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
