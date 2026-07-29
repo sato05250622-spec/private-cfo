@@ -291,6 +291,8 @@ export function AuthProvider({ children }) {
       setSession(next);
       try {
         const nextId = next?.user?.id ?? null;
+        // Q3#4 ガード用: 上書き前の「getSession() が確認できていた userId」を退避。
+        const confirmedUserId = sessionUserIdRef.current;
         sessionUserIdRef.current = nextId;
         if (nextId) {
           // #6 修正: 同一ユーザーの再発火 (TOKEN_REFRESHED / フォーカス復帰など) では
@@ -299,6 +301,24 @@ export function AuthProvider({ children }) {
           if (nextId === loadedUserIdRef.current) return;
           await loadProfile(nextId);
         } else {
+          // Q3#4 ガード (2026-07-29): INITIAL_SESSION の「偽 null」を無視する。
+          //   auth-js の _emitInitialSession は _useSession が throw したとき
+          //   (LockAcquireTimeoutError / storage 読み取り失敗など)、storage に有効な
+          //   セッションが残っていても catch 節で callback('INITIAL_SESSION', null) を
+          //   呼ぶ実装になっている (GoTrueClient.js)。
+          //   これを従来はサインアウトと誤認し、applyProfile(null) で全フラグを既定へ戻した
+          //   うえ clearProfileCache() で pcfo_* を全消去していた。結果、次回起動が確定で
+          //   キャッシュ MISS になり前景 loadProfile の 5 秒予算を踏む — 一度の不調が
+          //   次の起動を道連れにする自己増殖パスになっていた。
+          //   直前に getSession() が有効セッションを確認できていた (confirmedUserId が
+          //   non-null) 場合に限り、INITIAL_SESSION の null はリセットしない。
+          //   明示的な SIGNED_OUT は event が異なるため、従来どおりリセットされる。
+          if (event === 'INITIAL_SESSION' && confirmedUserId) {
+            // eslint-disable-next-line no-console
+            console.warn('[auth] INITIAL_SESSION(null) を無視 (getSession は有効セッションを確認済)', confirmedUserId);
+            sessionUserIdRef.current = confirmedUserId; // 退避した値を戻す (E の再検証対象を維持)
+            return;
+          }
           // B (2026-07-29): サインアウト時のリセットを完全化。
           //   従来は role / approved / customerEditEnabled の 3 つしか戻しておらず、
           //   report/meeting/fixed_costs/utilization/category_add/asset_sheet /

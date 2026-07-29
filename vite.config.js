@@ -87,6 +87,33 @@ export default defineConfig({
         // ユーザーがタブを完全に閉じない限り旧バンドルが serve され続けていた。
         skipWaiting: true,   // 新 SW が install 後すぐ active 化
         clientsClaim: true,  // 既に開いているクライアントも新 SW の制御下に取り込む
+        // 2026-07-29: Google Fonts (Noto Sans JP) を SW キャッシュ対象に追加。
+        //   globPatterns はビルド成果物のみを precache するため、クロスオリジンの
+        //   fonts.googleapis.com / fonts.gstatic.com は従来 SW を素通りして毎回
+        //   ネットワークへ出ていた (index.html の render-blocking と合わせて起動を遅延)。
+        //   - CSS (googleapis): StaleWhileRevalidate = キャッシュから即返しつつ裏で更新
+        //   - フォント本体 (gstatic): CacheFirst = 実質不変なのでネットワークに出ない
+        //   statuses に 0 を含めるのは opaque レスポンスも保存するため (workbox 標準レシピ)。
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'google-fonts-stylesheets',
+              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-webfonts',
+              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
       },
       devOptions: {
         enabled: false,

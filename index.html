@@ -19,10 +19,29 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
 
-    <!-- 年間累計カード用 Web フォント (極太ゴシック) -->
+    <!-- 年間累計カード用 Web フォント (極太ゴシック / Noto Sans JP 500・700・900)
+         2026-07-29: 従来の <link rel="stylesheet"> は render-blocking のため、
+           fonts.googleapis.com への往復が終わるまで LOADING… の初描画すら止まっていた。
+           このスタイルシートは SW の precache (globPatterns=ビルド成果物のみ) に載らず
+           毎回ネットワークへ出るため、Wi-Fi の DNS 遅延等がそのまま起動時間に乗っていた。
+         → preload(as=style) で取得し、onload で rel を stylesheet に差し替える非同期
+           パターンへ変更。初描画をブロックしなくなる。
+         見た目は不変: URL・weight 指定 (500/700/900)・display=swap はすべて従来どおりで、
+           適用先の FONT_NUM / FONT_JP (AnnualBudgetViewer 年間累計カード) や
+           index.css / App.jsx の font-family チェーンには一切手を入れていない。
+         SW 側は vite.config.js の workbox.runtimeCaching で googleapis/gstatic を
+           キャッシュするため、2 回目以降はネットワーク待ちゼロで適用される。 -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap"
+      onload="this.onload=null;this.rel='stylesheet'"
+    />
+    <noscript>
+      <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
+    </noscript>
 
     <title>プライベートCFO</title>
   </head>
