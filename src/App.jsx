@@ -41,6 +41,7 @@ import ReportTabs from "./components/ReportTabs";
 import { listPublishedByClient } from "./lib/api/monthlyReviews";
 import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
+import { useCredentialRequest } from "./hooks/useCredentialRequest";
 import { useAnnualBudgets } from "./hooks/useAnnualBudgets";
 import { useAuth } from "./context/AuthContext";
 import { migratePaymentsLoans } from "./lib/migratePaymentsLoans";
@@ -454,6 +455,30 @@ export default function App() {
   const [contactText, setContactText] = useState("");
   const [contactSent, setContactSent] = useState(false);
   const { submitting: contactSubmitting, sendInquiry } = useInquiries();
+  // 認証情報 (メール/パスワード) 変更申請。
+  //   enabled はアカウント設定 / 申請画面を開いている間だけ true にして、
+  //   起動時の余計な 1 クエリを避ける。
+  const [credEmail, setCredEmail] = useState("");
+  const [credPassword, setCredPassword] = useState("");
+  const [credPasswordConfirm, setCredPasswordConfirm] = useState("");
+  const [credSent, setCredSent] = useState(false);
+  const {
+    currentEmail: credCurrentEmail,
+    submitting: credSubmitting,
+    error: credError,
+    setError: setCredError,
+    pending: credPending,
+    pendingLoading: credPendingLoading,
+    submit: submitCredential,
+  } = useCredentialRequest({
+    enabled: menuScreen === "accountSetting" || menuScreen === "credentialChange",
+  });
+  // 申請画面を開くときのリセット (前回の入力・エラー・完了表示を持ち越さない)。
+  const openCredentialChange = () => {
+    setCredEmail(""); setCredPassword(""); setCredPasswordConfirm("");
+    setCredSent(false); setCredError(null);
+    setMenuScreen("credentialChange");
+  };
   const [summaryTab, setSummaryTab] = useState("summary");
   // === B-3b Step 4-2 phase 1: loans を Supabase 経由に切替 ===
   // 旧 localStorage 行は rollback 用にコメントアウトで残置 (Phase 3 で削除予定):
@@ -2654,8 +2679,169 @@ export default function App() {
               style={{width:"100%",padding:"14px",background:GOLD_GRAD,border:"none",borderRadius:12,fontSize:14,fontWeight:700,color:"#0A1628",cursor:"pointer"}}
             >{accountSavedFlash ? "保存しました" : "保存"}</button>
           </div>
+          {/* ログイン情報 (credential_change_requests)。
+              上の [保存] は報酬日 / 管理スタート日だけを対象にするため、
+              保存の流儀が違うこの導線は別カードに分けて誤操作を防ぐ。
+              メール/パスワードは本部の承認を経てから反映される。 */}
+          <div style={{margin:"16px 16px 0",background:CARD_BG,borderRadius:12,overflow:"hidden",border:`1px solid ${BORDER}`}}>
+            <div style={{padding:"12px 16px 8px",fontSize:11,fontWeight:700,color:TEXT_SECONDARY}}>ログイン情報</div>
+            <div style={{display:"flex",alignItems:"center",padding:"14px 16px",borderTop:`1px solid ${BORDER}`,gap:12}}>
+              <span style={{fontSize:12,color:TEXT_SECONDARY,minWidth:80,fontWeight:500}}>メールアドレス</span>
+              <span style={{flex:1,fontSize:13,color:TEXT_PRIMARY,textAlign:"right",wordBreak:"break-all"}}>{credCurrentEmail || "—"}</span>
+            </div>
+            <div
+              onClick={openCredentialChange}
+              style={{display:"flex",alignItems:"center",padding:"14px 16px",borderTop:`1px solid ${BORDER}`,gap:12,cursor:"pointer"}}
+            >
+              <span style={{flex:1,fontSize:13,fontWeight:500,color:credPending?GOLD:TEXT_PRIMARY}}>
+                {credPending ? "⏳ 変更申請を確認中" : "🔑 ログイン情報の変更を申請"}
+              </span>
+              <span style={{color:TEXT_MUTED}}>›</span>
+            </div>
+          </div>
           <LogoutButton />
           <div style={{height:20}}/>
+        </div>
+      );
+    }
+
+    // 認証情報 (メール/パスワード) の変更申請画面。
+    //   submit-credential-request Edge Function を invoke する
+    //   (パスワードは Function 内で AES-GCM 暗号化 → credential_change_requests に保存)。
+    //   顧客は申請を取り消せない (RLS に UPDATE/DELETE ポリシー無し) ため、
+    //   承認待ちが 1 件でもある間はフォームを出さず「確認中」を表示する。
+    //   表示は contact 画面と同じ 2 フェーズ構成 (入力 → 完了)。
+    if(menuScreen==="credentialChange"){
+      const emailTrimmed = credEmail.trim();
+      const hasInput = !!emailTrimmed || !!credPassword;
+      const canSubmit = hasInput && !credSubmitting;
+      return(
+        <div style={{minHeight:"100dvh",background:NAVY}}>
+          <div style={S.overlayHeader}>
+            <button onClick={()=>setMenuScreen("accountSetting")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
+            <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>ログイン情報の変更</span>
+            <span style={{width:40}}/>
+          </div>
+
+          {credSent?(
+            /* 完了フェーズ */
+            <div style={{margin:"60px 16px 0",textAlign:"center"}}>
+              <div style={{fontSize:48,marginBottom:16}}>⏳</div>
+              <div style={{fontSize:18,fontWeight:700,color:TEXT_PRIMARY,marginBottom:8}}>申請を受け付けました</div>
+              <div style={{fontSize:13,color:TEXT_SECONDARY,lineHeight:1.7}}>
+                本部の確認後に反映されます。<br/>
+                承認されるまでは、現在のログイン情報をお使いください。
+              </div>
+              <button onClick={()=>{setCredSent(false);setMenuScreen("accountSetting");}} style={{marginTop:24,padding:"12px 32px",background:GOLD_GRAD,border:"none",borderRadius:24,fontSize:14,fontWeight:700,color:"#0A1628",cursor:"pointer"}}>アカウント設定に戻る</button>
+            </div>
+          ):credPendingLoading?(
+            /* 承認待ちの確認中 (フォームのちらつき防止) */
+            <div style={{margin:"60px 16px 0",textAlign:"center",fontSize:13,color:TEXT_MUTED}}>確認しています…</div>
+          ):credPending?(
+            /* 既に承認待ちの申請がある */
+            <div style={{padding:"16px"}}>
+              <div style={{background:CARD_BG,borderRadius:14,border:`1px solid ${GOLD}44`,padding:"18px 16px",textAlign:"center",marginBottom:14}}>
+                <div style={{fontSize:36,marginBottom:10}}>⏳</div>
+                <div style={{fontSize:15,fontWeight:700,color:TEXT_PRIMARY,marginBottom:8}}>変更申請を確認中です</div>
+                <div style={{fontSize:12,color:TEXT_SECONDARY,lineHeight:1.7}}>
+                  本部が内容を確認しています。<br/>
+                  承認されるまでは、現在のログイン情報をお使いください。
+                </div>
+                <div style={{marginTop:14,paddingTop:12,borderTop:`1px solid ${BORDER}`,fontSize:11,color:TEXT_MUTED,lineHeight:1.8}}>
+                  申請日: {credPending.created_at ? new Date(credPending.created_at).toLocaleDateString("ja-JP") : "—"}
+                  {credPending.requested_email && (<><br/>新しいメールアドレス: {credPending.requested_email}</>)}
+                </div>
+              </div>
+              <div style={{padding:"10px 14px",background:`${GOLD}10`,borderRadius:10,border:`1px solid ${GOLD}22`,marginBottom:16}}>
+                <div style={{fontSize:11,color:TEXT_SECONDARY,lineHeight:1.7}}>💡 申請内容を変更・取り消ししたい場合は、お問い合わせからご連絡ください。</div>
+              </div>
+              <button
+                onClick={()=>setMenuScreen("contact")}
+                style={{width:"100%",padding:"14px",background:"transparent",border:`1px solid ${GOLD}`,borderRadius:28,fontSize:14,fontWeight:700,color:GOLD,cursor:"pointer"}}
+              >お問い合わせへ</button>
+            </div>
+          ):(
+            /* 入力フェーズ */
+            <div style={{padding:"16px"}}>
+              <div style={{background:CARD_BG,borderRadius:14,border:`1px solid ${BORDER}`,overflow:"hidden",marginBottom:14}}>
+                <div style={{padding:"12px 16px 8px",fontSize:11,fontWeight:700,color:TEXT_SECONDARY}}>現在のメールアドレス</div>
+                <div style={{padding:"0 16px 14px",fontSize:14,color:TEXT_PRIMARY,wordBreak:"break-all"}}>{credCurrentEmail || "—"}</div>
+              </div>
+
+              <div style={{background:CARD_BG,borderRadius:14,border:`1px solid ${BORDER}`,overflow:"hidden",marginBottom:14}}>
+                <div style={{padding:"12px 16px 8px",fontSize:11,fontWeight:700,color:TEXT_SECONDARY}}>新しいメールアドレス（変更する場合のみ）</div>
+                <input
+                  type="email" inputMode="email" autoCapitalize="off" autoCorrect="off" autoComplete="email"
+                  value={credEmail}
+                  onChange={e=>{setCredEmail(e.target.value);if(credError)setCredError(null);}}
+                  placeholder="new@example.com"
+                  style={{width:"100%",background:"transparent",border:"none",borderTop:`1px solid ${BORDER}`,padding:"12px 16px",fontSize:16,color:TEXT_PRIMARY,outline:"none",boxSizing:"border-box"}}
+                />
+              </div>
+
+              <div style={{background:CARD_BG,borderRadius:14,border:`1px solid ${BORDER}`,overflow:"hidden",marginBottom:14}}>
+                <div style={{padding:"12px 16px 8px",fontSize:11,fontWeight:700,color:TEXT_SECONDARY}}>新しいパスワード（変更する場合のみ）</div>
+                <input
+                  type="password" autoComplete="new-password"
+                  value={credPassword}
+                  onChange={e=>{setCredPassword(e.target.value);if(credError)setCredError(null);}}
+                  placeholder="8文字以上"
+                  style={{width:"100%",background:"transparent",border:"none",borderTop:`1px solid ${BORDER}`,padding:"12px 16px",fontSize:16,color:TEXT_PRIMARY,outline:"none",boxSizing:"border-box"}}
+                />
+                <input
+                  type="password" autoComplete="new-password"
+                  value={credPasswordConfirm}
+                  onChange={e=>{setCredPasswordConfirm(e.target.value);if(credError)setCredError(null);}}
+                  placeholder="確認のためもう一度入力"
+                  style={{width:"100%",background:"transparent",border:"none",borderTop:`1px solid ${BORDER}`,padding:"12px 16px",fontSize:16,color:TEXT_PRIMARY,outline:"none",boxSizing:"border-box"}}
+                />
+              </div>
+
+              <div style={{padding:"10px 14px",background:`${GOLD}10`,borderRadius:10,border:`1px solid ${GOLD}22`,marginBottom:14}}>
+                <div style={{fontSize:11,color:TEXT_SECONDARY,lineHeight:1.7}}>
+                  💡 変更内容は本部の確認後に反映されます。<br/>
+                  承認されるまでは、現在のログイン情報でログインしてください。
+                </div>
+              </div>
+
+              {credError && (
+                <div style={{padding:"10px 14px",background:`${RED}15`,borderRadius:10,border:`1px solid ${RED}44`,marginBottom:14}}>
+                  <div style={{fontSize:12,color:RED,lineHeight:1.6}}>{credError.message || "申請に失敗しました"}</div>
+                </div>
+              )}
+
+              <button
+                onClick={async () => {
+                  if (!canSubmit) return;
+                  const ok = await submitCredential({
+                    email: credEmail,
+                    password: credPassword,
+                    passwordConfirm: credPasswordConfirm,
+                  });
+                  if (ok) {
+                    setCredEmail(""); setCredPassword(""); setCredPasswordConfirm("");
+                    setCredSent(true);
+                  }
+                  // 失敗時は credError が state に入るので、入力を残したまま画面上に表示する。
+                }}
+                disabled={!canSubmit}
+                style={{
+                  width: "100%",
+                  padding: "16px",
+                  background: canSubmit ? GOLD_GRAD : "rgba(255,255,255,0.1)",
+                  border: "none",
+                  borderRadius: 28,
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: canSubmit ? "#0A1628" : TEXT_MUTED,
+                  cursor: credSubmitting ? "wait" : (hasInput ? "pointer" : "default"),
+                }}
+              >
+                {credSubmitting ? "送信中…" : "変更を申請する"}
+              </button>
+              <div style={{height:20}}/>
+            </div>
+          )}
         </div>
       );
     }
