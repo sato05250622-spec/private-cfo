@@ -148,8 +148,8 @@ function pickMonth(obj, m) {
 }
 
 // committed_lines の 1 行・1 月のセル値を解決する。
-// 優先度: monthly_overrides[m] → monthly_values[m] → null。
-// (admin 側の live 集計値は snapshot に含まれないため override / values のみ)
+// 優先度: monthly_values[m] → monthly_overrides[m] → null。
+// (admin 側の live 集計値は snapshot に含まれないため values / override のみ)
 function resolveCell(line, m) {
   // Phase 3 (固定費): 各月 monthly_amounts[m] ?? monthly_amount (基準額)。読み取り専用。
   // タスクA (2026-06-07): 月セル解決順を 3 段フォールバックに拡張 (非破壊・DB変更なし)。
@@ -166,10 +166,23 @@ function resolveCell(line, m) {
     const a = mv != null ? Number(mv) : Number(line.monthly_amount);
     return Number.isFinite(a) && a !== 0 ? a : null;
   }
-  const ov = pickMonth(line?.monthly_overrides, m);
-  if (ov != null) return ov;
+  // 2026-09-13: 解決順を monthly_values 先 / monthly_overrides 後 に反転 (admin と同期)。
+  //   旧仕様は ov → base の順。本部は「反映」時に resolveCell の解決済み値 (確定月=実績
+  //   monthly_actuals / 未確定月=週予算Σ) を monthly_values へ焼く一方、
+  //   AnnualBudgetTab.jsx handleCommitClick の `{ ...line, monthly_values: baked, ... }`
+  //   スプレッドで古い monthly_overrides (繰越票の手入力予算) がそのまま snapshot に
+  //   同梱される。顧客側が ov を先に拾うと確定月で「繰越票手入力が実績に化ける」ため、
+  //   本部 AnnualBudgetTab.jsx の「確定月は monthly_actuals 最優先・override は予算降格」
+  //   (タスク⑫ 2026-06-02) と結果が食い違っていた。
+  //   新仕様: 本部が焼いた monthly_values を正とし、override は monthly_values を持たない
+  //   旧 snapshot 向けのフォールバックとしてのみ使う。
+  //   ※ この 1 関数が resolveCellDisplay (月セル表示)・computeSubtotalsForType
+  //     (固定費合計/変動費合計の積み上げ)・PDF 出力の共通入口なので、ここの反転だけで
+  //     合計行 (committed_totals 由来) と内訳小計の食い違いも解消する。
   const base = pickMonth(line?.monthly_values, m);
   if (base != null) return base;
+  const ov = pickMonth(line?.monthly_overrides, m);
+  if (ov != null) return ov;
   return null;
 }
 
