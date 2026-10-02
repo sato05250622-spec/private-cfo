@@ -1507,13 +1507,19 @@ export default function App() {
         <div onClick={()=>setShowCalc(true)} style={{background:CARD_BG,borderBottom:`1px solid ${BORDER}`,padding:"5px 16px 8px",display:"flex",alignItems:"flex-end",justifyContent:"space-between",cursor:"pointer"}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
             <span style={{fontSize:12,color:TEXT_MUTED,fontWeight:500}}>支出金額</span>
-            {/* 2026-10-03: レシート読取。行全体の onClick (電卓表示) へ伝播させない。 */}
-            <button
-              disabled={receiptReading}
-              onClick={(e)=>{ e.stopPropagation(); requestFeature(receiptOcrEnabled, () => receiptFileRef.current && receiptFileRef.current.click()); }}
-              style={{flexShrink:0,padding:"5px 14px",border:"1px solid #D4A843",borderRadius:999,background:"#0D1E36",color:"#D4A843",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:receiptReading?"default":"pointer",opacity:receiptReading?0.6:1,...(profileReady?{}:pendingDim)}}
-            >{receiptReading ? "読み取り中…" : `📷 レシート読取${lockMark(receiptOcrEnabled)}`}</button>
-            <input ref={receiptFileRef} type="file" accept="image/*" capture="environment" onChange={handleReceiptFile} onClick={(e)=>e.stopPropagation()} style={{display:"none"}} />
+            {/* 2026-10-03: レシート読取。行全体の onClick (電卓表示) へ伝播させない。
+                ロック中 (receipt_ocr_enabled=false / プロフィール未取得) の顧客にはボタンごと出さない。
+                requestFeature と Edge Function 側の 403 はサーバー防御として残す。 */}
+            {receiptOcrEnabled === true && (
+              <>
+                <button
+                  disabled={receiptReading}
+                  onClick={(e)=>{ e.stopPropagation(); requestFeature(receiptOcrEnabled, () => receiptFileRef.current && receiptFileRef.current.click()); }}
+                  style={{flexShrink:0,padding:"5px 14px",border:"1px solid #D4A843",borderRadius:999,background:"#0D1E36",color:"#D4A843",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:receiptReading?"default":"pointer",opacity:receiptReading?0.6:1}}
+                >{receiptReading ? "読み取り中…" : "📷 レシート読取"}</button>
+                <input ref={receiptFileRef} type="file" accept="image/*" capture="environment" onChange={handleReceiptFile} onClick={(e)=>e.stopPropagation()} style={{display:"none"}} />
+              </>
+            )}
           </div>
           <div style={{display:"flex",alignItems:"flex-end",gap:6}}>
             <span style={{fontSize:44,fontWeight:400,color:inputAmount?TEXT_PRIMARY:TEXT_MUTED,lineHeight:1}}>{inputAmount||"0"}</span>
