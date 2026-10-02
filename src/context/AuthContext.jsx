@@ -19,19 +19,21 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
-// F: profiles の SELECT 列 (14 列)。loadProfile / refreshProfile の 2 箇所で使うため
+// F: profiles の SELECT 列 (15 列)。loadProfile / refreshProfile の 2 箇所で使うため
 //    定数で 1 箇所定義にする (片方だけ列を足す事故の防止)。
-const PROFILE_COLUMNS = 'role, approved, app_enabled, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit, asset_sheet_enabled, initial_asset';
+const PROFILE_COLUMNS = 'role, approved, app_enabled, management_start_day, customer_edit_enabled, include_fixed_expenses, report_enabled, meeting_enabled, fixed_costs_enabled, utilization_enabled, category_add_enabled, card_limit, asset_sheet_enabled, initial_asset, receipt_ocr_enabled';
 
 // -----------------------------------------------------------------
 // profiles の localStorage キャッシュ (stale-while-revalidate)。
 //   起動時に getSession + profiles SELECT の直列待ちのうち後者 (1RTT ~100-400ms) を、
 //   キャッシュヒット時は待たずに画面を出すための最適化。
-//   保存 shape: { userId, profile(14列 SELECT の生 data), savedAt }。
+//   保存 shape: { userId, profile(15列 SELECT の生 data), savedAt }。
 //   すべて try/catch で握りつぶし、localStorage 不可 (プライベートモード等) でも
 //   起動フローを壊さない (キャッシュ無し扱いにフォールバック)。
+//   v2 (2026-10-03): receipt_ocr_enabled 列追加に伴い bump。旧 v1 は読まれなくなり、
+//   サインアウト時の 'pcfo_' プレフィックス一括削除で掃除される。
 // -----------------------------------------------------------------
-const PROFILE_CACHE_KEY = 'pcfo_profile_cache_v1';
+const PROFILE_CACHE_KEY = 'pcfo_profile_cache_v2';
 
 function readProfileCache() {
   try {
@@ -101,6 +103,8 @@ export function AuthProvider({ children }) {
   const [reportEnabled, setReportEnabled] = useState(false);
   const [meetingEnabled, setMeetingEnabled] = useState(false);
   const [fixedCostsEnabled, setFixedCostsEnabled] = useState(false);
+  // 2026-10-03: レシート読取 (Edge Function receipt-ocr) 機能ゲート。DB receipt_ocr_enabled DEFAULT false。
+  const [receiptOcrEnabled, setReceiptOcrEnabled] = useState(false);
   const [utilizationEnabled, setUtilizationEnabled] = useState(false);
   const [categoryAddEnabled, setCategoryAddEnabled] = useState(false);
   const [cardLimit, setCardLimit] = useState(null);
@@ -132,7 +136,7 @@ export function AuthProvider({ children }) {
   //   「現在のセッションの userId」を保持する。
   const sessionUserIdRef = useRef(null);
 
-  // profiles の 14 列 (生 data) を state に反映する共通処理。
+  // profiles の 15 列 (生 data) を state に反映する共通処理。
   //   キャッシュ採用時 (起動) / フェッチ成功時 / サインアウト時 (data=null) から呼ぶ。
   //   B: data=null を渡すと全列 undefined 経由で各 ?? 既定へ戻る (前ユーザーの残留を根絶)。
   //   profileReady はここでは触らない (確定/未確定の判断は呼び出し側の責務)。
@@ -145,6 +149,8 @@ export function AuthProvider({ children }) {
     setReportEnabled(data?.report_enabled ?? false);
     setMeetingEnabled(data?.meeting_enabled ?? false);
     setFixedCostsEnabled(data?.fixed_costs_enabled ?? false);
+    // 列が無い旧キャッシュ / data=null は undefined → false (ロック側)。
+    setReceiptOcrEnabled(data?.receipt_ocr_enabled === true);
     setUtilizationEnabled(data?.utilization_enabled ?? false);
     setCategoryAddEnabled(data?.category_add_enabled ?? false);
     setCardLimit(data?.card_limit ?? null);
@@ -445,6 +451,7 @@ export function AuthProvider({ children }) {
     reportEnabled,
     meetingEnabled,
     fixedCostsEnabled,
+    receiptOcrEnabled,
     utilizationEnabled,
     categoryAddEnabled,
     cardLimit,

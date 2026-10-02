@@ -39,6 +39,7 @@ import InvestmentRecoveryViewer from "./pages/InvestmentRecoveryViewer";
 import { MonthPopoverDial } from "./components/MonthDialPicker";
 import ReportTabs from "./components/ReportTabs";
 import { listPublishedByClient } from "./lib/api/monthlyReviews";
+import { readReceipt } from "./lib/api/receiptOcr";
 import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
 import { useCredentialRequest } from "./hooks/useCredentialRequest";
@@ -493,7 +494,7 @@ export default function App() {
   // ログイン直後に 1 回だけ実行。冪等 (cfo_paymentsLoansMigrated フラグ + idempotent upsert)。
   // ref ガードで StrictMode 二重起動を抑止。失敗は console.warn のみで UI 阻害しない。
   // 完了後に refetchPaymentMethods / refetchLoans で UI を最新 DB 状態へ同期。
-  const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled, fixedCostsEnabled, utilizationEnabled, categoryAddEnabled, cardLimit, assetSheetEnabled, profileReady } = useAuth();
+  const { user: authUser, customerEditEnabled, reportEnabled, meetingEnabled, fixedCostsEnabled, receiptOcrEnabled, utilizationEnabled, categoryAddEnabled, cardLimit, assetSheetEnabled, profileReady } = useAuth();
   const authUserId = authUser?.id ?? null;
   // タスク (2026-06-08): メニュー「面談予定」行に次回面談日時を read-only 表示するため、
   //   詳細画面 AppointmentCard と同じ useNextAppointment を top-level で 1 回購読する。
@@ -977,6 +978,46 @@ export default function App() {
   };
 
   const changeDate = (delta) => { const d=new Date(inputDate); d.setDate(d.getDate()+delta); setInputDate(d); };
+  // 2026-10-03: レシート読取 (有料: receipt_ocr_enabled)。撮影 → Edge Function receipt-ocr →
+  //   amount / date / memo をフォームへ流し込むだけ。カテゴリ・支払い方法は触らず、自動保存もしない
+  //   (保存はユーザーが既存の保存ボタンで行う)。null の項目は既存入力を温存する。
+  const receiptFileRef = useRef(null);
+  const [receiptReading, setReceiptReading] = useState(false);
+  const handleReceiptFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ""; // 同じ画像を再選択しても onChange が発火するように戻す
+    if (!file) return;
+    setReceiptReading(true);
+    try {
+      const { data, error, status } = await readReceipt(file);
+      if (error) {
+        if (status === 403) showFeatureLockedToast();
+        else showFeatureLockedToast("読み取れませんでした。手入力してください");
+        return;
+      }
+      if (typeof data?.amount === "number" && Number.isFinite(data.amount) && data.amount > 0) {
+        setInputAmount(String(data.amount));
+      }
+      if (typeof data?.memo === "string" && data.memo.trim()) {
+        setInputMemo(data.memo.trim());
+      }
+      const m = typeof data?.date === "string" ? data.date.match(/^(\d{4})-(\d{2})-(\d{2})$/) : null;
+      if (m) {
+        const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+        const local = new Date(y, mo - 1, d);
+        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+        // 実在日 (2/31 等の繰り上がりを除外) かつ未来日でないときだけ反映。
+        if (local.getFullYear() === y && local.getMonth() === mo - 1 && local.getDate() === d && local <= todayStart) {
+          setInputDate(local);
+        }
+      }
+    } catch (err) {
+      console.error("[receipt-ocr]", err);
+      showFeatureLockedToast("読み取れませんでした。手入力してください");
+    } finally {
+      setReceiptReading(false);
+    }
+  };
   const addTransaction = () => {
     if (!inputAmount || isNaN(Number(inputAmount)) || Number(inputAmount) <= 0) return;
     // Step B ④: 予算オーバー判定に使うため、書き込み payload を変数に固定。
@@ -1459,7 +1500,16 @@ export default function App() {
         {/* 上部ブロック(flex-shrink:0):金額 / メモ / 支払い方法 — 常に最上段固定でスクロール非対象 */}
         <div style={{flexShrink:0,display:"flex",flexDirection:"column"}}>
         <div onClick={()=>setShowCalc(true)} style={{background:CARD_BG,borderBottom:`1px solid ${BORDER}`,padding:"5px 16px 8px",display:"flex",alignItems:"flex-end",justifyContent:"space-between",cursor:"pointer"}}>
-          <span style={{fontSize:12,color:TEXT_MUTED,fontWeight:500,marginBottom:6}}>支出金額</span>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+            <span style={{fontSize:12,color:TEXT_MUTED,fontWeight:500}}>支出金額</span>
+            {/* 2026-10-03: レシート読取。行全体の onClick (電卓表示) へ伝播させない。 */}
+            <button
+              disabled={receiptReading}
+              onClick={(e)=>{ e.stopPropagation(); requestFeature(receiptOcrEnabled, () => receiptFileRef.current && receiptFileRef.current.click()); }}
+              style={{flexShrink:0,padding:"5px 14px",border:"1px solid #D4A843",borderRadius:999,background:"#0D1E36",color:"#D4A843",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:receiptReading?"default":"pointer",opacity:receiptReading?0.6:1,...(profileReady?{}:pendingDim)}}
+            >{receiptReading ? "読み取り中…" : `📷 レシート読取${lockMark(receiptOcrEnabled)}`}</button>
+            <input ref={receiptFileRef} type="file" accept="image/*" capture="environment" onChange={handleReceiptFile} onClick={(e)=>e.stopPropagation()} style={{display:"none"}} />
+          </div>
           <div style={{display:"flex",alignItems:"flex-end",gap:6}}>
             <span style={{fontSize:44,fontWeight:400,color:inputAmount?TEXT_PRIMARY:TEXT_MUTED,lineHeight:1}}>{inputAmount||"0"}</span>
             <span style={{fontSize:16,color:TEXT_MUTED,fontWeight:400,marginBottom:8}}>円</span>
