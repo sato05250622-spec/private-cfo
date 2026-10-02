@@ -8,8 +8,9 @@
 //   403 + code 'feature_locked' = 有料フラグ OFF (呼び出し側でプラン案内トーストに分岐)。
 import { supabase } from '../supabaseClient';
 
-const MAX_EDGE = 1600;
-const JPEG_QUALITY = 0.8;
+// 2400px: Sonnet 系の高解像度入力 (長辺 2576px まで) を活かしつつ、レシートの小さい文字を潰さない。
+const MAX_EDGE = 2400;
+const JPEG_QUALITY = 0.85;
 
 // File → 長辺 MAX_EDGE 以下の JPEG base64 (data URL 接頭辞なし)。
 function fileToJpegBase64(file) {

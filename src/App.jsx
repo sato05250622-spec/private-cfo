@@ -1006,9 +1006,14 @@ export default function App() {
         const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
         const local = new Date(y, mo - 1, d);
         const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-        // 実在日 (2/31 等の繰り上がりを除外) かつ未来日でないときだけ反映。
-        if (local.getFullYear() === y && local.getMonth() === mo - 1 && local.getDate() === d && local <= todayStart) {
-          setInputDate(local);
+        const minDate = new Date(todayStart); minDate.setDate(minDate.getDate() - 60);
+        // 実在日 (2/31 等の繰り上がりを除外) かつ「今日から 60 日前〜今日」のときだけ反映。
+        //   誤読 (年違い・和暦換算ミス) で過去/未来に飛んだまま保存される事故を防ぐ。範囲外は日付を触らない。
+        if (local.getFullYear() === y && local.getMonth() === mo - 1 && local.getDate() === d && local >= minDate && local <= todayStart) {
+          if (toDateStr(local) !== toDateStr(inputDate)) {
+            setInputDate(local);
+            showFeatureLockedToast(`日付をレシートの ${mo}/${d} に変更しました`);
+          }
         }
       }
     } catch (err) {
