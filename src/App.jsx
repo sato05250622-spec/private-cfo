@@ -1485,6 +1485,25 @@ export default function App() {
     return (
       <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
         <div style={{background:CARD_BG,borderBottom:`1px solid ${BORDER}`,padding:"6px 16px",display:"flex",alignItems:"center",gap:8}}>
+          {/* 2026-10-03: レシート読取 (カメラアイコンのみ)。日付ナビ行の左端・「‹」の外側。
+              ロック中 (receipt_ocr_enabled=false / プロフィール未取得) は何も描画しない (行レイアウト不変)。
+              タップ領域 44x44 / 見た目 36px 丸。上下 margin -4px で行の高さを押し広げない。
+              requestFeature と Edge Function 側の 403 はサーバー防御として残す。 */}
+          {receiptOcrEnabled === true && (
+            <>
+              <button
+                aria-label="レシート読取"
+                disabled={receiptReading}
+                onClick={()=>requestFeature(receiptOcrEnabled, () => receiptFileRef.current && receiptFileRef.current.click())}
+                style={{flexShrink:0,width:44,height:44,margin:"-4px 0",padding:0,border:"none",background:"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:receiptReading?"default":"pointer"}}
+              >
+                <span style={{width:36,height:36,borderRadius:"50%",background:"#0D1E36",border:"1px solid #D4A843",color:"#D4A843",display:"flex",alignItems:"center",justifyContent:"center",opacity:receiptReading?0.4:1,boxSizing:"border-box"}}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                </span>
+              </button>
+              <input ref={receiptFileRef} type="file" accept="image/*" capture="environment" onChange={handleReceiptFile} style={{display:"none"}} />
+            </>
+          )}
           <button style={S.navArrow} onClick={()=>changeDate(-1)}>‹</button>
           <div
             onClick={()=>{setDatePickerMonth({y:inputDate.getFullYear(),m:inputDate.getMonth()});setShowDatePicker(true);}}
@@ -1505,22 +1524,7 @@ export default function App() {
         {/* 上部ブロック(flex-shrink:0):金額 / メモ / 支払い方法 — 常に最上段固定でスクロール非対象 */}
         <div style={{flexShrink:0,display:"flex",flexDirection:"column"}}>
         <div onClick={()=>setShowCalc(true)} style={{background:CARD_BG,borderBottom:`1px solid ${BORDER}`,padding:"5px 16px 8px",display:"flex",alignItems:"flex-end",justifyContent:"space-between",cursor:"pointer"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-            <span style={{fontSize:12,color:TEXT_MUTED,fontWeight:500}}>支出金額</span>
-            {/* 2026-10-03: レシート読取。行全体の onClick (電卓表示) へ伝播させない。
-                ロック中 (receipt_ocr_enabled=false / プロフィール未取得) の顧客にはボタンごと出さない。
-                requestFeature と Edge Function 側の 403 はサーバー防御として残す。 */}
-            {receiptOcrEnabled === true && (
-              <>
-                <button
-                  disabled={receiptReading}
-                  onClick={(e)=>{ e.stopPropagation(); requestFeature(receiptOcrEnabled, () => receiptFileRef.current && receiptFileRef.current.click()); }}
-                  style={{flexShrink:0,padding:"5px 14px",border:"1px solid #D4A843",borderRadius:999,background:"#0D1E36",color:"#D4A843",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:receiptReading?"default":"pointer",opacity:receiptReading?0.6:1}}
-                >{receiptReading ? "読み取り中…" : "📷 レシート読取"}</button>
-                <input ref={receiptFileRef} type="file" accept="image/*" capture="environment" onChange={handleReceiptFile} onClick={(e)=>e.stopPropagation()} style={{display:"none"}} />
-              </>
-            )}
-          </div>
+          <span style={{fontSize:12,color:TEXT_MUTED,fontWeight:500,marginBottom:6}}>支出金額</span>
           <div style={{display:"flex",alignItems:"flex-end",gap:6}}>
             <span style={{fontSize:44,fontWeight:400,color:inputAmount?TEXT_PRIMARY:TEXT_MUTED,lineHeight:1}}>{inputAmount||"0"}</span>
             <span style={{fontSize:16,color:TEXT_MUTED,fontWeight:400,marginBottom:8}}>円</span>
