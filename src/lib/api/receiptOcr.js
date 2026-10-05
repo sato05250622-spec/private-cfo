@@ -28,11 +28,15 @@ function fileToJpegBase64(file) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+        // iOS Safari はキャンバスのメモリ解放が遅いので、変換後すぐ 0x0 にして手放す (複数枚読取時の対策)。
+        canvas.width = 0;
+        canvas.height = 0;
         resolve(dataUrl.slice(dataUrl.indexOf(',') + 1));
       } catch (e) {
         reject(e);
       } finally {
         URL.revokeObjectURL(url);
+        img.src = '';
       }
     };
     img.onerror = () => {
@@ -76,4 +80,78 @@ export async function readReceipt(file) {
     return { data: null, error: err, status: 200 };
   }
   return { data, error: null, status: 200 };
+}
+
+// 複数レシート読取 (確認画面フロー用)。
+//   - 1 画像 = 1 リクエスト (mode:"multi" → { receipts:[{amount,date,memo}] })。1 枚に複数レシートが写っていてもよい。
+//   - 画像の縮小は 1 枚ずつ直列 (iOS のメモリ対策)。ネットワーク呼び出しは最大 2 本まで並行。
+//   - 結果は画像の選択順に結合する。onProgress(完了数, 総数) を 1 画像完了ごとに呼ぶ。
+// 戻り値: { receipts: [...], failedImages: 失敗した画像数, locked: 403 feature_locked が 1 つでもあれば true }
+// throw しない。
+const MULTI_CONCURRENCY = 2;
+
+export async function readReceiptsMulti(files, onProgress) {
+  const list = Array.prototype.slice.call(files || []);
+  const total = list.length;
+  const perImage = new Array(total);
+  let failedImages = 0;
+  let locked = false;
+  let done = 0;
+  let next = 0;
+  // 縮小処理を直列化するためのロック (前の変換が終わってから次を始める)。
+  let convertChain = Promise.resolve();
+
+  const convertSerial = (file) => {
+    const p = convertChain.then(() => fileToJpegBase64(file));
+    convertChain = p.catch(() => {});
+    return p;
+  };
+
+  const processOne = async (idx) => {
+    try {
+      const imageBase64 = await convertSerial(list[idx]);
+      const { data, error } = await supabase.functions.invoke('receipt-ocr', {
+        body: { image_base64: imageBase64, mime_type: 'image/jpeg', mode: 'multi' },
+      });
+      if (error) {
+        const res = error.context;
+        if (res && res.status === 403) locked = true;
+        failedImages += 1;
+        perImage[idx] = [];
+        return;
+      }
+      if (data?.error) {
+        failedImages += 1;
+        perImage[idx] = [];
+        return;
+      }
+      perImage[idx] = Array.isArray(data?.receipts) ? data.receipts : [];
+    } catch (e) {
+      console.error('[receipt-ocr multi]', e);
+      failedImages += 1;
+      perImage[idx] = [];
+    } finally {
+      done += 1;
+      if (typeof onProgress === 'function') onProgress(done, total);
+    }
+  };
+
+  const worker = async () => {
+    while (next < total) {
+      const idx = next;
+      next += 1;
+      await processOne(idx);
+    }
+  };
+
+  const workers = [];
+  for (let i = 0; i < Math.min(MULTI_CONCURRENCY, total); i++) workers.push(worker());
+  await Promise.all(workers);
+
+  const receipts = [];
+  for (let i = 0; i < total; i++) {
+    const arr = perImage[i] || [];
+    for (let j = 0; j < arr.length; j++) receipts.push(arr[j]);
+  }
+  return { receipts, failedImages, locked };
 }

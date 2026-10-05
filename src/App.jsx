@@ -39,7 +39,8 @@ import InvestmentRecoveryViewer from "./pages/InvestmentRecoveryViewer";
 import { MonthPopoverDial } from "./components/MonthDialPicker";
 import ReportTabs from "./components/ReportTabs";
 import { listPublishedByClient } from "./lib/api/monthlyReviews";
-import { readReceipt } from "./lib/api/receiptOcr";
+import { readReceiptsMulti } from "./lib/api/receiptOcr";
+import ReceiptBatchSheet from "./components/ReceiptBatchSheet";
 import { useLatestTelop } from "./hooks/useNotifications";
 import { useInquiries } from "./hooks/useInquiries";
 import { useCredentialRequest } from "./hooks/useCredentialRequest";
@@ -273,6 +274,7 @@ export default function App() {
   const {
     expenses: transactions,
     addExpense,
+    addExpenses,
     updateExpense,
     softDeleteExpense,
   } = useExpenses();
@@ -978,50 +980,74 @@ export default function App() {
   };
 
   const changeDate = (delta) => { const d=new Date(inputDate); d.setDate(d.getDate()+delta); setInputDate(d); };
-  // 2026-10-03: レシート読取 (有料: receipt_ocr_enabled)。撮影 → Edge Function receipt-ocr →
-  //   amount / date / memo をフォームへ流し込むだけ。カテゴリ・支払い方法は触らず、自動保存もしない
-  //   (保存はユーザーが既存の保存ボタンで行う)。null の項目は既存入力を温存する。
+  // 2026-10-06: レシート読取 (有料: receipt_ocr_enabled)。写真 1 枚〜複数枚 (1 枚に複数レシート可) →
+  //   Edge Function receipt-ocr (mode:"multi") → 確認画面 (ReceiptBatchSheet) で行ごとに修正 →
+  //   選択中のカテゴリ・支払い方法で一括登録 (addExpenses、全件か 0 件)。単発もこの画面を通す。
+  //   日付の「今日〜60 日前」ルールはシート側で行ごとに適用 (範囲外は inputDate + 日付要確認)。
   const receiptFileRef = useRef(null);
   const [receiptReading, setReceiptReading] = useState(false);
+  const [receiptSheetOpen, setReceiptSheetOpen] = useState(false);
+  const [receiptProgress, setReceiptProgress] = useState({ done: 0, total: 0 });
+  const [receiptResults, setReceiptResults] = useState(null);
+  const [receiptFailed, setReceiptFailed] = useState(0);
+  const [receiptFallbackDate, setReceiptFallbackDate] = useState(() => toDateStr(new Date()));
+  const [receiptSaving, setReceiptSaving] = useState(false);
+  // 読取中にキャンセルされた場合、遅れて返ってきた結果を捨てるための世代番号。
+  const receiptRunRef = useRef(0);
+  const closeReceiptSheet = () => {
+    receiptRunRef.current += 1;
+    setReceiptSheetOpen(false);
+    setReceiptReading(false);
+    setReceiptResults(null);
+    setReceiptFailed(0);
+  };
   const handleReceiptFile = async (e) => {
-    const file = e.target.files && e.target.files[0];
+    const files = e.target.files ? Array.prototype.slice.call(e.target.files) : [];
     e.target.value = ""; // 同じ画像を再選択しても onChange が発火するように戻す
-    if (!file) return;
+    if (files.length === 0) return;
+    receiptRunRef.current += 1;
+    const runId = receiptRunRef.current;
+    setReceiptFallbackDate(toDateStr(inputDate));
+    setReceiptResults(null);
+    setReceiptFailed(0);
+    setReceiptProgress({ done: 0, total: files.length });
     setReceiptReading(true);
-    try {
-      const { data, error, status } = await readReceipt(file);
-      if (error) {
-        if (status === 403) showFeatureLockedToast();
-        else showFeatureLockedToast("読み取れませんでした。手入力してください");
-        return;
-      }
-      if (typeof data?.amount === "number" && Number.isFinite(data.amount) && data.amount > 0) {
-        setInputAmount(String(data.amount));
-      }
-      if (typeof data?.memo === "string" && data.memo.trim()) {
-        setInputMemo(data.memo.trim());
-      }
-      const m = typeof data?.date === "string" ? data.date.match(/^(\d{4})-(\d{2})-(\d{2})$/) : null;
-      if (m) {
-        const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
-        const local = new Date(y, mo - 1, d);
-        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-        const minDate = new Date(todayStart); minDate.setDate(minDate.getDate() - 60);
-        // 実在日 (2/31 等の繰り上がりを除外) かつ「今日から 60 日前〜今日」のときだけ反映。
-        //   誤読 (年違い・和暦換算ミス) で過去/未来に飛んだまま保存される事故を防ぐ。範囲外は日付を触らない。
-        if (local.getFullYear() === y && local.getMonth() === mo - 1 && local.getDate() === d && local >= minDate && local <= todayStart) {
-          if (toDateStr(local) !== toDateStr(inputDate)) {
-            setInputDate(local);
-            showFeatureLockedToast(`日付をレシートの ${mo}/${d} に変更しました`);
-          }
-        }
-      }
-    } catch (err) {
-      console.error("[receipt-ocr]", err);
-      showFeatureLockedToast("読み取れませんでした。手入力してください");
-    } finally {
-      setReceiptReading(false);
+    setReceiptSheetOpen(true);
+    const result = await readReceiptsMulti(files, (done, total) => {
+      if (receiptRunRef.current === runId) setReceiptProgress({ done, total });
+    });
+    if (receiptRunRef.current !== runId) return; // キャンセル済み
+    setReceiptReading(false);
+    if (result.locked) {
+      closeReceiptSheet();
+      showFeatureLockedToast();
+      return;
     }
+    if (result.receipts.length === 0) {
+      closeReceiptSheet();
+      showFeatureLockedToast("レシートを読み取れませんでした");
+      return;
+    }
+    setReceiptFailed(result.failedImages);
+    setReceiptResults(result.receipts);
+  };
+  const confirmReceiptRows = (rows) => {
+    const catLabel = expenseCats.find(c => c.id === inputCategory)?.label ?? null;
+    setReceiptSaving(true);
+    addExpenses(rows.map(r => ({
+      date: r.date,
+      amount: r.amount,
+      memo: r.memo,
+      category: inputCategory,
+      categoryLabel: catLabel,
+      payment: inputPayment,
+    })))
+      .then((inserted) => {
+        closeReceiptSheet();
+        showFeatureLockedToast(`${inserted.length}件を登録しました`);
+      })
+      .catch((err) => { console.error(err); alert("支出の保存に失敗しました。"); })
+      .finally(() => setReceiptSaving(false));
   };
   const addTransaction = () => {
     if (!inputAmount || isNaN(Number(inputAmount)) || Number(inputAmount) <= 0) return;
@@ -1501,7 +1527,8 @@ export default function App() {
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
                 </span>
               </button>
-              <input ref={receiptFileRef} type="file" accept="image/*" capture="environment" onChange={handleReceiptFile} style={{display:"none"}} />
+              {/* multiple + capture なし: iOS で「写真を撮る / 写真ライブラリ(複数選択可)」のメニューを出す。 */}
+              <input ref={receiptFileRef} type="file" accept="image/*" multiple onChange={handleReceiptFile} style={{display:"none"}} />
             </>
           )}
           <button style={S.navArrow} onClick={()=>changeDate(-1)}>‹</button>
@@ -3343,6 +3370,26 @@ export default function App() {
       )}
 
       {/* 電卓モーダル */}
+      {/* 2026-10-06: レシート読取の確認画面 (単発・一括共通)。登録先 = 入力画面で選択中のカテゴリ/支払い方法。 */}
+      {receiptSheetOpen&&(()=>{
+        const cat = expenseCats.find(c => c.id === inputCategory);
+        const pm = paymentMethods.find(p => p.id === inputPayment);
+        return (
+          <ReceiptBatchSheet
+            reading={receiptReading}
+            progress={receiptProgress}
+            receipts={receiptResults}
+            failedImages={receiptFailed}
+            fallbackDateStr={receiptFallbackDate}
+            categoryLabel={cat?.label ?? "カテゴリ未選択"}
+            categoryColor={cat?.color}
+            paymentLabel={pm?.label ?? "現金"}
+            saving={receiptSaving}
+            onConfirm={confirmReceiptRows}
+            onClose={closeReceiptSheet}
+          />
+        );
+      })()}
       {showCalc&&(
         <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,height:"100dvh",background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex",flexDirection:"column",justifyContent:"flex-end"}} onClick={()=>setShowCalc(false)}>
           <div onClick={e=>e.stopPropagation()} style={{background:NAVY2,borderRadius:"20px 20px 0 0",border:`1px solid ${BORDER}`,paddingBottom:"calc(30px + env(safe-area-inset-bottom))"}}>

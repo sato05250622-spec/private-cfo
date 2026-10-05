@@ -84,6 +84,19 @@ export function useExpenses() {
     [userId],
   );
 
+  // レシート一括読取用: 複数件を 1 回の INSERT で登録 (全件か 0 件)。state 反映も 1 回だけ。
+  const addExpenses = useCallback(
+    async (apps) => {
+      if (!userId || !apps || apps.length === 0) return [];
+      const rows = apps.map((a) => toDb(a, userId));
+      const inserted = await api.insertExpenses(rows);
+      const mappedList = inserted.map((r) => toApp(r, userId));
+      setExpenses((prev) => [...mappedList, ...prev]);
+      return mappedList;
+    },
+    [userId],
+  );
+
   const updateExpense = useCallback(
     async (id, patchApp) => {
       if (!userId) return null;
@@ -114,6 +127,7 @@ export function useExpenses() {
     error,
     refetch,
     addExpense,
+    addExpenses,
     updateExpense,
     softDeleteExpense,
   };

@@ -28,6 +28,18 @@ export async function insertExpense(row) {
   return data;
 }
 
+// 複数行を 1 文で挿入 (レシート一括読取用)。1 つの INSERT 文なので全件成功か 0 件のどちらか。
+// 挿入された行 (id / timestamps 付き) を配列で返す。
+export async function insertExpenses(rows) {
+  if (!rows || rows.length === 0) return [];
+  const { data, error } = await supabase
+    .from(TABLE)
+    .insert(rows)
+    .select();
+  if (error) throw error;
+  return data ?? [];
+}
+
 // 部分更新。patch は DB カラム名。
 export async function updateExpense(id, patch) {
   const { data, error } = await supabase
