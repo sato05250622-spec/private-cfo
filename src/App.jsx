@@ -386,6 +386,8 @@ export default function App() {
   const [newCatName, setNewCatName] = useState("");
   const [newCatIcon, setNewCatIcon] = useState("restaurant");
   const [newCatColor, setNewCatColor] = useState("#F5921E");
+  // 2026-10-12 P5: カテゴリの事業費/プライベート費区分 (categories.expense_type)。新規は家計向けにプライベート費を初期選択。
+  const [newCatExpenseType, setNewCatExpenseType] = useState("private");
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [menuReportYear, setMenuReportYear] = useState(today.getFullYear());
@@ -399,6 +401,7 @@ export default function App() {
   const [editName, setEditName] = useState("");
   const [editIcon, setEditIcon] = useState("restaurant");
   const [editColor, setEditColor] = useState("#FF6B35");
+  const [editExpenseType, setEditExpenseType] = useState("business");
   const [selectedDay, setSelectedDay] = useState(toDateStr(today));
   const [expandedWeek, setExpandedWeek] = useState(weekInCycle(today, getManagementStartDay()));
   const [weekBudgetInput, setWeekBudgetInput] = useState("");
@@ -971,14 +974,26 @@ export default function App() {
 
   const addNewCategory = () => {
     if (!newCatName.trim()) return;
-    addCategory({ label: newCatName, iconKey: newCatIcon, color: newCatColor })
+    addCategory({ label: newCatName, iconKey: newCatIcon, color: newCatColor, expenseType: newCatExpenseType })
       .then(() => {
-        setNewCatName(""); setNewCatIcon("restaurant"); setNewCatColor("#F5921E");
+        setNewCatName(""); setNewCatIcon("restaurant"); setNewCatColor("#F5921E"); setNewCatExpenseType("private");
         setMenuScreen("catEdit");
       })
       .catch((e) => { console.error(e); alert("カテゴリ追加に失敗しました。"); });
   };
 
+  // P5: 事業費 / プライベート費 の選択 (本部の予算画面で振り分けに使う)。既存カテゴリは保存済みの区分を初期表示し、変えなければそのまま。
+  const expenseTypePicker = (value, onChange) => (
+    <div style={{background:CARD_BG,padding:"14px 18px"}}>
+      <div style={{fontSize:12,color:TEXT_SECONDARY,marginBottom:8,fontWeight:600}}>区分</div>
+      <div style={{display:"flex",gap:8}}>
+        {[["business","事業費"],["private","プライベート費"]].map(([k,l])=>{const sel=value===k;return(
+          <button key={k} type="button" onClick={()=>onChange(k)} aria-pressed={sel} style={{flex:1,padding:"12px 8px",borderRadius:12,border:`1.5px solid ${sel?GOLD:BORDER}`,background:sel?`${GOLD}22`:"transparent",color:sel?GOLD:TEXT_SECONDARY,fontSize:14,fontWeight:sel?700:500,cursor:"pointer"}}>{l}</button>
+        );})}
+      </div>
+      <div style={{fontSize:11,color:TEXT_MUTED,marginTop:8,lineHeight:1.6}}>本部の予算画面で「事業費」「プライベート費」に分けて集計します。</div>
+    </div>
+  );
   const changeDate = (delta) => { const d=new Date(inputDate); d.setDate(d.getDate()+delta); setInputDate(d); };
   // 2026-10-06: レシート読取 (有料: receipt_ocr_enabled)。写真 1 枚〜複数枚 (1 枚に複数レシート可) →
   //   Edge Function receipt-ocr (mode:"multi") → 確認画面 (ReceiptBatchSheet) で行ごとに修正 →
@@ -2084,6 +2099,8 @@ export default function App() {
           <div style={{height:12,background:CREAM}}/>
           <ColorPicker selected={newCatColor} onSelect={setNewCatColor}/>
           <div style={{height:12,background:CREAM}}/>
+          {expenseTypePicker(newCatExpenseType, setNewCatExpenseType)}
+          <div style={{height:12,background:CREAM}}/>
         </div>
         <div style={{position:"fixed",bottom:"calc(60px + env(safe-area-inset-bottom) + 8px)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:CARD_BG,padding:"12px 18px 12px",borderTop:"1px solid #f0f0f0",zIndex:150}}>
           <button onClick={addNewCategory} style={{display:"block",width:"100%",padding:"16px",background:newCatName.trim()?ORANGE:"#eee",color:newCatName.trim()?"#fff":"#aaa",border:"none",borderRadius:28,fontSize:16,fontWeight:700,cursor:"pointer"}}>保存</button>
@@ -2122,6 +2139,7 @@ export default function App() {
                     setEditName(c.label);
                     setEditIcon(c.iconKey || c.icon || "restaurant");
                     setEditColor(c.color || "#FF6B35");
+                    setEditExpenseType(c.expenseType === "private" ? "private" : "business");
                     setMenuScreen("catEditDetail");
                   }}
                   onRemove={(id) => removeCategory(id).catch((e) => { console.error(e); alert("削除に失敗しました。"); })}
@@ -2153,11 +2171,13 @@ export default function App() {
           <div style={{height:12,background:CREAM}}/>
           <ColorPicker selected={editColor} onSelect={setEditColor}/>
           <div style={{height:12,background:CREAM}}/>
+          {expenseTypePicker(editExpenseType, setEditExpenseType)}
+          <div style={{height:12,background:CREAM}}/>
         </div>
         <div style={{position:"fixed",bottom:"calc(60px + env(safe-area-inset-bottom) + 8px)",left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:CARD_BG,padding:"12px 18px 12px",borderTop:"1px solid #f0f0f0",zIndex:150}}>
           <button
             onClick={() => {
-              updateCategoryDb(editingCat.id, { label: editName, iconKey: editIcon, color: editColor })
+              updateCategoryDb(editingCat.id, { label: editName, iconKey: editIcon, color: editColor, expenseType: editExpenseType })
                 .then(() => setMenuScreen("catEdit"))
                 .catch((e) => { console.error(e); alert("保存に失敗しました。"); });
             }}

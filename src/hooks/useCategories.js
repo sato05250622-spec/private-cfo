@@ -9,7 +9,8 @@ import * as api from '../lib/api/categories';
 //   保存 shape: { userId, rows(toApp 変換後の配列・sort_order 順), savedAt }。
 //   全操作 try/catch で握りつぶし、localStorage 不可環境でも動作を壊さない。
 // -----------------------------------------------------------------
-const CATEGORIES_CACHE_KEY = 'pcfo_categories_cache_v1';
+// v2 (2026-10-12): 事業費/プライベート費区分 (expenseType) を行に含めるため bump。旧 v1 はサインアウト時の pcfo_ 一括削除で消える。
+const CATEGORIES_CACHE_KEY = 'pcfo_categories_cache_v2';
 
 function readCategoriesCache() {
   try {
@@ -43,17 +44,22 @@ function toApp(row) {
     iconKey: row.icon_key,
     color: row.color,
     sortOrder: row.sort_order ?? 0,
+    // 2026-10-12 P5: 事業費/プライベート費区分。DB 既定は 'business' (列が無い・null も business 扱い = 本部の MonthSummary と同じ判定)。
+    expenseType: row.expense_type === 'private' ? 'private' : 'business',
   };
 }
 
 function toDb(cat, clientId) {
-  return {
+  const row = {
     client_id: clientId,
     label: cat.label,
     icon_key: cat.iconKey,
     color: cat.color,
     sort_order: cat.sortOrder ?? 0,
   };
+  // P5: 区分は指定されたときだけ送る (未指定で既存の値・本部が設定した値を上書きしない)。
+  if (cat.expenseType === 'business' || cat.expenseType === 'private') row.expense_type = cat.expenseType;
+  return row;
 }
 
 // 顧客が持つカテゴリ一式(既定 + カスタム)を管理する。
@@ -148,6 +154,8 @@ export function useCategories() {
       if (!userId) return null;
       const patch = toDb(patchApp, userId);
       delete patch.client_id;
+      // P5 (副バグ修正): 並び順を渡していない編集で sort_order を 0 に戻さない。
+      if (patchApp.sortOrder === undefined) delete patch.sort_order;
       const updated = await api.updateCategory(id, patch, userId);
       const mapped = toApp(updated);
       setCategories((prev) => prev.map((c) => (c.id === id ? mapped : c)));
