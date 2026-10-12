@@ -2097,7 +2097,8 @@ export default function App() {
           <div style={{height:12,background:CREAM}}/>
           <IconPicker selected={newCatIcon} onSelect={setNewCatIcon}/>
           <div style={{height:12,background:CREAM}}/>
-          <ColorPicker selected={newCatColor} onSelect={setNewCatColor}/>
+          {/* 2026-10-12: 表示色はパレット自動割当のため色選択は出さない (保存色は既定値のまま) */}
+          <div style={{background:CARD_BG,padding:"12px 18px",fontSize:12,color:TEXT_SECONDARY,lineHeight:1.6}}>色は並び順に合わせて自動で割り当てます（隣のカテゴリとは反対色）。</div>
           <div style={{height:12,background:CREAM}}/>
           {expenseTypePicker(newCatExpenseType, setNewCatExpenseType)}
           <div style={{height:12,background:CREAM}}/>
@@ -2138,7 +2139,7 @@ export default function App() {
                     setEditingCat(c);
                     setEditName(c.label);
                     setEditIcon(c.iconKey || c.icon || "restaurant");
-                    setEditColor(c.color || "#FF6B35");
+                    setEditColor(c.storedColor || c.color || "#FF6B35"); // 保存色を保持 (表示色で上書きしない)
                     setEditExpenseType(c.expenseType === "private" ? "private" : "business");
                     setMenuScreen("catEditDetail");
                   }}
@@ -2169,7 +2170,7 @@ export default function App() {
           <div style={{height:12,background:CREAM}}/>
           <IconPicker selected={editIcon} onSelect={setEditIcon}/>
           <div style={{height:12,background:CREAM}}/>
-          <ColorPicker selected={editColor} onSelect={setEditColor}/>
+          <div style={{background:CARD_BG,padding:"12px 18px",fontSize:12,color:TEXT_SECONDARY,lineHeight:1.6}}>色は並び順に合わせて自動で割り当てます（隣のカテゴリとは反対色）。</div>
           <div style={{height:12,background:CREAM}}/>
           {expenseTypePicker(editExpenseType, setEditExpenseType)}
           <div style={{height:12,background:CREAM}}/>
