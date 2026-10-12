@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { withCategoryDisplayColors } from '../shared/categoryPalette';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import * as api from '../lib/api/categories';
 
@@ -211,11 +210,8 @@ export function useCategories() {
     [userId, categories],
   );
 
-  // 2026-10-12: 表示色は並び順で反対色を交互に割り当てる (保存色は storedColor。DB は変更しない)。
-  const displayCategories = useMemo(() => withCategoryDisplayColors(categories, 'sortOrder'), [categories]);
-
   return {
-    categories: displayCategories,
+    categories,
     loading,
     error,
     refetch,
