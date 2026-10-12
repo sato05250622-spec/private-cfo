@@ -2139,7 +2139,7 @@ export default function App() {
                     setEditName(c.label);
                     setEditIcon(c.iconKey || c.icon || "restaurant");
                     setEditColor(c.color || "#FF6B35");
-                    setEditExpenseType(c.expenseType === "private" ? "private" : "business");
+                    setEditExpenseType(c.expenseType === "business" ? "business" : "private");
                     setMenuScreen("catEditDetail");
                   }}
                   onRemove={(id) => removeCategory(id).catch((e) => { console.error(e); alert("削除に失敗しました。"); })}

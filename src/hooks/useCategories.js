@@ -44,8 +44,9 @@ function toApp(row) {
     iconKey: row.icon_key,
     color: row.color,
     sortOrder: row.sort_order ?? 0,
-    // 2026-10-12 P5: 事業費/プライベート費区分。DB 既定は 'business' (列が無い・null も business 扱い = 本部の MonthSummary と同じ判定)。
-    expenseType: row.expense_type === 'private' ? 'private' : 'business',
+    // 2026-10-12 P5: 事業費/プライベート費区分。2026-10-13: 明示的に 'business' のものだけ事業費、
+    //   未設定/null はプライベート費 (本部の MonthSummary と同じ判定)。
+    expenseType: row.expense_type === 'business' ? 'business' : 'private',
   };
 }
 
