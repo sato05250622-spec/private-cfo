@@ -23,6 +23,10 @@ function rowToItem(row) {
     monthlyAmounts: row.monthly_amounts ?? null,
     // Phase 3 (固定費 目標): 繰越票で手入力された年間目標。null = 未設定。
     annualTarget: row.annual_target ?? null,
+    // 2026-10-14 v5: 開始月・終了月 (月初日)・金額の履歴 [{from:'YYYY-MM', amount}]
+    startMonth: row.start_month ?? null,
+    endMonth: row.end_month ?? null,
+    amountHistory: row.amount_history ?? null,
   };
 }
 

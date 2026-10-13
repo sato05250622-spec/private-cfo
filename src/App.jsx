@@ -49,6 +49,7 @@ import { useAuth } from "./context/AuthContext";
 import { migratePaymentsLoans } from "./lib/migratePaymentsLoans";
 import { migrateBudgets } from "./lib/migrateBudgets";
 import { supabase } from "./lib/supabaseClient";
+import { fixedCostAmount, loanActiveIn, loanSchedule, loanBaseAmountFor, withAmountChange, currentYm } from "./utils/fixedCostSchedule";
 import { DndContext, closestCenter, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
 
@@ -1809,12 +1810,8 @@ export default function App() {
     // #11: 当月の固定費合計 = Σ loans ( monthlyAmounts[cycleMonth(m+1)] ?? amount )。
     //   「込み」のとき予算・実績の両方に同額加算 (固定費=確定債務)。残=budget−spent で「分ける」と同値。
     const inclFixed = fixedCostMode === 'incl';
-    const fixedCostMonthTotal = loans.reduce((s, l) => {
-      const ma = l?.monthlyAmounts;
-      const mv = ma ? (ma[m + 1] ?? ma[String(m + 1)]) : null;
-      const amt = mv != null ? Number(mv) : (Number(l?.amount) || 0);
-      return s + (Number(amt) || 0);
-    }, 0);
+    //   2026-10-14 v5: その月に有効な固定費だけ、その月時点の金額で (開始月・終了月・金額の履歴)
+    const fixedCostMonthTotal = loans.reduce((s, l) => s + fixedCostAmount(l, y, m + 1), 0);
     const dispBudget = inclFixed ? rBudget + fixedCostMonthTotal : rBudget;
     const dispSpent  = inclFixed ? reportExpense + fixedCostMonthTotal : reportExpense;
     return (
@@ -2142,7 +2139,13 @@ export default function App() {
                     setEditExpenseType(c.expenseType === "business" ? "business" : "private");
                     setMenuScreen("catEditDetail");
                   }}
-                  onRemove={(id) => removeCategory(id).catch((e) => { console.error(e); alert("削除に失敗しました。"); })}
+                  onRemove={(id) => {
+                    // 2026-10-14 v5: 削除は確認してから (論理削除: 過去の支出・予算は残り、来月以降の予算は削除)
+                    const target = expenseCats.find((c) => c.id === id);
+                    if (!window.confirm(`「${target?.label ?? "このカテゴリ"}」を削除しますか？\n入力の選択肢から消えます。これまでの支出と今月までの予算は記録として残ります。`)) return;
+                    const cyc = findCycleOfDate(new Date(), managementStartDay);
+                    removeCategory(id, { year: cyc.year, cycleMonth: cyc.month + 1 }).catch((e) => { console.error(e); alert("削除に失敗しました。"); });
+                  }}
                 />
               ))}
             </SortableContext>
@@ -2568,7 +2571,7 @@ export default function App() {
           <div style={S.overlayHeader}>
             <button onClick={()=>setMenuScreen("main")} style={{background:"none",border:"none",color:GOLD,fontSize:20,cursor:"pointer"}}>‹</button>
             <span style={{fontWeight:600,fontSize:15,color:TEXT_PRIMARY}}>🔁 固定費</span>
-            <button onClick={()=>{setLoanDraft({label:"",amount:"",bank:"",withdrawalDay:"",pmId:""});setEditingLoanId(null);setShowLoanForm(true);}} style={{background:"none",border:`1px solid ${GOLD}`,borderRadius:20,padding:"4px 12px",color:GOLD,fontSize:12,fontWeight:700,cursor:"pointer"}}>＋追加</button>
+            <button onClick={()=>{setLoanDraft({label:"",amount:"",bank:"",withdrawalDay:"",pmId:"",startMonth:currentYm(),endMonth:"",amountFrom:currentYm()});setEditingLoanId(null);setShowLoanForm(true);}} style={{background:"none",border:`1px solid ${GOLD}`,borderRadius:20,padding:"4px 12px",color:GOLD,fontSize:12,fontWeight:700,cursor:"pointer"}}>＋追加</button>
           </div>
           <div style={{padding:"12px 16px",fontSize:10,color:TEXT_MUTED,lineHeight:1.6}}>💡 家賃・ローン・保険など毎月の固定費を登録しておくと、月次サマリーで合算して表示できます。</div>
           <div style={{padding:"0 16px"}}>
@@ -2586,8 +2589,10 @@ export default function App() {
                       <div style={{fontSize:14,fontWeight:700,color:TEXT_PRIMARY}}>{loan.label}</div>
                       <div style={{fontSize:11,color:TEXT_MUTED,marginTop:2}}>🏦 {loan.bank||"銀行未設定"} ／ 毎月{loan.withdrawalDay||"－"}日</div>
                       <div style={{fontSize:16,fontWeight:700,color:GOLD,marginTop:4}}>{Number(loan.amount||0).toLocaleString()}円／月</div>
+                      {/* 2026-10-14 v5: 期間 (開始月〜終了月) */}
+                      <div style={{fontSize:10,color:TEXT_MUTED,marginTop:2}}>{loan.startMonth?`${String(loan.startMonth).slice(0,7).replace("-","年")}月〜${loan.endMonth?String(loan.endMonth).slice(0,7).replace("-","年")+"月":"継続中"}`:"期間の設定なし"}{loanSchedule(loan).history.length>1?` ／ 金額変更 ${loanSchedule(loan).history.length-1}回`:""}</div>
                     </div>
-                    <button onClick={()=>{setLoanDraft({label:loan.label,amount:String(loan.amount),bank:loan.bank||"",withdrawalDay:loan.withdrawalDay||"",pmId:loan.pmId||""});setEditingLoanId(loan.id);setShowLoanForm(true);}} style={{padding:"6px 12px",background:ORANGE_LIGHT,border:`1px solid ${ORANGE}`,borderRadius:12,color:ORANGE,fontSize:11,fontWeight:700,cursor:"pointer",marginRight:6}}>編集</button>
+                    <button onClick={()=>{setLoanDraft({label:loan.label,amount:String(loan.amount),bank:loan.bank||"",withdrawalDay:loan.withdrawalDay||"",pmId:loan.pmId||"",startMonth:loan.startMonth?String(loan.startMonth).slice(0,7):"",endMonth:loan.endMonth?String(loan.endMonth).slice(0,7):"",amountFrom:currentYm()});setEditingLoanId(loan.id);setShowLoanForm(true);}} style={{padding:"6px 12px",background:ORANGE_LIGHT,border:`1px solid ${ORANGE}`,borderRadius:12,color:ORANGE,fontSize:11,fontWeight:700,cursor:"pointer",marginRight:6}}>編集</button>
                     <button onClick={()=>setDeleteLoanTarget(loan)} style={{padding:"6px 10px",background:"transparent",border:`1px solid ${RED}44`,borderRadius:12,color:RED,fontSize:11,fontWeight:700,cursor:"pointer"}}>削除</button>
                   </div>
                 ))}
@@ -3194,7 +3199,7 @@ export default function App() {
                     cardBreakdown.forEach(({pm,total})=>{
                       if(total>0||pm.withdrawalDay){items.push({day:pm.withdrawalDay||"－",label:pm.label,bank:pm.bank||"",amount:total,color:pm.color,type:"card"});}
                     });
-                    loans.forEach(loan=>{items.push({day:loan.withdrawalDay||"－",label:loan.label,bank:loan.bank||"",amount:Number(loan.amount)||0,color:TEAL,type:"loan"});});
+                    {const [fy,fm]=currentYm().split("-").map(Number);loans.forEach(loan=>{const amt=fixedCostAmount(loan,fy,fm);if(!loanActiveIn(loan,fy,fm))return;items.push({day:loan.withdrawalDay||"－",label:loan.label,bank:loan.bank||"",amount:amt,color:TEAL,type:"loan"});});}
                     const dayNum=d=>d==="末"?31:d==="－"?99:Number(d)||99;
                     items.sort((a,b)=>dayNum(a.day)-dayNum(b.day));
                     const byBank={};
@@ -3289,6 +3294,24 @@ export default function App() {
                   <span style={{fontSize:14,color:TEXT_SECONDARY}}>円</span>
                 </div>
               </div>
+              {/* 2026-10-14 v5: 金額を変えたときは「この金額にする月」。その月から新しい金額、前の月は元の金額のまま */}
+              {editingLoanId&&Number(loanDraft.amount)!==(Number(loans.find(l=>l.id===editingLoanId)?.amount)||0)&&(
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:11,color:GOLD,marginBottom:6,fontWeight:600}}>この金額にする月（この月から新しい金額）</div>
+                  <input type="month" value={loanDraft.amountFrom||""} onChange={e=>setLoanDraft(p=>({...p,amountFrom:e.target.value}))} style={{width:"100%",background:NAVY3,border:`1px solid ${GOLD}66`,borderRadius:10,padding:"10px 12px",color:TEXT_PRIMARY,fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                </div>
+              )}
+              <div style={{display:"flex",gap:10,marginBottom:6}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11,color:TEXT_MUTED,marginBottom:6,fontWeight:600}}>開始月</div>
+                  <input type="month" value={loanDraft.startMonth||""} onChange={e=>setLoanDraft(p=>({...p,startMonth:e.target.value}))} style={{width:"100%",background:NAVY3,border:`1px solid ${BORDER}`,borderRadius:10,padding:"10px 12px",color:TEXT_PRIMARY,fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11,color:TEXT_MUTED,marginBottom:6,fontWeight:600}}>終了月（空欄＝継続中）</div>
+                  <input type="month" value={loanDraft.endMonth||""} onChange={e=>setLoanDraft(p=>({...p,endMonth:e.target.value}))} style={{width:"100%",background:NAVY3,border:`1px solid ${BORDER}`,borderRadius:10,padding:"10px 12px",color:TEXT_PRIMARY,fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                </div>
+              </div>
+              <div style={{fontSize:10,color:TEXT_MUTED,lineHeight:1.6,marginBottom:14}}>開始月より前・終了月より後の月には固定費として出ません。</div>
               <div style={{marginBottom:14}}>
                 <div style={{fontSize:11,color:TEXT_MUTED,marginBottom:6,fontWeight:600}}>引き落とし銀行</div>
                 <input value={loanDraft.bank} onChange={e=>setLoanDraft(p=>({...p,bank:e.target.value}))} placeholder="例：三菱UFJ銀行" style={{width:"100%",background:NAVY3,border:`1px solid ${BORDER}`,borderRadius:10,padding:"10px 12px",color:TEXT_PRIMARY,fontSize:16,outline:"none",boxSizing:"border-box"}}/>
@@ -3303,13 +3326,31 @@ export default function App() {
               </div>
               <button onClick={()=>{
                 if(!loanDraft.label.trim()||!loanDraft.amount||Number(loanDraft.amount)<=0)return;
-                const patch={...loanDraft,amount:Number(loanDraft.amount)};
+                // 2026-10-14 v5: 開始月・終了月・金額の履歴
+                const ymOk=v=>/^\d{4}-\d{2}$/.test(v||"");
+                if(!ymOk(loanDraft.startMonth)){alert("開始月を入力してください");return;}
+                if(loanDraft.endMonth&&!ymOk(loanDraft.endMonth)){alert("終了月の形式を確認してください");return;}
+                if(loanDraft.endMonth&&loanDraft.endMonth<loanDraft.startMonth){alert("終了月は開始月以降にしてください");return;}
+                const {amountFrom,startMonth,endMonth,...rest}=loanDraft;
+                const newAmount=Number(loanDraft.amount);
+                const patch={...rest,amount:newAmount,startMonth:`${startMonth}-01`,endMonth:endMonth?`${endMonth}-01`:null};
                 if(editingLoanId){
+                  const orig=loans.find(l=>l.id===editingLoanId)||{};
+                  const base={...orig,startMonth:patch.startMonth};
+                  if(newAmount!==(Number(orig.amount)||0)){
+                    if(!ymOk(amountFrom)){alert("この金額にする月を入力してください");return;}
+                    const hist=withAmountChange(base,amountFrom,newAmount);
+                    const [cy,cm]=currentYm().split("-").map(Number);
+                    patch.amountHistory=hist;
+                    patch.amount=loanBaseAmountFor({amount:newAmount,amountHistory:hist},cy,cm);
+                  } else if(!loanSchedule(base).history.length){
+                    patch.amountHistory=[{from:startMonth,amount:newAmount}];
+                  }
                   updateLoan(editingLoanId,patch).catch(e=>{console.error('[loans] update failed',editingLoanId,e);alert('固定費の更新に失敗しました');});
                 } else {
-                  createLoan({...patch,id:`loan_${Date.now()}`}).catch(e=>{console.error('[loans] create failed',e);alert('固定費の追加に失敗しました');});
+                  createLoan({...patch,amountHistory:[{from:startMonth,amount:newAmount}],id:`loan_${Date.now()}`}).catch(e=>{console.error('[loans] create failed',e);alert('固定費の追加に失敗しました');});
                 }
-                setShowLoanForm(false);setEditingLoanId(null);setLoanDraft({label:"",amount:"",bank:"",withdrawalDay:"",pmId:""});
+                setShowLoanForm(false);setEditingLoanId(null);setLoanDraft({label:"",amount:"",bank:"",withdrawalDay:"",pmId:"",startMonth:currentYm(),endMonth:"",amountFrom:currentYm()});
               }} style={{width:"100%",padding:"14px",background:loanDraft.label.trim()&&loanDraft.amount?GOLD_GRAD:"rgba(255,255,255,0.1)",border:"none",borderRadius:24,fontSize:15,fontWeight:700,color:loanDraft.label.trim()&&loanDraft.amount?"#0A1628":TEXT_MUTED,cursor:"pointer"}}>{editingLoanId?"変更を保存":"登録する"}</button>
             </div>
           </div>

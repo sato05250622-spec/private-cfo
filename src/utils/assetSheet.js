@@ -1,3 +1,4 @@
+import { fiscalYearAmounts } from './fixedCostSchedule.js';
 // =============================================================
 // 資産残高繰越票 純関数ヘルパ (Phase B-3 2026-06-07・顧客アプリ版)
 //
@@ -214,15 +215,17 @@ export function computeAssetSheet({
 //   - locked=false / archived=false。繰越票上は本部が月別に編集可 (確定ロック対象外)
 //   ※ 固定費行は永続 lines / committed_lines には焼かず、描画時にライブ生成する
 //     (settle/recompute/commit を汚さない・loans 変更を即反映するため)。
-function makeEmptyFixedCostLine(loan, displayOrder) {
+function makeEmptyFixedCostLine(loan, displayOrder, fiscalYear = null, startMonth = 1) {
+  // 2026-10-14 v5: 年度が分かるときは、その年度の各月の金額 (開始月・終了月・金額の履歴) を焼き込む
+  const fy = fiscalYear != null;
   return {
     category_id: loan.id,
     category_name: loan.label,
     row_type: 'fixed_cost',
     locked: false,
     archived: false,
-    monthly_amount: Number(loan.amount) || 0,            // 基準月額 (フォールバック)
-    monthly_amounts: loan.monthly_amounts || null,        // 月別上書き { "1".."12": 額 }
+    monthly_amount: fy ? 0 : (Number(loan.amount) || 0),            // 基準月額 (フォールバック)
+    monthly_amounts: fy ? fiscalYearAmounts(loan, Number(fiscalYear), Number(startMonth) || 1) : (loan.monthly_amounts || null), // 月別
     monthly_values: {},
     monthly_overrides: {},
     monthly_budget: {},
@@ -233,9 +236,9 @@ function makeEmptyFixedCostLine(loan, displayOrder) {
 
 // loans 配列 → 固定費行配列 (created_at 昇順は呼び出し側 API が保証済み)。
 // display_order は 0 起点 (描画は配列順だが、他コードとの整合のため採番)。
-export function buildFixedCostLines(loans) {
+export function buildFixedCostLines(loans, fiscalYear = null, startMonth = 1) {
   const arr = Array.isArray(loans) ? loans : [];
-  return arr.map((loan, i) => makeEmptyFixedCostLine(loan, i));
+  return arr.map((loan, i) => makeEmptyFixedCostLine(loan, i, fiscalYear, startMonth));
 }
 
 // ---- Step 2: 年度境界 (暦年マッピング) -----------------------

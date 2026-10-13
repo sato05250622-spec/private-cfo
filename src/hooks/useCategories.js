@@ -10,7 +10,7 @@ import * as api from '../lib/api/categories';
 //   全操作 try/catch で握りつぶし、localStorage 不可環境でも動作を壊さない。
 // -----------------------------------------------------------------
 // v2 (2026-10-12): 事業費/プライベート費区分 (expenseType) を行に含めるため bump。旧 v1 はサインアウト時の pcfo_ 一括削除で消える。
-const CATEGORIES_CACHE_KEY = 'pcfo_categories_cache_v2';
+const CATEGORIES_CACHE_KEY = 'pcfo_categories_cache_v3'; // v3: 論理削除済み (archived_at) を除外して保存
 
 function readCategoriesCache() {
   try {
@@ -47,6 +47,8 @@ function toApp(row) {
     // 2026-10-12 P5: 事業費/プライベート費区分。2026-10-13: 明示的に 'business' のものだけ事業費、
     //   未設定/null はプライベート費 (本部の MonthSummary と同じ判定)。
     expenseType: row.expense_type === 'business' ? 'business' : 'private',
+    // 2026-10-14 v5: 論理削除の日時 (空 = 使用中)。顧客アプリでは削除済みを一覧・入力に出さない
+    archivedAt: row.archived_at ?? null,
   };
 }
 
@@ -91,7 +93,7 @@ export function useCategories() {
     if (!background) setLoading(true);
     try {
       const rows = await api.listCategories(userId);
-      const mapped = rows.map(toApp);
+      const mapped = rows.map(toApp).filter((c) => !c.archivedAt);
       if (background) {
         const prev = readCategoriesCache();
         const changed = !prev || prev.userId !== userId
@@ -165,10 +167,11 @@ export function useCategories() {
     [userId],
   );
 
+  // 2026-10-14 v5: 物理削除をやめて論理削除。keepThrough { year, cycleMonth } より後の週予算だけ削除
   const removeCategory = useCallback(
-    async (id) => {
+    async (id, keepThrough = null) => {
       if (!userId) return;
-      await api.deleteCategory(id, userId);
+      await api.archiveCategory(id, userId, keepThrough);
       setCategories((prev) => prev.filter((c) => c.id !== id));
     },
     [userId],

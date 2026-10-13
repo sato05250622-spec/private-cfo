@@ -1,4 +1,5 @@
 import { Fragment, useState, useEffect, useRef } from "react";
+import { fiscalYearAmounts } from "../utils/fixedCostSchedule";
 import { useAnnualBudgets } from "../hooks/useAnnualBudgets";
 import { listFiscalYearsByClient } from "../lib/api/annualBudgets";
 import { useLoans } from "../hooks/useLoans";
@@ -113,14 +114,16 @@ function annualWeekBudgetForCategory(weekCatRecord, categoryId, { fiscalYear, st
 //   - monthly_amounts (月別上書き jsonb) も保持 → 各月セル = monthly_amounts[m] ?? monthly_amount
 //   - committed_lines には焼かれない (描画時にライブ生成し最上部に prepend)
 //   - 並び順は loans の取得順 (created_at 昇順、reorder なし) をそのまま使う
-function buildFixedCostLines(loans) {
+//   2026-10-14 v5: 年度 (fiscalYear / startMonth) が分かるときは、その年度の各月の金額
+//   (開始月より前・終了月より後は 0、金額の履歴を反映) を monthly_amounts に焼き込む。
+function buildFixedCostLines(loans, fiscalYear = null, startMonth = 1) {
   const arr = Array.isArray(loans) ? loans : [];
   return arr.map((loan, i) => ({
     category_id: loan.id,
     category_name: loan.label,
     row_type: "fixed_cost",
-    monthly_amount: Number(loan.amount) || 0,
-    monthly_amounts: loan.monthlyAmounts || null,
+    monthly_amount: fiscalYear != null ? 0 : (Number(loan.amount) || 0),
+    monthly_amounts: fiscalYear != null ? fiscalYearAmounts(loan, Number(fiscalYear), Number(startMonth) || 1) : (loan.monthlyAmounts || null),
     target_value: loan.annualTarget ?? null,
     archived: false,
     display_order: i,
@@ -710,7 +713,7 @@ export default function AnnualBudgetViewer({ clientId, fiscalYear }) {
   );
   // Phase 3 (固定費): 固定費行をライブ生成し、committed 由来の行の前 (最上部) に prepend。
   // 描画専用 (sortedLines は targetGrandTotal / 消化サマリーで従来どおり使用)。
-  const fixedCostLines = buildFixedCostLines(loans);
+  const fixedCostLines = buildFixedCostLines(loans, fyYear, startMonth);
   const displayLines = [...fixedCostLines, ...sortedLines];
   // #2: カテゴリ×将来月の week_cat_budgets 由来 monthly_budget (Σ週)。{ categoryId → { m: Σ週 } }。
   //   committed の将来月セルより優先して表示する (本部の resolveCell と挙動を揃える)。

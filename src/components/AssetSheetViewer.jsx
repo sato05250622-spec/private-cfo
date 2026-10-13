@@ -276,7 +276,8 @@ export default function AssetSheetViewer({ clientId }) {
   const { expenses } = useExpenses();
 
   // ── Phase E-1: 派生 (admin L141-190 と対応) ─────────────────
-  const fixedCostLines = useMemo(() => buildFixedCostLines(loanRows), [loanRows]);
+  // 2026-10-14 v5: 表示中の年度で固定費の各月の金額を解決 (開始月・終了月・金額の履歴)
+  const fixedCostLines = useMemo(() => buildFixedCostLines(loanRows, Number(yearLabel), startMonth), [loanRows, yearLabel, startMonth]);
   const linesForBudget = useMemo(
     () => [...fixedCostLines, ...expenseLines],
     [fixedCostLines, expenseLines],

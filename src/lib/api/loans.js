@@ -22,6 +22,7 @@ export async function listLoans(clientId) {
 // pm_id / bank も空文字列 → null に統一。
 export async function upsertLoan(clientId, {
   id, label, amount, bank, withdrawalDay, pmId, legacyKey,
+  startMonth, endMonth, amountHistory,
 }) {
   const { error } = await supabase
     .from(TABLE)
@@ -34,6 +35,10 @@ export async function upsertLoan(clientId, {
       withdrawal_day: withdrawalDay === '' || withdrawalDay == null ? null : Number(withdrawalDay),
       pm_id: pmId || null,
       legacy_key: legacyKey ?? null,
+      // 2026-10-14 v5: 指定があるときだけ送る (未指定なら既存の値を残す)
+      ...(startMonth !== undefined ? { start_month: startMonth || null } : {}),
+      ...(endMonth !== undefined ? { end_month: endMonth || null } : {}),
+      ...(amountHistory !== undefined ? { amount_history: amountHistory } : {}),
     });
   if (error) throw error;
 }

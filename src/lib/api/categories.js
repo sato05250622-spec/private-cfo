@@ -50,3 +50,24 @@ export async function deleteCategory(id, clientId) {
     .eq('id', id);
   if (error) throw error;
 }
+
+// 2026-10-14 v5: カテゴリの論理削除 (archived_at)。行は残し、過去の支出・予算・本部の繰越票/月次レビューから消さない。
+//   keepThrough { year, cycleMonth(1-12) } より「後」の週予算だけ削除する (当月までの予算は記録として残す)。
+export async function archiveCategory(id, clientId, keepThrough = null) {
+  const { error } = await supabase
+    .from(TABLE)
+    .update({ archived_at: new Date().toISOString() })
+    .eq('client_id', clientId)
+    .eq('id', id);
+  if (error) throw error;
+  if (keepThrough && keepThrough.year && keepThrough.cycleMonth) {
+    const Y = Number(keepThrough.year), M = Number(keepThrough.cycleMonth);
+    const { error: e2 } = await supabase
+      .from('week_cat_budgets')
+      .delete()
+      .eq('client_id', clientId)
+      .eq('category_id', id)
+      .or(`year.gt.${Y},and(year.eq.${Y},cycle_month.gt.${M})`);
+    if (e2) throw e2;
+  }
+}
