@@ -213,7 +213,17 @@ export default function MonthlyReviewViewer({ clientId, year, month }) {
     return <StatusCard year={year} month={month} message="Supabase連携後に本部から送付されます" showBadge />;
   }
 
-  const lines = Array.isArray(data.lines) ? data.lines : [];
+  // 2026-10-14: 以前の本部の不具合で同じ行 (同じ id) が 2 回保存された公開分も 1 行だけ表示する
+  //   (例: 「その他(削除済カテゴリ)」が 2 行)。本部で再公開すると元のカテゴリ名の行に置き換わる。
+  const lines = (() => {
+    const seen = new Set();
+    return (Array.isArray(data.lines) ? data.lines : []).filter((l) => {
+      if (!l || !l.id) return true;
+      if (seen.has(l.id)) return false;
+      seen.add(l.id);
+      return true;
+    });
+  })();
   const totals = data.totals || {};
   // 診断は手動設定優先・null は達成率から自動算出 (本部準拠)。常にバッジ表示。
   const diag = resolveDiagnosis(totals.achievement_ratio, data.diagnosis);
